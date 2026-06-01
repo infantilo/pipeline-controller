@@ -1,0 +1,49 @@
+[
+  {
+    "id": "vujkpdqdaimmnjkp0t5",
+    "label": "countdown pre show",
+    "template": "countdown",
+    "data": {
+      "mode": "duration",
+      "targetTime": 0,
+      "duration": 10,
+      "countdownLabel": "STARTS IN",
+      "openUpUponZero": true,
+      "themeColor": "#d32f2f",
+      "textColor": "#ffffff"
+    },
+    "layer": "overlay"
+  },
+  {
+    "id": "hglrdehyz7bmnjku1zx",
+    "label": "Score",
+    "template": "scorebug",
+    "data": {
+      "homeTeam": "HOME",
+      "awayTeam": "AWAY",
+      "homeScore": 2,
+      "awayScore": 0,
+      "period": "1st",
+      "time": "12:00",
+      "homeColor": "#1a237e",
+      "awayColor": "#b71c1c"
+    },
+    "layer": "overlay"
+  },
+  {
+    "id": "64gtf4lk67xmoernlwj",
+    "label": "Spielegrafik",
+    "template": "scorebug",
+    "data": {
+      "homeTeam": "AUSTRIA",
+      "awayTeam": "RAPID",
+      "homeScore": 0,
+      "awayScore": 0,
+      "period": "1 Halbzeit",
+      "time": "12:00",
+      "homeColor": "#1a237e",
+      "awayColor": "#b71c1c"
+    },
+    "layer": "overlay"
+  }
+]

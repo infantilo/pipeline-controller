@@ -1,0 +1,94 @@
+{
+  "groups": [
+    {
+      "id": "pgm-stereo",
+      "label": "Stereo Programmton",
+      "channels": 2,
+      "sink": "autoaudiosink",
+      "r128": {
+        "enabled": true,
+        "target": -23,
+        "maxGain": 2,
+        "smoothRate": 0.05
+      }
+    },
+    {
+      "id": "begl-stereo",
+      "label": "Begleitton Stereo",
+      "channels": 2,
+      "sink": "fakesink",
+      "r128": {
+        "enabled": true,
+        "target": -23,
+        "maxGain": 2,
+        "smoothRate": 0.05
+      }
+    },
+    {
+      "id": "pgm-51",
+      "label": "51 Programmton",
+      "channels": 6,
+      "sink": "fakesink"
+    }
+  ],
+  "presets": {
+    "stereo": {
+      "label": "Stereo (CH1=L, CH2=R)",
+      "routes": [
+        {
+          "from": "mxf_ch1",
+          "to": [
+            "pgm-stereo:L",
+            "begl-stereo:L"
+          ]
+        },
+        {
+          "from": "mxf_ch2",
+          "to": [
+            "pgm-stereo:R",
+            "begl-stereo:R"
+          ]
+        }
+      ],
+      "upmix": [
+        {
+          "from": "pgm-stereo",
+          "to": "pgm-51",
+          "method": "ltrt"
+        }
+      ]
+    },
+    "2 Ton": {
+      "label": "Zwei Ton",
+      "routes": [
+        {
+          "from": "mxf_ch1",
+          "to": [
+            "pgm-stereo:L"
+          ]
+        },
+        {
+          "from": "mxf_ch2",
+          "to": [
+            "pgm-stereo:R"
+          ]
+        }
+      ],
+      "upmix": [
+        {
+          "from": "pgm-stereo",
+          "to": "pgm-51",
+          "method": "ltrt"
+        }
+      ]
+    }
+  },
+  "clock": {
+    "provider": "audiotestsrc",
+    "decklinkDevice": 0,
+    "ptpDomain": 127,
+    "ptpInterface": "eth0",
+    "fallbackToSystem": true,
+    "bufferTime": 400000
+  }
+}

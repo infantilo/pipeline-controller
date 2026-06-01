@@ -1,0 +1,91 @@
+{
+  "$schema": "https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json",
+  "id": "hinweiskette-info-chain",
+  "version": "1.0.0",
+  "name": "Hinweiskette",
+  "description": "Sequenzielle Hinweiskette oben mittig (Neue Folge, Neue Serie, Untertitel, Zweikanalton, Dolby Digital)",
+  "author": {
+    "name": "Grok"
+  },
+  "main": "hinweiskette.js",
+  "supportsRealTime": true,
+  "supportsNonRealTime": false,
+  "stepCount": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ratio": {
+        "type": "integer",
+        "title": "Bildformat",
+        "description": "0 = 16:9, 1 = 4:3",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1
+      },
+      "NeueFolge": {
+        "type": "integer",
+        "title": "Neue Folge",
+        "description": "0 oder 1",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1
+      },
+      "NeueSerie": {
+        "type": "integer",
+        "title": "Neue Serie",
+        "description": "0 oder 1",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1
+      },
+      "Untertitel": {
+        "type": "integer",
+        "title": "Untertitel",
+        "description": "0 oder 1",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1
+      },
+      "Zweikanalton": {
+        "type": "integer",
+        "title": "Zweikanalton",
+        "description": "0 oder 1",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1
+      },
+      "DD": {
+        "type": "integer",
+        "title": "Dolby Digital",
+        "description": "0 oder 1",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1
+      },
+      "durationPerHint": {
+        "type": "integer",
+        "title": "Dauer pro Hinweis (ms)",
+        "default": 3000,
+        "minimum": 500,
+        "maximum": 10000
+      },
+      "textColor": {
+        "type": "string",
+        "title": "Schriftfarbe",
+        "default": "rgba(255, 255, 255, 0.80)",
+        "gddType": "color",
+        "description": "CSS Farbwert (z.B. rgba(255,255,255,0.8) oder #ffffff)"
+      }
+    }
+  },
+  "renderRequirements": [
+    {
+      "resolution": {
+        "width": { "ideal": 1920 },
+        "height": { "ideal": 1080 }
+      },
+      "frameRate": { "ideal": 50 }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "pipeline-controller",
+  "version": "1.0.0",
+  "description": "GStreamer Broadcast Playout System — Channel-in-a-Box",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:debug": "node server.js --debug",
+    "probe": "node probe.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.0.0",
+    "gst-kit": "^0.2.5",
+    "net-snmp": "^3.11.0",
+    "puppeteer": "^24.0.0"
+  },
+  "optionalDependencies": {
+    "puppeteer-core": "^24.0.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

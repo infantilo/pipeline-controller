@@ -1,0 +1,34 @@
+{
+  "file-transfer-manager": {
+    "config": {
+      "protocol": "local",
+      "host": "",
+      "port": 21,
+      "username": "",
+      "password": "",
+      "remotePath": "/",
+      "sourcePaths": "/home/infantilo/PIPELINE CONTROLLER/recordings",
+      "destDir": "",
+      "preFetchMinutes": 60,
+      "deleteAfterMinutes": 120,
+      "maxCacheGB": 50,
+      "concurrentTransfers": 2,
+      "fileExtensions": "mxf,mov,mp4,ts,mpeg,mpg,mkv",
+      "enabled": true
+    },
+    "enabled": true
+  },
+  "broadcast-controller": {
+    "enabled": false
+  },
+  "marina-sync": {
+    "config": {
+      "watchFolder": "\\marina\\",
+      "channelId": "5024",
+      "autoStart": false,
+      "onAirSync": true,
+      "pollIntervalSec": 60
+    },
+    "enabled": false
+  }
+}

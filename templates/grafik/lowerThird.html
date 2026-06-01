@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { background: transparent !important; }
+  body {
+    width:640px; height:360px; overflow:hidden;
+    background: transparent;
+    font-family: 'Arial', sans-serif;
+  }
+  .lower-third {
+    position: absolute;
+    bottom: 40px; left: 27px;
+    /* animation: slideIn 0.4s cubic-bezier(0.25,0.46,0.45,0.94) both; */
+  }
+  /* slideIn disabled for screenshot stability */
+  @keyframes slideIn {
+    from { transform: translateX(-20px); opacity: 0; }
+    to   { transform: translateX(0);     opacity: 1; }
+  }
+  .bar {
+    background: linear-gradient(135deg, #c00 0%, #800 100%);
+    padding: 0 0 0 3px;
+    display: inline-flex;
+    flex-direction: column;
+    min-width: 160px;
+  }
+  .name  { color: #fff; font-size: 12px; font-weight: 700; padding: 5px 8px 1px; letter-spacing:0.04em; }
+  .title { color: #ffd; font-size: 7px; font-weight: 400; padding: 1px 8px 5px; letter-spacing:0.02em; }
+  .accent { width: 100%; height: 1px; background: #ff0; }
+</style>
+</head>
+<body>
+<script>
+  const d = window.__GRAFIX_DATA__ || {};
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelector('.name').textContent  = d.name  || '';
+    document.querySelector('.title').textContent = d.title || '';
+    if (!d.title) document.querySelector('.title').style.display='none';
+  });
+</script>
+<div class="lower-third">
+  <div class="accent"></div>
+  <div class="bar">
+    <div class="name">Name</div>
+    <div class="title">Titel</div>
+  </div>
+</div>
+</body></html>

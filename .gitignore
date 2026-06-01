@@ -1,0 +1,92 @@
+# Dependencies
+node_modules/
+
+# Runtime data / logs
+*.log
+startlog.log
+gst_audio.log
+
+# Media content (no binary assets on GitHub)
+media/
+channelbranding/
+images/
+
+# Marina integration folder
+marina/
+
+# Playlists (operational data)
+playlists/
+
+# oGraf templates — keep only hinweiskette
+templates/grafik/02700111/
+templates/grafik/3d-slat-rotation-lower-third/
+templates/grafik/alert-widget/
+templates/grafik/analog-clock-top-left/
+templates/grafik/be-right-back/
+templates/grafik/billboard/
+templates/grafik/billboard (1)/
+templates/grafik/boxing-title/
+templates/grafik/breaking-news/
+templates/grafik/countdown/
+templates/grafik/countdown-lower-third/
+templates/grafik/digital-circuit/
+templates/grafik/digital-clock-top-left/
+templates/grafik/event-list/
+templates/grafik/flat-design-lower-third/
+templates/grafik/flow-field/
+templates/grafik/fragmented-trapezoid-lower-third/
+templates/grafik/glitch-lower-third/
+templates/grafik/goal-bar/
+templates/grafik/locator/
+templates/grafik/locator (1)/
+templates/grafik/lower-third/
+templates/grafik/modular-lower-third/
+templates/grafik/multi-step-news/
+templates/grafik/neon-lower-third/
+templates/grafik/offline-screen/
+templates/grafik/particle-lower-third/
+templates/grafik/scorebug/
+templates/grafik/scorebug (1)/
+templates/grafik/scorebug (2)/
+templates/grafik/shadow-text-lower-third/
+templates/grafik/slab/
+templates/grafik/slab (1)/
+templates/grafik/sponsor-bug/
+templates/grafik/starting-soon/
+templates/grafik/statistic-counter-lower-third/
+templates/grafik/stream-ending/
+templates/grafik/ticker/
+templates/grafik/ticker (1)/
+templates/grafik/tombstone/
+templates/grafik/tombstone (1)/
+templates/grafik/wave-interference/
+templates/grafik/weather-forecast/
+templates/grafik/webcam-frame/
+
+# Media library (operational, potentially large)
+library.json
+
+# Runtime config with local paths / credentials
+users.json
+settings.json
+
+# Operational state
+asrun/
+recordings/
+playlists/_current.json
+*.deb
+
+# Build artifacts
+filelist.txt
+
+# Temp stills
+/tmp/pc_still_*.jpg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code settings (project-specific)
+.claude/
+Trace-20260601T141143.json
+PlayerPipeline.js

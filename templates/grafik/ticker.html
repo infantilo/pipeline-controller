@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; }
+  html { background: transparent !important; }
+  body { width:640px; height:360px; overflow:hidden; background:transparent; }
+  .ticker-bar {
+    position:absolute; bottom:0; left:0; right:0;
+    height:20px; background:#c00;
+    display:flex; align-items:center; overflow:hidden;
+  }
+  .ticker-label {
+    background:#fff; color:#c00; font-weight:700; font-size:9px;
+    padding:0 6px; height:100%; display:flex; align-items:center;
+    font-family:Arial; white-space:nowrap; min-width:53px;
+  }
+  .ticker-text {
+    color:#fff; font-size:9px; font-family:Arial;
+    white-space:nowrap;
+    animation: ticker 20s linear infinite;
+    padding-left:13px;
+  }
+  @keyframes ticker {
+    0%   { transform: translateX(640px); }
+    100% { transform: translateX(-100%); }
+  }
+</style>
+</head><body>
+<div class="ticker-bar">
+  <div class="ticker-label" id="lb">NEWS</div>
+  <div style="overflow:hidden;flex:1">
+    <div class="ticker-text" id="tx"></div>
+  </div>
+</div>
+<script>
+  const d = window.__GRAFIX_DATA__ || {};
+  document.getElementById('lb').textContent = d.label || 'NEWS';
+  document.getElementById('tx').textContent = d.text  || '';
+  const dur = d.speed || 20;
+  document.querySelector('.ticker-text').style.animationDuration = dur + 's';
+</script>
+</body></html>

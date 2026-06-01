@@ -1,0 +1,2250 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline Controller – Handbuch</title>
+<style>
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2e3e;
+    --accent:   #4f8ef7;
+    --accent2:  #7c5cbf;
+    --green:    #3dba6f;
+    --red:      #e05252;
+    --yellow:   #d4a017;
+    --text:     #d8dce8;
+    --muted:    #7a8099;
+    --code-bg:  #12151f;
+    --radius:   6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    font-size: 15px;
+  }
+
+  /* ── Layout ── */
+  .layout { display: flex; min-height: 100vh; }
+
+  nav {
+    width: 280px;
+    min-width: 240px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 1.5rem 0;
+    flex-shrink: 0;
+  }
+  nav .logo {
+    padding: 0 1.5rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1rem;
+  }
+  nav .logo h1 { font-size: 1rem; font-weight: 700; color: #fff; letter-spacing: .04em; }
+  nav .logo p  { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+
+  nav a {
+    display: block;
+    padding: .35rem 1.5rem;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: .82rem;
+    border-left: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+  nav a:hover  { color: var(--text); }
+  nav a.active { color: var(--accent); border-left-color: var(--accent); }
+  nav .nav-section {
+    font-size: .68rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    padding: 1.2rem 1.5rem .3rem;
+    font-weight: 600;
+  }
+  nav a.sub { padding-left: 2.5rem; font-size: .78rem; }
+
+  main {
+    flex: 1;
+    padding: 2.5rem 3rem;
+    max-width: 960px;
+  }
+
+  /* ── Headings ── */
+  h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: .5rem; }
+  h2 {
+    font-size: 1.35rem; font-weight: 600; color: #fff;
+    margin: 3rem 0 1rem;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 1.05rem; font-weight: 600; color: var(--text); margin: 2rem 0 .6rem; }
+  h4 { font-size: .9rem; font-weight: 600; color: var(--muted); margin: 1.2rem 0 .4rem; text-transform: uppercase; letter-spacing: .06em; }
+
+  /* ── Prose ── */
+  p  { margin: .6rem 0 .8rem; }
+  ul, ol { margin: .5rem 0 .8rem 1.5rem; }
+  li { margin: .25rem 0; }
+  a  { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Code ── */
+  code {
+    background: var(--code-bg);
+    color: #a8d8a0;
+    padding: .1em .4em;
+    border-radius: 3px;
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: .85em;
+    border: 1px solid var(--border);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.2rem 1.4rem;
+    overflow-x: auto;
+    margin: .8rem 0 1.2rem;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: .83rem;
+    line-height: 1.6;
+  }
+  pre code { background: none; border: none; padding: 0; color: #c8e0c0; }
+  .comment { color: #5a7050; }
+  .kw      { color: #7eb6d4; }
+  .str     { color: #c8a060; }
+  .num     { color: #9fd0a0; }
+  .key     { color: #a0bcd8; }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; margin: .8rem 0 1.4rem; font-size: .85rem; }
+  th {
+    background: var(--surface);
+    color: var(--muted);
+    text-align: left;
+    padding: .55rem .9rem;
+    font-weight: 600;
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    border-bottom: 2px solid var(--border);
+  }
+  td { padding: .5rem .9rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+
+  /* ── Badges / chips ── */
+  .badge {
+    display: inline-block;
+    padding: .15em .55em;
+    border-radius: 3px;
+    font-size: .75em;
+    font-weight: 600;
+    letter-spacing: .03em;
+    vertical-align: middle;
+  }
+  .badge-green  { background: rgba(61,186,111,.18); color: var(--green); }
+  .badge-blue   { background: rgba(79,142,247,.18); color: var(--accent); }
+  .badge-yellow { background: rgba(212,160,23,.18); color: var(--yellow); }
+  .badge-red    { background: rgba(224,82,82,.18);  color: var(--red); }
+  .badge-purple { background: rgba(124,92,191,.18); color: var(--accent2); }
+
+  /* ── Callouts ── */
+  .callout {
+    border-left: 3px solid;
+    padding: .8rem 1rem;
+    margin: 1rem 0 1.4rem;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: .88rem;
+  }
+  .callout-info   { border-color: var(--accent);  background: rgba(79,142,247,.08);  }
+  .callout-warn   { border-color: var(--yellow);  background: rgba(212,160,23,.08);  }
+  .callout-tip    { border-color: var(--green);   background: rgba(61,186,111,.08);  }
+  .callout-danger { border-color: var(--red);     background: rgba(224,82,82,.08);   }
+  .callout strong { font-weight: 700; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.3rem;
+    margin: .6rem 0 1rem;
+  }
+  .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin: .8rem 0 1.2rem; }
+  .card h4 { margin: 0 0 .4rem; font-size: .82rem; color: var(--accent); }
+  .card p  { margin: 0; font-size: .84rem; }
+
+  /* ── Kbd ── */
+  kbd {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: .1em .4em;
+    font-family: inherit;
+    font-size: .82em;
+    color: var(--text);
+  }
+
+  /* ── Section divider ── */
+  hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+  /* ── Hero ── */
+  .hero {
+    background: linear-gradient(135deg, rgba(79,142,247,.12) 0%, rgba(124,92,191,.12) 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 2rem 2.2rem;
+    margin-bottom: 2.5rem;
+  }
+  .hero h1 { font-size: 1.9rem; }
+  .hero p  { color: var(--muted); margin: .5rem 0 1rem; font-size: .95rem; }
+  .hero .tags { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+  /* ── Plugin schema ── */
+  .schema-field {
+    display: flex;
+    gap: 1rem;
+    padding: .6rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: .84rem;
+    align-items: flex-start;
+  }
+  .schema-field:last-child { border-bottom: none; }
+  .schema-key { min-width: 180px; font-family: monospace; color: var(--accent); font-size: .82rem; }
+  .schema-type { color: var(--muted); min-width: 70px; font-size: .78rem; margin-top: .1rem; }
+  .schema-desc { flex: 1; }
+  .schema-default { color: var(--muted); font-style: italic; font-size: .8rem; }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    nav { display: none; }
+    main { padding: 1.5rem; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<!-- ══ NAVIGATION ══════════════════════════════════════════════════════════════ -->
+<nav>
+  <div class="logo">
+    <h1>Pipeline Controller</h1>
+    <p>Broadcast Playout System</p>
+  </div>
+
+  <div class="nav-section">Erste Schritte</div>
+  <a href="#überblick">Systemübersicht</a>
+  <a href="#installation-installer">Installer-Paket (empfohlen)</a>
+  <a href="#installation-appimage">AppImage-Installation</a>
+  <a href="#installation-source">Installation aus Quellcode</a>
+  <a href="#start">Starten</a>
+  <a href="#https">HTTPS / TLS</a>
+
+  <div class="nav-section">Konfiguration</div>
+  <a href="#einstellungen">Einstellungen (UI)</a>
+  <a href="#design-sprache">Design &amp; Sprache</a>
+  <a href="#shortcuts">Tastaturkürzel</a>
+  <a href="#user-management">User Management</a>
+  <a href="#audio-config">Audio-Konfiguration</a>
+  <a href="#umgebungsvariablen">Umgebungsvariablen</a>
+
+  <div class="nav-section">Bedienung</div>
+  <a href="#ui">Benutzeroberfläche</a>
+  <a href="#counter-strip">Counter-Strip</a>
+  <a href="#switcher">Switcher</a>
+  <a href="#player">Player-Slots</a>
+  <a href="#playlist">Playlist</a>
+  <a href="#asset-panel">Asset-Panel</a>
+  <a href="#voiceover">Voiceover</a>
+  <a href="#branding">Branding</a>
+
+  <div class="nav-section">Audio</div>
+  <a href="#audio-gruppen">Audio-Gruppen</a>
+  <a href="#audio-presets">Presets &amp; Routing</a>
+  <a href="#clock">Clock-Provider</a>
+  <a href="#dst">Sommerzeit / DST</a>
+
+  <div class="nav-section">Grafik / oGraf</div>
+  <a href="#ograf-überblick">Übersicht</a>
+  <a href="#ograf-templates">Templates</a>
+  <a href="#ograf-lifecycle">oGraf-Lifecycle</a>
+  <a href="#ograf-hotkeys">Hotkeys</a>
+  <a href="#ograf-playlist">Als Playlist-Event</a>
+  <a href="#ograf-playlist-vars">Playlist-Variablen</a>
+
+  <div class="nav-section">Medien &amp; Bibliothek</div>
+  <a href="#bibliothek">Medien-Bibliothek</a>
+  <a href="#som-eom">SOM / EOM</a>
+
+  <div class="nav-section">Plugins</div>
+  <a href="#plugin-system">Plugin-System</a>
+  <a href="#plugin-ftm">File Transfer Manager</a>
+  <a href="#plugin-broadcast">Broadcast Controller</a>
+  <a href="#plugin-marina">Marina Sync</a>
+  <a href="#plugin-snmp">SNMP Monitor</a>
+  <a href="#plugin-subtitle">Subtitle FAB</a>
+  <a href="#plugin-entwicklung">Eigene Plugins</a>
+
+  <div class="nav-section">Referenz</div>
+  <a href="#api">REST-API</a>
+  <a href="#sse">SSE Event-Stream</a>
+  <a href="#dateien">Dateistruktur</a>
+  <a href="#fehlerbehebung">Fehlerbehebung</a>
+  <a href="#open-source">Open-Source-Lizenzen</a>
+</nav>
+
+<!-- ══ MAIN CONTENT ═════════════════════════════════════════════════════════════ -->
+<main>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="überblick">
+<div class="hero">
+  <h1>Pipeline Controller</h1>
+  <p>Professionelles GStreamer-basiertes Broadcast-Playout-System (Channel-in-a-Box)<br>
+     für Linux – mit HTML5-Weboberfläche, oGraf-Grafik-Engine und Plugin-System.</p>
+  <div class="tags">
+    <span class="badge badge-blue">Node.js Backend</span>
+    <span class="badge badge-purple">GStreamer 1.22+</span>
+    <span class="badge badge-green">HTML5 UI</span>
+    <span class="badge badge-yellow">oGraf / EBU</span>
+    <span class="badge badge-blue">Plugin-System</span>
+    <span class="badge badge-green">Open-Source-Basis</span>
+  </div>
+</div>
+
+<h2>Was ist Pipeline Controller?</h2>
+<p>Pipeline Controller ist ein vollständiges Broadcast-Playout-System, das auf dem Open-Source-Framework <strong>GStreamer</strong> aufbaut. Es ermöglicht professionelle Sendeabwicklung mit:</p>
+<ul>
+  <li>Bis zu <strong>3 unabhängigen Medien-Playern</strong> (MXF, MP4, MOV, …)</li>
+  <li><strong>Master-Pipeline</strong> mit Compositor, Video-Switcher und Audio-Mixing</li>
+  <li>Flexiblem <strong>Audio-Routing</strong> mit mehreren Gruppen, Kanal-Matrizen und 5.1-Upmix</li>
+  <li><strong>oGraf HTML5-Grafik-Engine</strong> (EBU-Standard) via Puppeteer/Chromium</li>
+  <li><strong>Playlist-Engine</strong> mit Übergängen und Event-Kindern</li>
+  <li><strong>Voiceover-Engine</strong> mit Fade-In/Out und Programm-Ducking</li>
+  <li>Erweiterbarem <strong>Plugin-System</strong> für Router-Steuerung, Datei-Transfer u.v.m.</li>
+  <li>Vollständiger <strong>REST-API</strong> und SSE-Event-Stream für externe Steuerung</li>
+</ul>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="installation-appimage">
+<h2>AppImage-Installation</h2>
+
+<div class="callout callout-warn">
+  <strong>Wichtig:</strong> Das AppImage muss <em>extrahiert</em> werden und darf <strong>nicht direkt</strong> als gemountetes AppImage gestartet werden. Der Grund: die <strong>oGraf-Grafik-Engine</strong> verwendet Puppeteer (Headless Chromium), das Zugriff auf das echte Dateisystem benötigt und im FUSE-gemounteten AppImage-Dateisystem nicht korrekt funktioniert.
+</div>
+
+<h3>Schritt 1 – AppImage herunterladen und ausführbar machen</h3>
+<pre><code>chmod +x PipelineController-x86_64.AppImage</code></pre>
+
+<h3>Schritt 2 – AppImage extrahieren</h3>
+<pre><code><span class="comment"># Extrahiert in: ./squashfs-root/</span>
+./PipelineController-x86_64.AppImage --appimage-extract</code></pre>
+
+<h3>Schritt 3 – Aus dem extrahierten Verzeichnis starten</h3>
+<pre><code>cd squashfs-root
+./AppRun</code></pre>
+<p>Oder über den enthaltenen Start-Wrapper:</p>
+<pre><code>./squashfs-root/start.sh</code></pre>
+
+<h3>Schritt 4 – Weboberfläche öffnen</h3>
+<p>Browser öffnen: <strong><a href="http://localhost:3000">http://localhost:3000</a></strong></p>
+
+<div class="callout callout-tip">
+  <strong>Tipp:</strong> Das extrahierte Verzeichnis kann an einen beliebigen Ort verschoben werden
+  (z.B. <code>/opt/pipeline-controller/</code>). Die Daten-Ordner (<code>media/</code>, <code>playlists/</code>, etc.)
+  werden relativ zum Startverzeichnis angelegt.
+</div>
+
+<h3>Systemvoraussetzungen (AppImage)</h3>
+<table>
+  <tr><th>Komponente</th><th>Anforderung</th></tr>
+  <tr><td>Betriebssystem</td><td>Linux x86_64, Kernel ≥ 5.4 (Debian 12 / Ubuntu 22.04 empfohlen)</td></tr>
+  <tr><td>X11-Display</td><td>Erforderlich für Videoausgabe (<code>ximagesink</code>) und Puppeteer</td></tr>
+  <tr><td>GStreamer</td><td>1.20+ (im AppImage enthalten <em>oder</em> system-seitig installiert)</td></tr>
+  <tr><td>PulseAudio / ALSA</td><td>Für Audioausgabe (PulseAudio empfohlen)</td></tr>
+  <tr><td>RAM</td><td>≥ 2 GB (4 GB empfohlen bei oGraf + mehreren Playern)</td></tr>
+  <tr><td>Storage</td><td>Je nach Medien-Cache; AppImage selbst ~300 MB extrahiert</td></tr>
+</table>
+
+<h3>GStreamer-Plugins nachinstallieren (falls Fehler auftreten)</h3>
+<p>Das AppImage enthält die wichtigsten GStreamer-Plugins. Falls ein Plugin fehlt, kann es systemweit nachinstalliert werden:</p>
+<pre><code>sudo apt install \
+  gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly \
+  gstreamer1.0-libav</code></pre>
+<div class="callout callout-info">
+  <strong>Hinweis:</strong> <code>gstreamer1.0-plugins-bad</code> enthält u.a. <code>dtsdec</code>, <code>compositor</code>, <code>inter{audio,video}src/sink</code> und andere für professionelles Broadcast benötigte Elemente.
+</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="installation-source">
+<h2>Installation aus dem Quellcode</h2>
+
+<h3>Systemvoraussetzungen</h3>
+<pre><code><span class="comment"># Node.js ≥ 18 (nvm empfohlen)</span>
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+nvm install 20
+nvm use 20
+
+<span class="comment"># Build-Tools für native Node-Addons</span>
+sudo apt install build-essential libgstreamer1.0-dev \
+  libgstreamer-plugins-base1.0-dev
+
+<span class="comment"># GStreamer-Plugins</span>
+sudo apt install \
+  gstreamer1.0-tools \
+  gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly \
+  gstreamer1.0-libav \
+  gstreamer1.0-x \
+  gstreamer1.0-alsa \
+  gstreamer1.0-gl
+
+<span class="comment"># PulseAudio</span>
+sudo apt install pulseaudio
+
+<span class="comment"># Puppeteer-Abhängigkeiten (Chromium für oGraf)</span>
+sudo apt install libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+  libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+  libxkbcommon0 libpango-1.0-0 libcairo2 libasound2 libnss3</code></pre>
+
+<h3>Node-Abhängigkeiten installieren</h3>
+<pre><code>cd "/path/to/PIPELINE CONTROLLER"
+npm install</code></pre>
+<p><code>npm install</code> kompiliert automatisch das native <code>gst-kit</code>-Addon (GStreamer-Bindings für Node.js) via <code>node-gyp</code>.</p>
+
+<h3>Start</h3>
+<pre><code>node server.js</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="installation-installer">
+<h2>Installer-Paket (empfohlen für Remote-Installation)</h2>
+<p>Das Installer-Paket erlaubt die Installation auf einem anderen Rechner <strong>ohne AppImage</strong> – als nativer Node.js-Dienst. Das Paket enthält den kompletten Quellcode, alle Konfigurationsdateien und ein interaktives Installations-Skript.</p>
+
+<h3>Paket erstellen (auf der Entwicklungsmaschine)</h3>
+<pre><code>cd "/path/to/PIPELINE CONTROLLER"
+./create_install_package.sh 1.0.0
+<span class="comment"># Ergebnis: ../PipelineController-1.0.0.tar.gz</span></code></pre>
+
+<h3>Auf dem Ziel-Rechner installieren</h3>
+<pre><code><span class="comment"># 1. Paket übertragen (z.B. via scp)</span>
+scp PipelineController-1.0.0.tar.gz user@remote:~/
+
+<span class="comment"># 2. Entpacken und Installer starten</span>
+ssh user@remote
+tar -xzf PipelineController-1.0.0.tar.gz
+cd PipelineController-1.0.0
+bash install.sh</code></pre>
+
+<p><strong>Wichtig:</strong> <code>install.sh</code> niemals mit <code>sudo</code> starten – PulseAudio/PipeWire läuft als normaler Benutzer.</p>
+
+<h3>Was der Installer macht</h3>
+<ul>
+  <li>Prüft Node.js ≥ 18, GStreamer-Plugins (inkl. <code>intervideosrc</code>), ffmpeg</li>
+  <li>Installiert fehlende Abhängigkeiten via <code>apt-get</code> (sudo-Passwort wird abgefragt)</li>
+  <li>Fragt nach Installationsverzeichnis (Standard: <code>~/pipeline-controller</code>)</li>
+  <li>Kopiert alle Anwendungsdateien, erstellt Laufzeitverzeichnisse</li>
+  <li>Bereinigt <code>settings.json</code> und <code>plugins.json</code>: setzt alle Pfade auf das neue Installationsverzeichnis</li>
+  <li>Setzt <code>videoSink</code> auf <code>fakesink</code> (headless-sicher; in der UI änderbar)</li>
+  <li>Führt <code>npm install</code> durch und lädt Chromium für oGraf</li>
+  <li>Erstellt <code>start.sh</code> und richtet optional einen Systemd-User-Service ein</li>
+</ul>
+
+<h3>Kritische GStreamer-Plugins</h3>
+<p>Der Installer prüft explizit <code>intervideosrc</code>, <code>intervideosink</code>, <code>interaudiosrc</code>, <code>interaudiosink</code> (aus <code>gstreamer1.0-plugins-bad</code>). Fehlt eines davon, startet weder die Master-Pipeline noch die Preview.</p>
+
+<div class="callout">
+  <strong>NFS/SSHFS-Hinweis:</strong> Wenn Quell- und Zielmaschine ein gemeinsames Dateisystem nutzen, werden Pfade aus der Quell-<code>settings.json</code> überschrieben, nicht "gültig behalten" – der Installer erkennt diesen Fall und setzt Pfade immer explizit auf das Installationsverzeichnis.
+</div>
+
+<h3>Nach der Installation starten</h3>
+<pre><code><span class="comment"># Direkt starten</span>
+bash ~/pipeline-controller/start.sh
+
+<span class="comment"># Systemd User-Service (falls beim Install eingerichtet)</span>
+systemctl --user start pipeline-controller
+journalctl --user -u pipeline-controller -f</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="https">
+<h2>HTTPS / TLS (optional)</h2>
+<p>Pipeline Controller unterstützt HTTPS als optionalen zweiten Server-Port. Der HTTP-Server bleibt parallel aktiv (z.B. für lokalen Zugriff).</p>
+
+<h3>Zertifikat erstellen (selbstsigniert)</h3>
+<pre><code>openssl req -x509 -newkey rsa:4096 \
+  -keyout ~/pipeline-controller/key.pem \
+  -out ~/pipeline-controller/cert.pem \
+  -days 3650 -nodes -subj "/CN=mein-server"</code></pre>
+
+<h3>Konfiguration in settings.json</h3>
+<pre><code>{
+  "httpsKey":  "/home/user/pipeline-controller/key.pem",
+  "httpsCert": "/home/user/pipeline-controller/cert.pem",
+  "httpsPort": 3443
+}</code></pre>
+
+<h3>Konfiguration via Umgebungsvariablen</h3>
+<pre><code>HTTPS_KEY=/path/to/key.pem HTTPS_CERT=/path/to/cert.pem HTTPS_PORT=3443 node server.js</code></pre>
+
+<p>Nach dem Neustart ist die Web-Oberfläche unter <strong>https://server:3443</strong> erreichbar. Bei selbstsignierten Zertifikaten muss die Browser-Ausnahme einmalig bestätigt werden.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="start">
+<h2>Starten</h2>
+
+<h3>Einfacher Start</h3>
+<pre><code>cd "/path/to/PIPELINE CONTROLLER"
+node server.js
+<span class="comment"># oder aus dem AppImage-Verzeichnis:</span>
+./AppRun</code></pre>
+<p>Weboberfläche: <strong>http://localhost:3000</strong></p>
+
+<h3>Start mit Optionen</h3>
+<pre><code>PORT=3000 MEDIA_DIR=/mnt/san/media DISPLAY=:0 node server.js</code></pre>
+
+<h3>Autostart via systemd (Produktionsbetrieb)</h3>
+<pre><code><span class="comment"># /etc/systemd/system/pipeline-controller.service</span>
+[Unit]
+Description=Pipeline Controller
+After=network.target sound.target graphical.target
+
+[Service]
+User=<em>benutzername</em>
+WorkingDirectory=/opt/pipeline-controller/squashfs-root
+Environment=DISPLAY=:0
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+ExecStart=/opt/pipeline-controller/squashfs-root/AppRun
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+<pre><code>sudo systemctl enable pipeline-controller
+sudo systemctl start pipeline-controller
+sudo journalctl -u pipeline-controller -f   <span class="comment"># Logs verfolgen</span></code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="einstellungen">
+<h2>Einstellungen</h2>
+<p>Alle Einstellungen werden in <code>settings.json</code> gespeichert und sind über das <strong>⚙ Zahnrad-Symbol</strong> in der UI erreichbar.</p>
+
+<h3>Video-Tab</h3>
+<table>
+  <tr><th>Einstellung</th><th>Beschreibung</th><th>Standard</th></tr>
+  <tr><td>Auflösung / FPS</td><td>Format der Master-Pipeline, z.B. <code>1920×1080@25</code></td><td>640×360@25</td></tr>
+  <tr><td>Video-Sink</td><td>GStreamer-Element für die Videoausgabe</td><td><code>ximagesink</code></td></tr>
+  <tr><td>Scale-Modus</td><td><code>fit</code> / <code>fill</code> / <code>stretch</code> – Skalierung bei abweichendem Quell-Seitenverhältnis</td><td><code>fit</code></td></tr>
+  <tr><td>Scale-Methode</td><td>Qualität: 0=Nearest, 1=Bilinear, 2=Lanczos</td><td>1</td></tr>
+  <tr><td>Deinterlace</td><td><code>auto</code> / <code>always</code> / <code>never</code></td><td><code>auto</code></td></tr>
+  <tr><td>Idle-Quelle</td><td>Signal wenn kein Clip aktiv: <code>smpte</code> / <code>black</code> / <code>image</code></td><td><code>image</code></td></tr>
+  <tr><td>Idle-Bild</td><td>Dateiname aus <code>images/</code> für Idle-Quelle <code>image</code></td><td>—</td></tr>
+</table>
+
+<h4>Verfügbare Video-Sinks</h4>
+<table>
+  <tr><th>Sink</th><th>Beschreibung</th></tr>
+  <tr><td><code>ximagesink</code></td><td>X11-Fenster (Standard auf Desktop)</td></tr>
+  <tr><td><code>xvimagesink</code></td><td>X11 mit Hardware-Accelerated Scaling</td></tr>
+  <tr><td><code>autovideosink</code></td><td>Automatische Auswahl des besten Sinks</td></tr>
+  <tr><td><code>fakesink</code></td><td>Kein Bild – für Tests oder headless Betrieb</td></tr>
+  <tr><td><code>decklinkvideosink</code></td><td>Blackmagic DeckLink SDI-Ausgang (erfordert DeckLink-Treiber)</td></tr>
+</table>
+
+<h3>Audio-Tab</h3>
+<p>Audio-Gruppen, Presets und Clock-Konfiguration werden in <code>audio_config.json</code> gespeichert (→ <a href="#audio-config">Audio-Konfiguration</a>).</p>
+
+<h3>Debug-Tab</h3>
+<table>
+  <tr><th>Profil</th><th>GST_DEBUG-Level</th><th>Verwendung</th></tr>
+  <tr><td>Nur Fehler</td><td><code>*:1</code></td><td>Produktionsbetrieb</td></tr>
+  <tr><td>Fehler + Warnungen</td><td><code>*:2</code></td><td>Problemsuche</td></tr>
+  <tr><td>Info</td><td><code>*:3</code></td><td>Detailanalyse</td></tr>
+  <tr><td>Verbose</td><td><code>*:5</code></td><td>Entwicklung / Bug-Reports</td></tr>
+</table>
+
+<h3>Authentication</h3>
+<p>Optional Bearer-token authentication for the web interface. Enable it in the UI under <strong>Settings → Users</strong>. See <a href="#user-management">User Management</a> for the full setup guide.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="design-sprache">
+<h2>Design &amp; Sprache</h2>
+
+<h3>Hell / Dunkel Design</h3>
+<p>Das UI unterstützt Dark Mode (Standard) und Light Mode. Umschalten über <strong>⚙ Einstellungen → Darstellung → Design-Modus</strong>.</p>
+<ul>
+  <li><strong>🌙 Dunkel:</strong> Standard – optimiert für Broadcast-Kontrollräume mit gedimmtem Licht.</li>
+  <li><strong>☀ Hell:</strong> Für helle Umgebungen oder externe Monitore.</li>
+</ul>
+<p>Das gewählte Design wird im Browser-LocalStorage gespeichert und gilt pro Benutzer.</p>
+
+<h3>Panel-Hintergrundfarben</h3>
+<p>Playlist- und Vorbereitungs-Panel können individuell eingefärbt werden (Farbwähler unter Darstellung → Panel-Hintergrundfarben). Farben werden ebenfalls im LocalStorage gespeichert.</p>
+
+<h3>Sprache</h3>
+<p>Die Benutzeroberfläche ist zweisprachig verfügbar. Umschalten unter <strong>⚙ Einstellungen → Darstellung</strong>:</p>
+<ul>
+  <li><strong>🇩🇪 Deutsch</strong></li>
+  <li><strong>🇬🇧 English</strong></li>
+</ul>
+<p>Die Sprachauswahl wird im LocalStorage des Browsers gespeichert und gilt pro Benutzer/Gerät.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="shortcuts">
+<h2>Tastaturkürzel (Shortcuts)</h2>
+<p>Alle Shortcuts sind vollständig konfigurierbar unter <strong>⚙ Einstellungen → Shortcuts</strong>. Die Konfiguration wird in <code>grafik_hotkeys.json</code> gespeichert.</p>
+
+<h3>Standard-Shortcuts</h3>
+<table>
+  <tr><th>Aktion</th><th>Standard</th></tr>
+  <tr><td>Play / Nächster Clip</td><td><kbd>Space</kbd></td></tr>
+  <tr><td>Hard Cut (sofort umschalten)</td><td><kbd>H</kbd></td></tr>
+  <tr><td>Preview an/aus</td><td><kbd>F2</kbd></td></tr>
+  <tr><td>Aufzeichnung-Panel öffnen</td><td><kbd>R</kbd></td></tr>
+  <tr><td>Grafik-Hotkeys 1–9</td><td><kbd>1</kbd>–<kbd>9</kbd> (konfigurierbar)</td></tr>
+</table>
+
+<h3>Shortcuts anpassen</h3>
+<ol>
+  <li>⚙ Einstellungen → Shortcuts öffnen</li>
+  <li>Auf die Tastenkombination eines Eintrags klicken</li>
+  <li>Neue Taste(n) drücken</li>
+  <li>💾 Shortcuts speichern</li>
+</ol>
+<p>Chord-Shortcuts (z.B. <kbd>Ctrl+G</kbd>) werden ebenfalls unterstützt.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="user-management">
+<h2>User Management</h2>
+<span class="badge badge-blue">Bearer Token Auth</span>
+<span class="badge badge-yellow">Admin only</span>
+
+<p>Pipeline Controller includes an optional role-based access control system. When disabled, the web interface is open to anyone on the network with no login required. When enabled, every API call and page load requires a valid Bearer token obtained at login.</p>
+
+<div class="callout callout-warn">
+  <strong>Note:</strong> Authentication is disabled by default. Enable it only when the system is reachable from untrusted networks. Once enabled, existing sessions remain valid until the server restarts.
+</div>
+
+<h3>Enabling Authentication</h3>
+<ol>
+  <li>Open the UI and navigate to <strong>Settings → Users</strong> (gear icon).</li>
+  <li>Check <strong>Enable Authentication</strong>.</li>
+  <li>Save. The page will immediately show a login prompt on next access.</li>
+</ol>
+<p>The setting is stored as <code>"authEnabled": true</code> in <code>settings.json</code>.</p>
+
+<h3>Roles</h3>
+<p>Each user can hold any combination of roles. The <code>admin</code> role always supersedes all others.</p>
+<table>
+  <tr><th>Role</th><th>Access</th></tr>
+  <tr>
+    <td><code>admin</code></td>
+    <td>Full access — user management, all settings, plugins, playlist, graphics, media library, user activity log.</td>
+  </tr>
+  <tr>
+    <td><code>editor</code></td>
+    <td>Playlist control (play, stop, next, load, edit events), media library, SOM/EOM, plugin management, user activity log view.</td>
+  </tr>
+  <tr>
+    <td><code>grafiker</code></td>
+    <td>Graphics (oGraf templates, take/out, hotkeys) — no playlist or system access.</td>
+  </tr>
+  <tr>
+    <td><code>viewer</code></td>
+    <td>Read-only — can watch the live state, SSE event stream, and playlist but cannot trigger any actions.</td>
+  </tr>
+</table>
+
+<h3>Managing Users in the UI</h3>
+<p>All user operations require the <code>admin</code> role.</p>
+
+<h4>Add a user</h4>
+<ol>
+  <li>Settings → Users → click <strong>＋ Add User</strong>.</li>
+  <li>Enter a username and password.</li>
+  <li>Select one or more roles from the checkboxes (<code>admin</code>, <code>editor</code>, <code>grafiker</code>, <code>viewer</code>).</li>
+  <li>Click <strong>Save</strong>.</li>
+</ol>
+
+<h4>Edit a user</h4>
+<p>Click the pencil icon next to any user in the list. You can change the username, password, and roles. Leave the password field blank to keep the current password.</p>
+
+<h4>Delete a user</h4>
+<p>Click the trash icon next to a user. The action is immediate. You cannot delete your own account while logged in.</p>
+
+<h3>users.json Format</h3>
+<p>Users are persisted in <code>users.json</code> next to <code>server.js</code>. Passwords are stored as SHA-256 hashes — never in plain text.</p>
+<pre><code>[
+  {
+    <span class="key">"id"</span>:       <span class="str">"b31c63494568"</span>,
+    <span class="key">"username"</span>: <span class="str">"editor1"</span>,
+    <span class="key">"password"</span>: <span class="str">"&lt;sha256-hash&gt;"</span>,
+    <span class="key">"roles"</span>:    [<span class="str">"editor"</span>]
+  }
+]</code></pre>
+<div class="callout callout-info">
+  <strong>Tip:</strong> Do not edit <code>users.json</code> manually while the server is running. Use the UI or the REST API instead — the server keeps the file in sync automatically.
+</div>
+
+<h3>REST API</h3>
+<p>All user management endpoints require an <code>Authorization: Bearer &lt;token&gt;</code> header from an <code>admin</code> session.</p>
+<table>
+  <tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+  <tr><td><code>POST</code></td><td><code>/api/auth/login</code></td><td>Log in — body: <code>{"username":"…","password":"…"}</code>. Returns <code>token</code>, <code>username</code>, <code>roles</code>.</td></tr>
+  <tr><td><code>POST</code></td><td><code>/api/auth/logout</code></td><td>Invalidate the current session token.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/api/auth/me</code></td><td>Returns current session info and whether auth is enabled.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/api/users</code></td><td>List all users (id, username, roles — no password hash). <em>admin only.</em></td></tr>
+  <tr><td><code>POST</code></td><td><code>/api/users</code></td><td>Create a user — body: <code>{"username","password","roles":["editor"]}</code>. <em>admin only.</em></td></tr>
+  <tr><td><code>PATCH</code></td><td><code>/api/users/:id</code></td><td>Update username, password, and/or roles by user ID. <em>admin only.</em></td></tr>
+  <tr><td><code>DELETE</code></td><td><code>/api/users/:id</code></td><td>Delete a user by ID. <em>admin only.</em></td></tr>
+  <tr><td><code>GET</code></td><td><code>/api/userlog</code></td><td>Retrieve the user activity log (JSONL). <em>admin / editor.</em></td></tr>
+</table>
+
+<h3>User Activity Log</h3>
+<p>Every login, logout, and write operation is appended to a JSONL log file. The log path is set in Settings → Users → <em>Activity Log Path</em> (e.g. <code>/var/log/pipeline-controller/userlog.jsonl</code>).</p>
+<pre><code>{"ts":"2026-05-18T14:00:00.000Z","user":"editor1","ip":"192.168.1.5","action":"playlist.set","detail":"42 events"}</code></pre>
+<p>Logged actions include: <code>auth.login</code>, <code>auth.logout</code>, <code>user.create</code>, <code>user.update</code>, <code>user.delete</code>, <code>playlist.set</code>, <code>playlist.play</code>, <code>playlist.next</code>, and more.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="audio-config">
+<h2>Audio-Konfiguration</h2>
+<p>Datei: <code>audio_config.json</code> – wird automatisch beim Speichern über die UI aktualisiert oder kann manuell bearbeitet werden.</p>
+
+<h3>Struktur</h3>
+<pre><code>{
+  <span class="key">"groups"</span>: [
+    {
+      <span class="key">"id"</span>: <span class="str">"pgm-stereo"</span>,
+      <span class="key">"label"</span>: <span class="str">"Programmton Stereo"</span>,
+      <span class="key">"channels"</span>: <span class="num">2</span>,
+      <span class="key">"sink"</span>: <span class="str">"pulsesink"</span>,
+      <span class="key">"r128"</span>: {
+        <span class="key">"enabled"</span>: <span class="kw">true</span>,
+        <span class="key">"target"</span>: <span class="num">-23</span>,
+        <span class="key">"maxGain"</span>: <span class="num">12</span>,
+        <span class="key">"smoothRate"</span>: <span class="num">0.5</span>
+      }
+    },
+    {
+      <span class="key">"id"</span>: <span class="str">"pgm-51"</span>,
+      <span class="key">"label"</span>: <span class="str">"Programmton 5.1"</span>,
+      <span class="key">"channels"</span>: <span class="num">6</span>,
+      <span class="key">"sink"</span>: <span class="str">"fakesink"</span>
+    }
+  ],
+  <span class="key">"presets"</span>: {
+    <span class="key">"stereo"</span>: {
+      <span class="key">"label"</span>: <span class="str">"Stereo (CH1=L, CH2=R)"</span>,
+      <span class="key">"routes"</span>: [
+        { <span class="key">"from"</span>: <span class="str">"mxf_ch1"</span>, <span class="key">"to"</span>: [<span class="str">"pgm-stereo:L"</span>] },
+        { <span class="key">"from"</span>: <span class="str">"mxf_ch2"</span>, <span class="key">"to"</span>: [<span class="str">"pgm-stereo:R"</span>] }
+      ],
+      <span class="key">"upmix"</span>: [
+        { <span class="key">"from"</span>: <span class="str">"pgm-stereo"</span>, <span class="key">"to"</span>: <span class="str">"pgm-51"</span>, <span class="key">"method"</span>: <span class="str">"ltrt"</span> }
+      ]
+    }
+  },
+  <span class="key">"clock"</span>: {
+    <span class="key">"provider"</span>: <span class="str">"audiotestsrc"</span>
+  }
+}</code></pre>
+
+<h3>Audio-Gruppen</h3>
+<table>
+  <tr><th>Feld</th><th>Typ</th><th>Beschreibung</th></tr>
+  <tr><td><code>id</code></td><td>string</td><td>Eindeutiger Bezeichner (Buchstaben, Ziffern, Bindestriche)</td></tr>
+  <tr><td><code>label</code></td><td>string</td><td>Anzeigename in der UI und im VU-Meter</td></tr>
+  <tr><td><code>channels</code></td><td>2 / 6</td><td>Kanalanzahl: 2 = Stereo, 6 = 5.1 Surround</td></tr>
+  <tr><td><code>sink</code></td><td>string</td><td>GStreamer-Audioausgabe: <code>pulsesink</code>, <code>alsasink</code>, <code>fakesink</code>, <code>autoaudiosink</code></td></tr>
+  <tr><td><code>r128</code></td><td>object</td><td>EBU R128 Loudness-Normalisierung (optional)</td></tr>
+</table>
+
+<h3>Kanal-Bezeichner für Routing</h3>
+<table>
+  <tr><th>Bezeichner</th><th>Bedeutung</th></tr>
+  <tr><td><code>mxf_ch1</code> … <code>mxf_ch8</code></td><td>Mono-Audiospuren aus der Quelldatei (1-basiert)</td></tr>
+  <tr><td><code>&lt;gruppen-id&gt;:L</code></td><td>Linker Kanal der Gruppe</td></tr>
+  <tr><td><code>&lt;gruppen-id&gt;:R</code></td><td>Rechter Kanal der Gruppe</td></tr>
+  <tr><td><code>&lt;gruppen-id&gt;:C</code></td><td>Center (5.1)</td></tr>
+  <tr><td><code>&lt;gruppen-id&gt;:LFE</code></td><td>Subwoofer (5.1)</td></tr>
+  <tr><td><code>&lt;gruppen-id&gt;:Ls / :Rs</code></td><td>Surround Left/Right (5.1)</td></tr>
+</table>
+
+<h3>Upmix-Methoden</h3>
+<table>
+  <tr><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>ltrt</code></td><td>Lt/Rt Surround-Downmix-kompatibel (empfohlen für Broadcast)</td></tr>
+  <tr><td><code>loro</code></td><td>Lo/Ro Stereo-Kompatibel</td></tr>
+  <tr><td><code>matrix</code></td><td>Benutzerdefinierte Routing-Matrix</td></tr>
+</table>
+
+<h3>Clock-Provider</h3>
+<table>
+  <tr><th>Wert</th><th>Beschreibung</th></tr>
+  <tr><td><code>audiotestsrc</code></td><td>Pipeline-interne Clock (Standard, stabil)</td></tr>
+  <tr><td><code>system</code></td><td>Linux-Systemclock</td></tr>
+  <tr><td><code>ptp-generic</code></td><td>IEEE 1588 PTP über Netzwerk (SMPTE 2110)</td></tr>
+  <tr><td><code>ptp-decklink</code></td><td>Blackmagic DeckLink PTP-Clock</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="umgebungsvariablen">
+<h2>Umgebungsvariablen</h2>
+<table>
+  <tr><th>Variable</th><th>Standard</th><th>Beschreibung</th></tr>
+  <tr><td><code>PORT</code></td><td><code>3000</code></td><td>HTTP-Port der Weboberfläche</td></tr>
+  <tr><td><code>MEDIA_DIR</code></td><td><code>./media</code></td><td>Pfad zum Medien-Ordner</td></tr>
+  <tr><td><code>PLAYLISTS_DIR</code></td><td><code>./playlists</code></td><td>Pfad zum Playlist-Ordner</td></tr>
+  <tr><td><code>GRAFIK_PORT</code></td><td><code>3101</code></td><td>HTTP-Port des oGraf-Template-Servers</td></tr>
+  <tr><td><code>DISPLAY</code></td><td>—</td><td>X11-Display, z.B. <code>:0</code></td></tr>
+  <tr><td><code>PULSE_SERVER</code></td><td>—</td><td>PulseAudio-Socket, z.B. <code>unix:/run/user/1000/pulse/native</code></td></tr>
+  <tr><td><code>GST_DEBUG</code></td><td>—</td><td>GStreamer Debug-Filter, z.B. <code>*:2</code></td></tr>
+  <tr><td><code>VIDEO_SINK</code></td><td>auto</td><td>GStreamer Video-Sink überschreiben</td></tr>
+  <tr><td><code>AUDIO_SINK</code></td><td><code>pulsesink</code></td><td>GStreamer Audio-Sink überschreiben</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="ui">
+<h2>Benutzeroberfläche</h2>
+
+<h3>Toolbar (oben)</h3>
+<table>
+  <tr><th>Element</th><th>Funktion</th></tr>
+  <tr><td><strong>▶ START</strong></td><td>Master-Pipeline starten (Video + Audio aktivieren)</td></tr>
+  <tr><td><strong>■ STOP</strong></td><td>Master-Pipeline stoppen</td></tr>
+  <tr><td><strong>📺 Preview</strong></td><td>JPEG-Vorschau ein-/ausblenden (5 fps, 640×360)</td></tr>
+  <tr><td><strong>⚙</strong></td><td>Einstellungen öffnen</td></tr>
+  <tr><td><strong>🔔</strong></td><td>Status-Benachrichtigungen</td></tr>
+</table>
+
+<h3 id="switcher">Switcher</h3>
+<p>Schaltet die <em>aktive Programmquelle</em> in der Master-Pipeline:</p>
+<table>
+  <tr><th>Quelle</th><th>Beschreibung</th></tr>
+  <tr><td>SMPTE</td><td>Testbild (Farbbalken) + 1-kHz-Referenzton</td></tr>
+  <tr><td>SCHWARZ</td><td>Schwarzbild + Stille (Audio-Stille)</td></tr>
+  <tr><td>BILD</td><td>Konfiguriertes Idle-Standbild aus <code>images/</code></td></tr>
+  <tr><td>BILD + PL</td><td>Idle-Bild mit Playlist-Overlay</td></tr>
+  <tr><td>PLAYER 1 / 2 / 3</td><td>Aktiver Medien-Player</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="player">
+<h2>Player-Slots</h2>
+<p>Pipeline Controller stellt bis zu 3 unabhängige Player bereit. Jeder Player läuft in einer eigenen GStreamer-Pipeline und übergibt Audio/Video über die <code>interaudio/intervideo</code>-Schnittstelle an die Master-Pipeline.</p>
+
+<h3>Player-Steuerung</h3>
+<table>
+  <tr><th>Aktion</th><th>Beschreibung</th></tr>
+  <tr><td><strong>Cue / Vorladen</strong></td><td>Clip laden und auf EOM positionieren – ohne Programmwechsel</td></tr>
+  <tr><td><strong>▶ Play</strong></td><td>Clip starten + Switcher auf diesen Player schalten</td></tr>
+  <tr><td><strong>⏸ Pause</strong></td><td>Bild einfrieren (Audio stumm)</td></tr>
+  <tr><td><strong>■ Stop</strong></td><td>Player zurücksetzen, Switcher auf Idle</td></tr>
+</table>
+
+<h3>EOM-Verhalten (End of Material)</h3>
+<p>Wenn ein Clip sein EOM erreicht:</p>
+<ol>
+  <li>Playlist-Engine prüft das nächste Event</li>
+  <li>Bei vorhandenem Folge-Clip: automatischer nahtloser Schnitt</li>
+  <li>Ohne Folge-Event: Wechsel auf konfigurierte Gap-Quelle (Schwarz / Idle)</li>
+</ol>
+
+<h3>As-Run-Log</h3>
+<p>Jede Sendung wird automatisch protokolliert in <code>asrun/AsRun_YYYYMMDD.txt</code>:</p>
+<pre><code>2026-05-03T08:00:00Z  PLAY  player1  news_intro.mxf  00:00:00:00
+2026-05-03T08:00:28Z  STOP  player1  news_intro.mxf  00:00:28:06</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="playlist">
+<h2>Playlist</h2>
+
+<h3>Event-Typen</h3>
+<table>
+  <tr><th>Typ</th><th>Beschreibung</th></tr>
+  <tr><td><code>player</code></td><td>Mediendatei aus der Bibliothek (MXF, MP4, MOV, …)</td></tr>
+  <tr><td><code>grafik</code></td><td>oGraf/HTML5-Grafik als Primär-Event</td></tr>
+  <tr><td><code>image</code></td><td>Standbild (JPG/PNG) aus <code>images/</code></td></tr>
+  <tr><td><code>live</code></td><td>Live-Signal (Switcher bleibt auf aktuellem Input)</td></tr>
+  <tr><td><code>gap</code></td><td>Explizite Pause / Schwarzbild für definierte Dauer</td></tr>
+</table>
+
+<h3>Übergänge</h3>
+<table>
+  <tr><th>Übergang</th><th>Beschreibung</th></tr>
+  <tr><td><code>cut</code></td><td>Harter Schnitt (Standard)</td></tr>
+  <tr><td><code>v-fade</code></td><td>V-Blende: aus nach Schwarz, dann in</td></tr>
+  <tr><td><code>cut-fade</code></td><td>Schnitt rein, Blende raus</td></tr>
+  <tr><td><code>fade-cut</code></td><td>Blende rein, Schnitt raus</td></tr>
+</table>
+
+<h3>Playlist-JSON-Format</h3>
+<pre><code>[
+  {
+    <span class="key">"id"</span>: <span class="str">"evt-001"</span>,
+    <span class="key">"source"</span>: <span class="str">"player"</span>,
+    <span class="key">"file"</span>: <span class="str">"nachrichten.mxf"</span>,
+    <span class="key">"som"</span>: <span class="str">"00:00:00:00"</span>,
+    <span class="key">"eom"</span>: <span class="str">"00:05:30:00"</span>,
+    <span class="key">"transition"</span>: <span class="str">"cut"</span>,
+    <span class="key">"audioPreset"</span>: <span class="str">"stereo"</span>,
+    <span class="key">"children"</span>: [
+      {
+        <span class="key">"source"</span>: <span class="str">"grafik"</span>,
+        <span class="key">"grafik"</span>: {
+          <span class="key">"template"</span>: <span class="str">"lower-third"</span>,
+          <span class="key">"data"</span>: { <span class="key">"name"</span>: <span class="str">"Max Mustermann"</span>, <span class="key">"title"</span>: <span class="str">"Korrespondent Wien"</span> },
+          <span class="key">"delay"</span>: <span class="num">3</span>,
+          <span class="key">"duration"</span>: <span class="num">8</span>
+        }
+      }
+    ]
+  }
+]</code></pre>
+
+<h3>Grafik-Timing-Parameter (als Playlist-Child)</h3>
+<table>
+  <tr><th>Parameter</th><th>Beschreibung</th></tr>
+  <tr><td><code>delay</code></td><td>Sekunden nach Clip-Start (0 = sofort)</td></tr>
+  <tr><td><code>delayFrames</code></td><td>Frames nach Clip-Start (überschreibt <code>delay</code>)</td></tr>
+  <tr><td><code>duration</code></td><td>Sichtbar für N Sekunden (0 = manuell ausblenden)</td></tr>
+  <tr><td><code>durationFrames</code></td><td>Sichtbar für N Frames</td></tr>
+  <tr><td><code>endOffset</code></td><td>Ausblenden N Sekunden vor Clip-Ende (negative Zahl)</td></tr>
+  <tr><td><code>endOffsetFrames</code></td><td>Ausblenden N Frames vor Clip-Ende</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="counter-strip">
+<h2>Counter-Strip</h2>
+<p>Der Counter-Strip am oberen Bildschirmrand zeigt auf einen Blick alle zeitkritischen Ereignisse der laufenden Sendestunde.</p>
+
+<table>
+  <tr><th>Zelle</th><th>Farbe</th><th>Inhalt</th></tr>
+  <tr><td><strong>⏰ FIX-START</strong></td><td>Gelb</td><td>Countdown zum nächsten Fixzeit-Ereignis (startType=fixtime) oder zum Fix-Ende des laufenden Events</td></tr>
+  <tr><td><strong>▶ LAUFEND</strong></td><td>Grün</td><td>Restzeit des aktuellen On-Air-Events mit Fortschrittsbalken</td></tr>
+  <tr><td><strong>⇥ NÄCHSTER</strong></td><td>—</td><td>Gap/Overlap zum nächsten Event in der Timeline</td></tr>
+  <tr><td><strong>📺 NÄCHSTES LIVE</strong></td><td>Blau</td><td>Countdown zum nächsten Live-Ereignis</td></tr>
+  <tr><td><strong>⏭ NÄCHSTE AKTION</strong></td><td>Orange</td><td>Nächster Grafik-Child-Event oder nächstes Playlist-Event</td></tr>
+  <tr><td><strong>⚠ NÄCHSTES FEHLT</strong></td><td>Rot</td><td>Countdown bis zum nächsten Event mit fehlendem File</td></tr>
+</table>
+
+<h3>Scroll-Navigation</h3>
+<p>Ein <strong>Klick auf eine Counter-Zelle</strong> scrollt die Playlist-Liste zum entsprechenden Event und hebt es kurz hervor. Ausnahme: die <em>LAUFEND</em>-Zelle scrollt zum aktuellen On-Air-Event.</p>
+
+<h3>Sichtbarkeit konfigurieren</h3>
+<p>Über das <strong>⚙-Symbol</strong> im Strip-Header können einzelne Zellen ein- oder ausgeblendet werden. Die Einstellung wird im Browser-LocalStorage gespeichert.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="asset-panel">
+<h2>Asset-Panel</h2>
+<p>Das Asset-Panel ermöglicht den schnellen Umschnitt auf vordefinierte Inhalte (z.B. Werbeblöcke, Promos, Jingles) ohne manuelle Playlist-Bearbeitung.</p>
+
+<h3>Asset-Rückkehr-Modi</h3>
+<table>
+  <tr><th>Modus</th><th>Verhalten</th></tr>
+  <tr><td><strong>interrupt</strong></td><td>
+    Das laufende On-Air-Event (sofern Clip) wird unterbrochen. Pipeline Controller:
+    <ol style="margin:.3rem 0 0 1.2rem">
+      <li>Cued den ersten Asset-Event im Hintergrund (aktueller Clip läuft weiter)</li>
+      <li>Sobald gecued: schaltet auf Asset um</li>
+      <li>Nach dem Asset wird eine <em>Return-Copy</em> mit dem exakten SOM der Unterbrechung eingefügt</li>
+      <li>Return-Copy und bereits gespielte Portion ergeben zusammen die ursprüngliche Event-Länge</li>
+    </ol>
+  </td></tr>
+  <tr><td><strong>break</strong></td><td>Sofortiger Schnitt auf Asset; kein Return (Playlist läuft nach Asset normal weiter)</td></tr>
+  <tr><td><strong>live</strong></td><td>Nach dem Asset wird auf eine konfigurierte Live-Quelle umgeschaltet</td></tr>
+</table>
+
+<h3>Asset anlegen / bearbeiten</h3>
+<ol>
+  <li>Asset-Panel öffnen (⬛-Button oben)</li>
+  <li>Assets-Liste-Symbol → <strong>＋ Neues Asset</strong></li>
+  <li>Label, Farbe und Rückkehr-Modus setzen</li>
+  <li>Events hinzufügen (Clips, Live-Quellen, Schwarz)</li>
+  <li>Speichern</li>
+</ol>
+<div class="callout callout-info">
+  <strong>As-Run:</strong> Unterbrochene Events werden mit der tatsächlich ausgespielten Dauer protokolliert. Die Return-Copy erscheint als eigenes As-Run-Event mit dem neuen SOM.
+</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="voiceover">
+<h2>Voiceover</h2>
+<p>Die Voiceover-Engine erlaubt das Einblenden einer Audio-Datei (WAV/MP3) über den laufenden Programm-Ton mit konfigurierbarem Fade-In/Out und Programm-Ducking.</p>
+
+<h3>Presets</h3>
+<table>
+  <tr><th>Preset-ID</th><th>VO-Lautstärke</th><th>Programm-Lautstärke</th><th>Verwendung</th></tr>
+  <tr><td><code>AP100</code></td><td>100 %</td><td>0 %</td><td>Volleinblendung (VO verdrängt Programm)</td></tr>
+  <tr><td><code>AP75</code></td><td>100 %</td><td>25 %</td><td>Klassisches Voiceover</td></tr>
+  <tr><td><code>AP50</code></td><td>100 %</td><td>50 %</td><td>Mix 50/50</td></tr>
+  <tr><td><code>AP25</code></td><td>50 %</td><td>100 %</td><td>Hintergrundvoice</td></tr>
+  <tr><td><code>ST</code></td><td>100 %</td><td>100 %</td><td>Stereo-Mix ohne Ducking</td></tr>
+  <tr><td><code>ST-ALL</code></td><td>100 %</td><td>0 %</td><td>Alle Gruppen, kein Programm</td></tr>
+</table>
+
+<h3>API-Aufruf</h3>
+<pre><code>POST /api/voiceover/play
+{
+  <span class="key">"filePath"</span>: <span class="str">"/pfad/zu/musik.wav"</span>,
+  <span class="key">"preset"</span>: <span class="str">"AP75"</span>,
+  <span class="key">"fadeInMs"</span>: <span class="num">500</span>,
+  <span class="key">"fadeOutMs"</span>: <span class="num">1000</span>,
+  <span class="key">"durationMs"</span>: <span class="num">30000</span>
+}</code></pre>
+
+<p>Unterstützte Formate: <strong>WAV</strong> (PCM 8/16/24/32 Bit, IEEE Float 32/64 Bit) und <strong>MP3</strong>.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="branding">
+<h2>Channel Branding</h2>
+<p>PNG-Grafiken aus dem Ordner <code>channelbranding/</code> können als transparentes Overlay über das Programmbild gelegt werden.</p>
+<ul>
+  <li>UI: Grafik-Panel → Branding-Bereich → Datei auswählen → Einblenden</li>
+  <li>Transparenz-Unterstützung: PNG mit Alpha-Kanal</li>
+  <li>API: <code>POST /api/branding/show { "file": "logo.png" }</code></li>
+  <li>API: <code>POST /api/branding/hide</code></li>
+</ul>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="audio-gruppen">
+<h2>Audio-Routing – Architektur</h2>
+<pre><code>MXF/MP4-Datei
+ └── GStreamer uridecodebin
+       └── audiomixmatrix  ← Kanal-Routing per Preset
+             ├── interaudiosink channel=player1_pgm-stereo
+             ├── interaudiosink channel=player1_begl-stereo
+             └── interaudiosink channel=player1_pgm-51
+
+Master-Pipeline
+ ├── interaudiosrc channel=player1_pgm-stereo
+ │     └── input-selector (Player1/2/3 + SMPTE + Stille)
+ │           └── audiomixer  (+ Voiceover-Mix)
+ │                 └── pulsesink  [VU-Meter]
+ ├── interaudiosrc channel=player1_begl-stereo
+ │     └── input-selector → audiomixer → fakesink
+ └── interaudiosrc channel=player1_pgm-51
+       └── input-selector → audiomixer → fakesink</code></pre>
+
+<h3>VU-Meter</h3>
+<p>Das VU-Meter zeigt den Pegel jeder konfigurierten Audio-Gruppe in Echtzeit an. Es erscheint im Preview-Bereich wenn Preview aktiv ist. Die Daten werden über den SSE-Event-Stream als <code>audio-level</code>-Event übertragen.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="audio-presets">
+<h2>Audio-Presets &amp; Routing</h2>
+<p>Presets definieren, wie die Audiospuren der Mediendatei auf die Audio-Gruppen verteilt werden. Ein Preset kann optional einen <code>upmix</code>-Eintrag enthalten, um Stereo-Signal auf 5.1 hochzumixen.</p>
+
+<div class="callout callout-tip">
+  <strong>Tipp:</strong> Der <code>audioPreset</code>-Parameter in einem Playlist-Event überschreibt das globale Standard-Preset für diesen Clip. So kann jedes Event ein eigenes Routing haben.
+</div>
+
+<h3>Automatische Preset-Regeln (AudioRules)</h3>
+<p>In den Einstellungen können <em>Regeln</em> definiert werden, die automatisch das passende Preset anhand von Dateiname, Metadaten oder Kanal-Anzahl auswählen:</p>
+<pre><code>[
+  { <span class="key">"condition"</span>: <span class="str">"channels >= 6"</span>, <span class="key">"preset"</span>: <span class="str">"51-direkt"</span> },
+  { <span class="key">"condition"</span>: <span class="str">"filename contains 'DE'"</span>, <span class="key">"preset"</span>: <span class="str">"stereo"</span> }
+]</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="dst">
+<h2>Sommerzeit / Winterzeit (DST)</h2>
+
+<p>Der Server verwendet <strong>lokale Systemzeit</strong> für alle Fix-Zeit-Ereignisse und Timecode-Berechnungen.
+Die Zeitzone wird über die Linux-Systemkonfiguration gesetzt (<code>/etc/localtime</code> oder Umgebungsvariable <code>TZ</code>).
+Für 24/7-Betrieb ist eine korrekte Zeitzonenkonfiguration zwingend erforderlich.</p>
+
+<h3>Verhalten bei Zeitumstellung</h3>
+<table>
+  <tr><th>Szenario</th><th>Auswirkung</th><th>Empfehlung</th></tr>
+  <tr>
+    <td><strong>Sommerzeit-Beginn</strong><br>(„Uhr vor")<br>z.B. 2:00 → 3:00</td>
+    <td>Fix-Zeit-Events zwischen 2:00 und 3:00 existieren in dieser Nacht nicht in der lokalen Zeit.
+    Der Scheduler erkennt das und verschiebt den Event auf den nächsten Tag (gleiche Uhrzeit + 24 h).</td>
+    <td>Keine Fix-Zeit-Events zwischen 2:00 und 3:00 in der Nacht der Sommerzeit-Umstellung planen.</td>
+  </tr>
+  <tr>
+    <td><strong>Winterzeit-Beginn</strong><br>(„Uhr zurück")<br>z.B. 3:00 → 2:00</td>
+    <td>Fix-Zeit-Events zwischen 2:00 und 3:00 sind in dieser Nacht doppelt vorhanden (CEST und CET).
+    Der Scheduler löst beim <em>ersten</em> Vorkommen aus (Sommer-CEST). Das zweite Vorkommen wird
+    nicht noch einmal ausgelöst, da die Playlist bereits weitergelaufen ist.</td>
+    <td>Keine Fix-Zeit-Events zwischen 2:00 und 3:00 in der Nacht der Winterzeit-Umstellung planen.
+    Für den Übergangszeitraum Sendepausen oder manuelle Steuerung einplanen.</td>
+  </tr>
+  <tr>
+    <td><strong>Laufende Timelines</strong></td>
+    <td>Clip-Laufzeiten und Progress-Anzeigen basieren auf Millisekunden-Differenzen (monotone Uhr).
+    GStreamer verwendet intern <code>CLOCK_MONOTONIC</code>, sodass laufende Clips durch Zeitumstellung
+    nicht unterbrochen werden.</td>
+    <td>Keine Einschränkung — Clips laufen korrekt durch.</td>
+  </tr>
+</table>
+
+<h3>Konfiguration</h3>
+<pre><code># Zeitzone für den Server setzen (in systemd-Unit oder Shell):
+export TZ="Europe/Vienna"
+
+# Oder systemweit (Debian/Ubuntu):
+sudo timedatectl set-timezone Europe/Vienna
+
+# Zeitzone verifizieren:
+timedatectl | grep "Time zone"
+date</code></pre>
+
+<p class="note">Empfehlung für 24/7-Produktionsbetrieb: NTP-Synchronisation aktivieren (<code>timedatectl set-ntp true</code>) und die Systemzeit regelmäßig über <code>chrony</code> oder <code>systemd-timesyncd</code> synchronisieren.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="clock">
+<h2>Clock-Provider</h2>
+<p>Die Wahl des Clock-Providers beeinflusst die Synchronisation aller GStreamer-Pipelines. Die primäre Audio-Gruppe (erste in der Liste) steuert die Master-Clock.</p>
+
+<table>
+  <tr><th>Provider</th><th>Beschreibung</th><th>Empfehlung</th></tr>
+  <tr><td><code>audiotestsrc</code></td><td>Interne Pipeline-Clock (sehr stabil, keine Drift)</td><td>Standard</td></tr>
+  <tr><td><code>system</code></td><td>Linux-Systemclock (CLOCK_MONOTONIC)</td><td>Tests</td></tr>
+  <tr><td><code>ptp-generic</code></td><td>IEEE 1588 PTP über Netzwerk-Interface</td><td>SMPTE 2110</td></tr>
+  <tr><td><code>ptp-decklink</code></td><td>Blackmagic DeckLink Hardware-Clock via PTP</td><td>SDI + DeckLink</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="ograf-überblick">
+<h2>Grafik / oGraf</h2>
+<p>Die Grafik-Engine basiert auf dem <strong>EBU oGraf-Standard</strong> und rendert HTML5-Animationen via <strong>Puppeteer (Headless Chromium)</strong> zu RGBA-Pixeln, die als transparentes Layer über das Programmbild composited werden.</p>
+
+<h3>Architektur</h3>
+<pre><code>Browser-Tab (Puppeteer / Headless Chromium)
+  └── HTML5-Template wird geladen und animiert
+        └── Screenshot (PNG/RGBA) alle ~40ms
+              └── GStreamer appsrc
+                    └── Compositor (Alpha-Overlay)
+                          └── Programmbild</code></pre>
+
+<h3>Template-Typen</h3>
+<div class="card-grid">
+  <div class="card">
+    <h4>Klassische HTML-Templates</h4>
+    <p>Einzelne <code>.html</code>-Datei in <code>templates/grafik/</code>.<br>
+    Daten via <code>window.__GRAFIX_DATA__</code>.<br>
+    Kein spezielles Framework nötig.</p>
+  </div>
+  <div class="card">
+    <h4>oGraf-Templates (EBU-Standard)</h4>
+    <p>Ordner mit <code>.ograf.json</code> + <code>.js</code>.<br>
+    Custom Elements (Web Components).<br>
+    Multi-Step-Animationen, Daten-Update ohne Neustart.</p>
+  </div>
+</div>
+
+<h3>Enthaltene Templates</h3>
+<p>Pipeline Controller enthält eine umfangreiche Bibliothek fertiger oGraf-Templates:</p>
+<table>
+  <tr><th>Template</th><th>Beschreibung</th></tr>
+  <tr><td><code>lower-third</code></td><td>Klassische Bauchbinde (Name + Titel)</td></tr>
+  <tr><td><code>flat-design-lower-third</code></td><td>Modernes flaches Design</td></tr>
+  <tr><td><code>neon-lower-third</code></td><td>Neon-Glow-Effekt</td></tr>
+  <tr><td><code>multi-step-news</code></td><td>Mehrstufige Nachrichten-Bauchbinde</td></tr>
+  <tr><td><code>ticker</code></td><td>Lauftext-Ticker (unten)</td></tr>
+  <tr><td><code>scorebug</code></td><td>Sportergebnis-Einblendung</td></tr>
+  <tr><td><code>countdown</code></td><td>Countdown-Timer</td></tr>
+  <tr><td><code>weather-forecast</code></td><td>Wettervorhersage</td></tr>
+  <tr><td><code>breaking-news</code></td><td>Breaking-News-Banner</td></tr>
+  <tr><td><code>billboard</code></td><td>Vollbild-Bauchbinde / Schlagzeile</td></tr>
+  <tr><td><code>offline-screen</code></td><td>Offline/Be-Right-Back-Bild</td></tr>
+  <tr><td><code>analog-clock-top-left</code></td><td>Analoge Uhr</td></tr>
+  <tr><td><em>…und 25+ weitere</em></td><td></td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="ograf-templates">
+<h2>Eigene oGraf-Templates erstellen</h2>
+
+<h3>Verzeichnis-Struktur</h3>
+<pre><code>templates/grafik/
+  mein-template/
+    mein-template.ograf.json
+    mein-template.js</code></pre>
+
+<h3>Manifest (<code>.ograf.json</code>)</h3>
+<pre><code>{
+  <span class="key">"$schema"</span>: <span class="str">"https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json"</span>,
+  <span class="key">"id"</span>: <span class="str">"mein-template"</span>,
+  <span class="key">"name"</span>: <span class="str">"Mein Template"</span>,
+  <span class="key">"version"</span>: <span class="str">"1.0.0"</span>,
+  <span class="key">"main"</span>: <span class="str">"mein-template.js"</span>,
+  <span class="key">"supportsRealTime"</span>: <span class="kw">true</span>,
+  <span class="key">"schema"</span>: {
+    <span class="key">"type"</span>: <span class="str">"object"</span>,
+    <span class="key">"properties"</span>: {
+      <span class="key">"headline"</span>: { <span class="key">"type"</span>: <span class="str">"string"</span>, <span class="key">"title"</span>: <span class="str">"Überschrift"</span> },
+      <span class="key">"subline"</span>:  { <span class="key">"type"</span>: <span class="str">"string"</span>, <span class="key">"title"</span>: <span class="str">"Unterzeile"</span> }
+    }
+  }
+}</code></pre>
+
+<h3>Template-Script (<code>.js</code>)</h3>
+<pre><code>class MeinTemplate extends HTMLElement {
+  <span class="comment">// Daten laden und Template vorbereiten</span>
+  load(data)    { this._data = data; }
+
+  <span class="comment">// Auf Sendung / Step starten</span>
+  play({ goto = 0 } = {}) {
+    this.innerHTML = `&lt;div class="lt"&gt;${this._data.headline}&lt;/div&gt;`;
+    this.style.animation = <span class="str">'slide-in 0.5s ease'</span>;
+  }
+
+  <span class="comment">// Nächsten Animationsschritt</span>
+  continue() { <span class="comment">/* weitere Steps */</span> }
+
+  <span class="comment">// Ausblenden</span>
+  stop() { this.style.animation = <span class="str">'slide-out 0.5s ease'</span>; }
+
+  <span class="comment">// Daten live aktualisieren ohne Neustart</span>
+  update({ data }) { this._data = data; this.play(); }
+}
+
+customElements.define(<span class="str">'mein-template'</span>, MeinTemplate);</code></pre>
+
+<div class="callout callout-info">
+  <strong>Template-Server:</strong> Templates sind während des Betriebs unter
+  <code>http://localhost:3101/grafik/&lt;name&gt;</code> erreichbar.
+  Eigene Assets (Bilder, Fonts) können im Template-Ordner abgelegt werden.
+</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="ograf-lifecycle">
+<h2>oGraf-Lifecycle</h2>
+<table>
+  <tr><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>load(data)</code></td><td>Template initialisieren, Daten laden</td></tr>
+  <tr><td><code>play({ goto: N })</code></td><td>Schritt N starten (0-basiert, Standard: 0)</td></tr>
+  <tr><td><code>continue()</code></td><td>Nächsten Animationsschritt auslösen</td></tr>
+  <tr><td><code>stop()</code></td><td>Ausblenden / Ende-Animation starten</td></tr>
+  <tr><td><code>update({ data })</code></td><td>Daten live aktualisieren ohne Neustart</td></tr>
+</table>
+
+<h3>API-Aufrufe</h3>
+<pre><code><span class="comment"># Grafik einblenden</span>
+POST /api/grafik/show
+{ "template": "lower-third", "data": { "headline": "Max Mustermann" }, "layer": 1 }
+
+<span class="comment"># Nächsten Schritt</span>
+POST /api/grafik/continue  { "id": "&lt;grafik-id&gt;" }
+
+<span class="comment"># Ausblenden</span>
+POST /api/grafik/hide  { "id": "&lt;grafik-id&gt;" }
+
+<span class="comment"># Aktive Grafiken abfragen</span>
+GET /api/grafik/status</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="ograf-hotkeys">
+<h2>Grafik-Hotkeys</h2>
+<p>Häufig verwendete Templates können als Ein-Klick-Hotkeys gespeichert werden.</p>
+<ol>
+  <li>UI → Grafik-Panel → <strong>＋ Hotkey hinzufügen</strong></li>
+  <li>Label, Template und Daten (JSON) eingeben</li>
+  <li><strong>Speichern</strong> → Gespeichert in <code>grafik_hotkeys.json</code></li>
+  <li>Ein Klick auf den Hotkey-Button blendet die Grafik sofort ein</li>
+</ol>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="ograf-playlist">
+<h2>Grafik als Playlist-Event</h2>
+<p>Grafiken können als <em>Children</em> an Clip-Events angehängt werden und werden automatisch zur definierten Zeit ein- und ausgeblendet.</p>
+<pre><code>{
+  <span class="key">"source"</span>: <span class="str">"player"</span>,
+  <span class="key">"file"</span>: <span class="str">"interview.mxf"</span>,
+  <span class="key">"children"</span>: [
+    {
+      <span class="key">"source"</span>: <span class="str">"grafik"</span>,
+      <span class="key">"grafik"</span>: {
+        <span class="key">"template"</span>: <span class="str">"lower-third"</span>,
+        <span class="key">"data"</span>: { <span class="key">"headline"</span>: <span class="str">"Dr. Anna Müller"</span>, <span class="key">"subline"</span>: <span class="str">"Universität Wien"</span> },
+        <span class="key">"delay"</span>: <span class="num">5</span>,
+        <span class="key">"duration"</span>: <span class="num">10</span>
+      }
+    }
+  ]
+}</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="ograf-playlist-vars">
+<h2>oGraf Playlist-Variablen</h2>
+<p>In <strong>allen Datenfeldern</strong> von Grafik-Child-Events (Text, Zahl, Integer) können Playlist-Variablen verwendet werden. Der Wert wird exakt zum Zeitpunkt der Grafik-Einblendung aus dem aktuellen Playlist-Zustand aufgelöst — inklusive korrekter Restzeit des laufenden Clips.</p>
+
+<h3>Vollständige Syntax</h3>
+<pre><code>{{KONTEXT:FELD}}
+{{KONTEXT[FILTER]:FELD}}
+{{KONTEXT[FILTER]:FELD|FORMAT}}</code></pre>
+
+<h3>Kontext</h3>
+<table>
+  <tr><th>Kontext</th><th>Bedeutung</th></tr>
+  <tr><td><code>current</code></td><td>Das aktuell laufende On-Air-Event</td></tr>
+  <tr><td><code>next</code></td><td>Das 1. nächste Playlist-Event (skippt Meta-Events, Done, Skipped)</td></tr>
+  <tr><td><code>next2</code>, <code>next3</code>, …</td><td>2., 3., … nächstes Event</td></tr>
+  <tr><td><code>prev</code></td><td>Das vorherige Event</td></tr>
+  <tr><td><code>prev2</code>, <code>prev3</code>, …</td><td>2., 3., … vorheriges Event</td></tr>
+</table>
+
+<h3>Filter (optional)</h3>
+<p>Überspringt Events bis die Bedingung erfüllt ist:</p>
+<table>
+  <tr><th>Filter</th><th>Beispiel</th><th>Bedeutung</th></tr>
+  <tr><td><code>class(ID)</code></td><td><code>next[class(movie)]:title</code></td><td>Nächstes Event mit Klassifikation „movie"</td></tr>
+  <tr><td><code>title(Substr)</code></td><td><code>next[title(Nachrichten)]:starttime</code></td><td>Titel enthält „Nachrichten" (case-insensitiv)</td></tr>
+  <tr><td><code>source(ID)</code></td><td><code>next[source(live1)]:title</code></td><td>Quelle ist „live1"</td></tr>
+</table>
+
+<h3>Felder</h3>
+<table>
+  <tr><th>Feld</th><th>Typ</th><th>Wert</th></tr>
+  <tr><td><code>title</code></td><td>string</td><td>Event-Titel oder Dateiname ohne Extension</td></tr>
+  <tr><td><code>file</code></td><td>string</td><td>Dateiname (vollständig)</td></tr>
+  <tr><td><code>source</code></td><td>string</td><td>Quell-ID: <code>player</code>, <code>live</code>, <code>live1</code>, …</td></tr>
+  <tr><td><code>classification</code></td><td>string</td><td>Klassifikations-ID: <code>movie</code>, <code>news</code>, …</td></tr>
+  <tr><td><code>classifcolor</code></td><td>string</td><td>Farbe als <code>#rrggbb</code></td></tr>
+  <tr><td><code>classificon</code></td><td>string</td><td>Icon/Emoji der Klassifikation</td></tr>
+  <tr><td><code>duration</code></td><td>string</td><td>EOM-Wert oder <code>_clipDur</code></td></tr>
+  <tr><td><code>starttime</code></td><td>string/number</td><td>Geplante Startzeit — <strong>Format wählbar</strong> (s. unten)</td></tr>
+</table>
+
+<h3>Formate für <code>starttime</code></h3>
+<p>Das optionale <code>|FORMAT</code>-Suffix steuert Ausgabeformat und Datentyp. Numerische Formate liefern einen <strong>JS-Number</strong> (kein String) — ideal für Template-Felder vom Typ <code>integer</code>/<code>number</code>.</p>
+
+<table>
+  <tr><th>Format</th><th>Beispiel-Ausgabe</th><th>Verwendung</th></tr>
+  <tr><td><em>(kein)</em></td><td><code>14:30:00:00</code></td><td>Timecode HH:MM:SS:FF (Standard)</td></tr>
+  <tr><td><code>HH:MM:SS</code></td><td><code>14:30:00</code></td><td>Uhrzeit ohne Frames</td></tr>
+  <tr><td><code>HH:MM</code></td><td><code>14:30</code></td><td>Nur Stunden und Minuten</td></tr>
+  <tr><td><code>unix</code></td><td><code>1748700000</code> (Number)</td><td>Unix-Timestamp in Sekunden</td></tr>
+  <tr><td><code>unixms</code></td><td><code>1748700000000</code> (Number)</td><td>Unix-Timestamp in Millisekunden — für <code>targetTime</code>-Felder</td></tr>
+  <tr><td><code>countdown</code></td><td><code>4832</code> (Number)</td><td>Sekunden bis Eventstart — für <code>duration</code>-Felder</td></tr>
+  <tr><td><code>countdownms</code></td><td><code>4832000</code> (Number)</td><td>Millisekunden bis Eventstart</td></tr>
+  <tr><td><code>countdown:HH:MM:SS</code></td><td><code>01:20:32</code></td><td>Formatierte Restzeit bis Start</td></tr>
+  <tr><td><code>countdown:HH:MM</code></td><td><code>01:20</code></td><td>Restzeit ohne Sekunden</td></tr>
+</table>
+
+<div class="callout callout-info">
+  <strong>Countdown-Genauigkeit:</strong> Die verbleibende Zeit bis zum Eventstart wird aus GStreamer-Position + summierten Clip-Dauern berechnet. Bei Fixzeiten (<code>startType: fixtime</code>) wird die exakte Wanduhrzeit verwendet — diese sind am präzisesten.
+</div>
+
+<h3>Countdown-Template: welches Format wählen?</h3>
+<table>
+  <tr><th>Template-Feld</th><th>Template-Modus</th><th>Variable</th></tr>
+  <tr><td><code>targetTime</code> (Unix ms)</td><td><code>mode: timestamp</code></td><td><code>{{next[class(movie)]:starttime|unixms}}</code> ← <strong>empfohlen</strong> (Template rechnet selbst)</td></tr>
+  <tr><td><code>duration</code> (Sekunden)</td><td><code>mode: duration</code></td><td><code>{{next[class(movie)]:starttime|countdown}}</code></td></tr>
+</table>
+
+<h3>Beispiele</h3>
+<pre><code><span class="comment">// "What's Next": Titel des nächsten Films</span>
+<span class="key">"title"</span>: <span class="str">"{{next[class(movie)]:title}}"</span>
+
+<span class="comment">// Countdown bis nächste Nachrichten (Unix-ms für Timestamp-Modus)</span>
+<span class="key">"targetTime"</span>: <span class="str">"{{next[title(Nachrichten)]:starttime|unixms}}"</span>
+
+<span class="comment">// Countdown als Dauer in Sekunden</span>
+<span class="key">"duration"</span>: <span class="str">"{{next[class(movie)]:starttime|countdown}}"</span>
+
+<span class="comment">// Klassifikationsfarbe für dynamisches Theming</span>
+<span class="key">"accent_color"</span>: <span class="str">"{{current:classifcolor}}"</span>
+
+<span class="comment">// 2. nächster Film (übernächst nach Promotion etc.)</span>
+<span class="key">"next_title"</span>: <span class="str">"{{next2[class(movie)]:title}}"</span>
+
+<span class="comment">// Startzeit als lesbarer String</span>
+<span class="key">"start_label"</span>: <span class="str">"{{next[class(movie)]:starttime|HH:MM}}"</span></code></pre>
+
+<h3>Typkonvertierung</h3>
+<p>Wenn der <em>gesamte Feldwert</em> exakt eine Variable ist (kein Mischtext) und das Ergebnis eine reine Zahl ist, wird ein <strong>JS-Number</strong> übergeben — kein String. Damit werden Template-Felder vom Typ <code>integer</code> oder <code>number</code> korrekt befüllt.</p>
+<pre><code><span class="comment">// Feldwert im Editor:</span>   "{{next:starttime|unixms}}"
+<span class="comment">// Template bekommt:</span>     1748700000000   <span class="comment">← JS Number, nicht String</span>
+
+<span class="comment">// Gemischter Text → bleibt String:</span>
+<span class="comment">// Feldwert:</span>  "Start: {{next:starttime|HH:MM}}"
+<span class="comment">// Ergebnis:</span>  "Start: 14:30"   <span class="comment">← String</span></code></pre>
+
+<h3>UI: Interaktiver Variable-Builder</h3>
+<p>Der <strong><code>{{…}}</code>-Button</strong> erscheint neben allen Text-, Zahl- und Integer-Feldern — im Event-Editor (Child Events), in „Benutzerdefinierte Daten" und im Grafik-Panel (linke Seite).</p>
+<table>
+  <tr><th>Schritt</th><th>Beschreibung</th></tr>
+  <tr><td><strong>Kontext</strong></td><td><code>current</code> / <code>next</code> / <code>prev</code></td></tr>
+  <tr><td><strong>Wievieltes</strong></td><td>1.–4. (ergibt <code>next2</code>, <code>next3</code>, …)</td></tr>
+  <tr><td><strong>Filter</strong></td><td>Kein Filter / Nach Classification (Dropdown mit echten Werten) / Nach Titel / Nach Quelle</td></tr>
+  <tr><td><strong>Feld</strong></td><td>Auswahl aller verfügbaren Felder</td></tr>
+  <tr><td><strong>Format</strong></td><td>Erscheint automatisch wenn Feld = <em>Startzeit</em>: Uhrzeit-Formate und Countdown-Formate wählbar</td></tr>
+  <tr><td><strong>Live-Vorschau</strong></td><td>Zeigt sofort die fertige <code>{{…}}</code>-Syntax — <strong>← Einfügen</strong> übernimmt sie ins Feld</td></tr>
+</table>
+<p style="margin-top:.6rem">Eigene Schlüssel die nicht im Template-Schema definiert sind: <strong>＋ Feld</strong> im Abschnitt „Benutzerdefinierte Daten" anlegen.</p>
+
+<div class="callout callout-info">
+  <strong>Auflösungszeitpunkt:</strong> Variablen werden zum Einblende-Zeitpunkt aufgelöst — nach dem konfigurierten <em>Delay</em>. Ein Child-Event das 30s nach Clip-Start erscheint, berechnet die verbleibende Zeit korrekt ab dem Einblendemoment.
+</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="bibliothek">
+<h2>Medien-Bibliothek</h2>
+
+<h3>Unterstützte Formate</h3>
+<table>
+  <tr><th>Format</th><th>Beschreibung</th></tr>
+  <tr><td>MXF (OP1a, OP-Atom)</td><td>Professionelles Broadcast-Format, multi-track Audio</td></tr>
+  <tr><td>MP4 (H.264/H.265)</td><td>Standard-Webformat</td></tr>
+  <tr><td>MOV (QuickTime)</td><td>Apple-Format, auch ProRes</td></tr>
+  <tr><td>TS / MPEG</td><td>Transport-Stream</td></tr>
+  <tr><td>Alle weiteren</td><td>Alle von GStreamer <code>uridecodebin</code> unterstützten Formate</td></tr>
+</table>
+
+<h3>Analyse-Reihenfolge</h3>
+<p>Beim Einlesen der Bibliothek analysiert Pipeline Controller Dateien in dieser Priorität:</p>
+<ol>
+  <li><code>gst-discoverer-1.0</code> (GStreamer) – genaueste Analyse</li>
+  <li><code>ffprobe</code> (FFmpeg) – breite Format-Unterstützung</li>
+  <li><code>gst-launch-1.0 -v</code> – Fallback via Caps-Parsing</li>
+</ol>
+
+<h3>Medien-Ordner konfigurieren</h3>
+<pre><code><span class="comment"># Standard: ./media/ relativ zum Startverzeichnis</span>
+MEDIA_DIR=/mnt/san/broadcast/media node server.js</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="som-eom">
+<h2>SOM / EOM (Start- und End-of-Material)</h2>
+<p>In der Bibliotheks-Ansicht kann pro Clip ein Start- und End-Timecode definiert werden. Der Clip wird dann nur in diesem Bereich abgespielt.</p>
+<table>
+  <tr><th>Parameter</th><th>Format</th><th>Beschreibung</th></tr>
+  <tr><td>SOM</td><td><code>HH:MM:SS:FF</code></td><td>Erster Frame der Ausspielung</td></tr>
+  <tr><td>EOM</td><td><code>HH:MM:SS:FF</code></td><td>Letzter Frame der Ausspielung (leer = Dateiende)</td></tr>
+</table>
+<div class="callout callout-info">
+  <strong>Frame-genaue Präzision:</strong> SOM/EOM werden frame-genau auf Basis der erkannten Framerate berechnet.
+  Timecodes werden mit <code>HH:MM:SS:FF</code> für interlaced (field-basiert bei 50i/60i) und
+  <code>HH:MM:SS.fraction</code> für progressive Formate angezeigt.
+</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="plugin-system">
+<h2>Plugin-System</h2>
+
+<p>Plugins laufen in isolierten <strong>Node.js Worker-Threads</strong>. Ein Plugin-Absturz hat <em>keine Auswirkung</em> auf die laufende Pipeline oder das Playout.</p>
+
+<h3>Plugin-Verwaltung (UI)</h3>
+<ol>
+  <li>UI → <strong>Einstellungen → Plugins</strong></li>
+  <li>Plugin aus der Liste auswählen</li>
+  <li>Plugin <strong>aktivieren / deaktivieren</strong></li>
+  <li>Konfiguration ausfüllen und <strong>Speichern</strong></li>
+</ol>
+<p>Konfigurationen werden in <code>plugins.json</code> persistent gespeichert.</p>
+
+<h3>Plugin-Verzeichnis</h3>
+<pre><code>plugins/
+  broadcast-controller/
+    index.js          <span class="comment"># Plugin-Code</span>
+  file-transfer-manager/
+    index.js</code></pre>
+
+<h3>Plugin-Events (abonnierbar)</h3>
+<table>
+  <tr><th>Event</th><th>Beschreibung</th></tr>
+  <tr><td><code>playlist:updated</code></td><td>Playlist wurde geändert</td></tr>
+  <tr><td><code>playlist:playing</code></td><td>Nächstes Event ist On-Air</td></tr>
+  <tr><td><code>player:cued</code></td><td>Player hat Clip vorgeladen (~5s vor On-Air)</td></tr>
+  <tr><td><code>player:stopped</code></td><td>Player wurde gestoppt</td></tr>
+  <tr><td><code>live:precue</code></td><td>Live-Event in der Playlist kurz vor On-Air</td></tr>
+  <tr><td><code>system:shutdown</code></td><td>Server wird heruntergefahren (Cleanup)</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="plugin-broadcast">
+<h2>Plugin: Broadcast Controller</h2>
+<span class="badge badge-blue">v2.0.0</span>
+<span class="badge badge-green">Open Source (MIT)</span>
+
+<p>Ermöglicht die automatische Steuerung externer Broadcast-Router und Geräte wenn Ereignisse in der Playlist eintreten.</p>
+
+<h3>Unterstützte Protokolle</h3>
+<table>
+  <tr><th>Protokoll</th><th>Beschreibung</th><th>Standard-Port</th></tr>
+  <tr><td>SW-P-08</td><td>Binäres Router-Protokoll (Nevion IPATH, EVS Cerebrum, Leitch/GVG)</td><td>8079</td></tr>
+  <tr><td>Cerebrum CERECONTROL</td><td>EVS Cerebrum Text-TCP (<code>TAKE router dst src</code>)</td><td>9735</td></tr>
+  <tr><td>HTTP/HTTPS</td><td>JSON-Webhook (POST mit Bearer-Token)</td><td>80/443</td></tr>
+  <tr><td>TCP Generisch</td><td>Frei konfigurierbarer Text-TCP mit Template-Variablen</td><td>beliebig</td></tr>
+</table>
+
+<h3>Meldezeitpunkte</h3>
+<table>
+  <tr><th>Zeitpunkt</th><th>Beschreibung</th></tr>
+  <tr><td>Pre-Cue</td><td>~5 Sekunden vor On-Air (Clip wird geladen) → Router auf Stand-by-Eingang</td></tr>
+  <tr><td>On-Air</td><td>Tatsächlicher Sendebeginn → Router auf PGM-Ausgang</td></tr>
+</table>
+
+<h3>Konfiguration</h3>
+
+<h4>SW-P-08 Konfiguration</h4>
+<div class="schema-field">
+  <div class="schema-key">protocol</div>
+  <div class="schema-type">select</div>
+  <div class="schema-desc">Protokoll auswählen: <code>sw-p-08</code></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">host</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">IP-Adresse oder Hostname des Routers. <span class="schema-default">Standard: 192.168.1.100</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">port</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">TCP-Port des SW-P-08-Servers. <span class="schema-default">Standard: 8079</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">swp08Matrix</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Matrix/Level: 0 = Video, 1 = Audio, 255 = alle Level gleichzeitig. <span class="schema-default">Standard: 0</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">swp08SourceMap</div>
+  <div class="schema-type">JSON</div>
+  <div class="schema-desc">Quellen-Tabelle: Signal-Name → Router-Source-Port-Nummer.<br>
+    <code>{"FeedWien": 1, "CAM_Studio": 2, "VTR_1": 3}</code></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">swp08DestMap</div>
+  <div class="schema-type">JSON</div>
+  <div class="schema-desc">Ziel-Tabelle: Input-ID → Router-Destination-Port-Nummer.<br>
+    <code>{"DL_IN_1": 1, "DL_IN_2": 2}</code></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">swp08PgmDest</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">PGM-Destination für On-Air: Port-Name oder -Nummer (z.B. <code>"PGM"</code> oder <code>0</code>). Leer = keine On-Air-Route.</div>
+</div>
+
+<h4>TCP Generisch – Template-Variablen</h4>
+<table>
+  <tr><th>Variable</th><th>Beschreibung</th></tr>
+  <tr><td><code>{{source}}</code></td><td>Event-Typ: <code>player</code>, <code>live</code>, <code>image</code></td></tr>
+  <tr><td><code>{{file}}</code></td><td>Dateiname des Clips</td></tr>
+  <tr><td><code>{{title}}</code></td><td>Titel des Events (falls vorhanden)</td></tr>
+  <tr><td><code>{{timecode}}</code></td><td>Aktueller Timecode (HH:MM:SS:FF)</td></tr>
+  <tr><td><code>{{slotId}}</code></td><td>Player-Slot: <code>player1</code>, <code>player2</code></td></tr>
+  <tr><td><code>{{upstreamSource}}</code></td><td>Live-Quellen-Signal-Name</td></tr>
+  <tr><td><code>{{inputId}}</code></td><td>Decklink-Eingangs-ID</td></tr>
+</table>
+
+<h3>Kompatible Geräte</h3>
+<ul>
+  <li><strong>Nevion IPATH</strong> (SW-P-08)</li>
+  <li><strong>EVS Cerebrum</strong> (SW-P-08 oder CERECONTROL)</li>
+  <li><strong>Leitch/GVG-Router</strong> (SW-P-08)</li>
+  <li>Jedes Gerät mit HTTP-Webhook oder TCP-Interface</li>
+</ul>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="plugin-ftm">
+<h2>Plugin: File Transfer Manager</h2>
+<span class="badge badge-blue">v1.3.0</span>
+<span class="badge badge-green">Standard: aktiv</span>
+
+<p>Überträgt Mediendateien <em>automatisch</em> von einem Remote-Speicher auf die lokale Festplatte, bevor sie in der Playlist benötigt werden. Verwaltet auch das Löschen abgespielter Dateien (Housekeeping). <strong>Das FTM-Plugin ist per Default aktiviert</strong> – alle anderen Plugins sind standardmäßig deaktiviert.</p>
+
+<h3>Unterstützte Protokolle</h3>
+<table>
+  <tr><th>Protokoll</th><th>Beschreibung</th></tr>
+  <tr><td>FTP</td><td>Normales FTP (basic-ftp)</td></tr>
+  <tr><td>FTPS</td><td>FTP mit explizitem TLS</td></tr>
+  <tr><td>Lokaler Pfad</td><td>Gemountetes Netzlaufwerk (NFS, SMB, CIFS)</td></tr>
+</table>
+
+<h3>Konfiguration</h3>
+<div class="schema-field">
+  <div class="schema-key">protocol</div>
+  <div class="schema-type">select</div>
+  <div class="schema-desc"><code>ftp</code>, <code>ftps</code>, <code>local</code> – für NFS/SMB-Mounts <code>local</code> verwenden</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">host / port</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">FTP-Server-Adresse und Port (nur bei FTP/FTPS)</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">sourcePaths</div>
+  <div class="schema-type">dirlist</div>
+  <div class="schema-desc">Quell-Verzeichnisse (bei <code>local</code>), von wo Dateien kopiert werden. Beim Installer wird automatisch auf <code>&lt;install-dir&gt;/recordings</code> gesetzt. Mehrere Verzeichnisse, eines pro Zeile.</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">destDir</div>
+  <div class="schema-type">dirpicker</div>
+  <div class="schema-desc">Ziel-Verzeichnis = Media-Ordner. Beim Installer wird automatisch auf <code>&lt;install-dir&gt;/media</code> gesetzt. Leer lassen = automatisch aus Systemkonfiguration (MEDIA_DIR).</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">preFetchMinutes</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Transfer starten wenn Event innerhalb dieser Zeit in der Playlist erscheint. <span class="schema-default">Standard: 60 min</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">deleteAfterMinutes</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Lokale Datei löschen wenn sie X Minuten nach letzter Nutzung nicht mehr in der Playlist ist. <span class="schema-default">Standard: 120 min</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">maxCacheGB</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Maximale Cache-Größe in GB. <span class="schema-default">Standard: 50 GB</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">concurrentTransfers</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Anzahl paralleler Datei-Transfers (1–8). <span class="schema-default">Standard: 2</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">fileExtensions</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">Komma-getrennte Liste der zu verwaltenden Datei-Endungen. <span class="schema-default">Standard: mxf,mov,mp4,ts,mpeg,mpg,mkv</span></div>
+</div>
+
+<h3>Workflow</h3>
+<ol>
+  <li>Playlist wird geladen → FTM scannt alle Datei-Events</li>
+  <li>Dateien die bereits lokal vorhanden sind (sourcePaths oder destDir) werden sofort als verfügbar markiert — kein unnötiger Transfer</li>
+  <li>Fehlende Dateien: innerhalb <code>preFetchMinutes</code> vor Sendebeginn startet der Transfer</li>
+  <li>Nach dem Transfer: Playlist-Event wird automatisch neu validiert (Status-Anzeige wechselt von „fehlend" auf vorhanden)</li>
+  <li>Nach <code>deleteAfterMinutes</code>: nicht mehr benötigte Dateien werden gelöscht</li>
+</ol>
+
+<div class="callout callout-warn">
+  <strong>Wichtig:</strong> Das Plugin ersetzt Dateipfade transparent. Die Playlist-Einträge behalten ihre Original-Bezeichnungen – FTM löst sie intern auf den lokalen Pfad auf.
+</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="plugin-snmp">
+<h2>Plugin: SNMP Monitor</h2>
+<span class="badge badge-blue">v1.0.0</span>
+<span class="badge badge-yellow">Standard: deaktiviert</span>
+
+<p>Überwacht Broadcast-Geräte (Encoder, Router, Switches) via SNMP und sendet Status-Informationen als SSE-Events an die Web-UI. Unterstützt SNMP v1, v2c und v3.</p>
+
+<h3>Konfiguration</h3>
+<div class="schema-field">
+  <div class="schema-key">host</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">IP-Adresse oder Hostname des SNMP-Geräts</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">community</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">SNMP Community-String (v1/v2c). <span class="schema-default">Standard: public</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">oids</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">Komma-getrennte OID-Liste, die abgefragt werden soll. Z.B. <code>1.3.6.1.2.1.1.1.0,1.3.6.1.2.1.1.5.0</code></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">pollIntervalSec</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Abfrage-Intervall in Sekunden. <span class="schema-default">Standard: 30</span></div>
+</div>
+
+<p>Plugin im Plugin-Manager aktivieren: ⚙ Einstellungen → Plugins → SNMP Monitor → Aktivieren.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="plugin-subtitle">
+<h2>Plugin: Subtitle FAB</h2>
+<span class="badge badge-blue">v1.1.0</span>
+<span class="badge badge-yellow">Standard: deaktiviert</span>
+
+<p>Verbindet Pipeline Controller mit einem <strong>FAB Subtitle Server</strong> für Live-Untertitel-Steuerung. Das Plugin empfängt Playlist-Events und sendet entsprechende Steuerbefehle an den Subtitle-Server (Start, Stop, Clip-Wechsel).</p>
+
+<h3>Konfiguration</h3>
+<div class="schema-field">
+  <div class="schema-key">host</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">IP-Adresse des FAB Subtitle Servers</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">port</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">TCP-Port des FAB Servers. <span class="schema-default">Standard: 8080</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">enabled</div>
+  <div class="schema-type">boolean</div>
+  <div class="schema-desc">Verbindung aktiv. Das Plugin verbindet sich beim Start automatisch.</div>
+</div>
+
+<p>Plugin im Plugin-Manager aktivieren: ⚙ Einstellungen → Plugins → Subtitle FAB → Aktivieren.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="plugin-marina">
+<h2>Plugin: Marina Sync</h2>
+<span class="badge badge-blue">v1.0.0</span>
+<span class="badge badge-green">Open Source (MIT)</span>
+
+<p>Synchronises the Pipeline Controller playlist with a <strong>Pebble Beach Marina</strong> playout system by monitoring a shared watchfolder for Marina Channel-Manager export files (<code>.mpl</code>). Every time Marina writes a new schedule file the plugin parses the XML, converts the events, and loads the result as the active Pipeline Controller playlist — with no manual intervention required.</p>
+
+<div class="callout callout-info">
+  <strong>Requirement:</strong> <code>python3</code> must be available in <code>PATH</code>. The plugin uses a Python subprocess to parse the Marina XML.
+</div>
+
+<h3>How it Works</h3>
+<ol>
+  <li>On startup the plugin scans the watchfolder for the newest <code>.mpl</code> file matching the configured Channel ID.</li>
+  <li>It registers a filesystem watcher (<code>inotify</code> on Linux) for instant change detection, with a configurable polling fallback for network drives (NFS / SMB).</li>
+  <li>When a new or modified file is detected a 500 ms debounce fires, then the file is read once and closed immediately — no advisory locks or file descriptors are held.</li>
+  <li>The XML is parsed and mapped to Pipeline Controller events (see <a href="#marina-event-mapping">Event Mapping</a> below).</li>
+  <li>If <strong>On-Air Sync</strong> is enabled, the plugin checks Marina's scheduling state to determine which event is currently running and at what offset, then starts playback mid-playlist at the correct position.</li>
+  <li>The resulting playlist is loaded into Pipeline Controller. If <strong>Auto-Start</strong> is enabled and no playlist is currently running, playback begins immediately.</li>
+</ol>
+
+<h3>Configuration</h3>
+<div class="schema-field">
+  <div class="schema-key">watchFolder</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">Path to the directory where Marina writes <code>.mpl</code> files. Accepts absolute paths and paths relative to the application directory. Windows-style backslashes are converted automatically.<br>
+    Example: <code>/opt/marina/export</code> or <code>marina\</code></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">channelId</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">Marina Channel ID used to filter files in the watchfolder. The plugin looks for filenames containing <code>_&lt;channelId&gt;_</code>, e.g. <code>Autosaved_5024_….mpl</code>.<br>
+    Leave empty to use the newest <code>.mpl</code> file regardless of channel. <span class="schema-default">Default: (empty)</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">autoStart</div>
+  <div class="schema-type">boolean</div>
+  <div class="schema-desc">Automatically start the playlist when a new schedule is loaded and no playlist is currently running. <span class="schema-default">Default: false</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">onAirSync</div>
+  <div class="schema-type">boolean</div>
+  <div class="schema-desc">Calculate the on-air entry point from Marina's scheduling state (<code>state="Running"</code>) and start playback at the correct event and SOM offset. Requires <code>autoStart</code> to be effective. <span class="schema-default">Default: true</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">pollIntervalSec</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Polling interval in seconds as a fallback when <code>inotify</code> is not available (e.g. on NFS mounts). Minimum: 5 s. <span class="schema-default">Default: 30</span></div>
+</div>
+
+<h3 id="marina-event-mapping">Event Mapping</h3>
+<p>Marina event types are converted to Pipeline Controller playlist events as follows:</p>
+<table>
+  <tr><th>Marina Type</th><th>Pipeline Controller Event</th><th>Notes</th></tr>
+  <tr><td><code>PrimaryVideo</code></td><td><code>player</code></td><td>Clips played from media library. EOM from Marina duration; SOM from On-Air Sync offset.</td></tr>
+  <tr><td><code>Live</code></td><td><code>live</code></td><td>Live source routed via Broadcast Controller. Duration from Marina schedule.</td></tr>
+  <tr><td><code>Comment</code></td><td><code>comment</code></td><td>Non-playable separator event, shown in playlist UI.</td></tr>
+  <tr><td><code>PlaylistStart</code></td><td><code>block_start</code></td><td>Named block marker. Fixed start time if Marina has a <code>schedStartTime</code>.</td></tr>
+  <tr><td><code>PlaylistEnd</code></td><td><code>block_end</code></td><td>Block end marker.</td></tr>
+  <tr><td><em>Disabled events</em></td><td>—</td><td>Events with <code>enabled="false"</code> are skipped entirely.</td></tr>
+</table>
+
+<h4>Child Event Mapping</h4>
+<table>
+  <tr><th>Marina Child Type</th><th>Pipeline Controller Child</th><th>Notes</th></tr>
+  <tr><td><code>VIZ</code></td><td><code>grafik</code></td><td>Template name, data fields, and timing (+ParentStart / -ParentEnd) are preserved.</td></tr>
+  <tr><td><code>LogoHD</code></td><td><code>branding</code></td><td>Non-transparent logos are set as the parent event's channel branding.</td></tr>
+  <tr><td><code>AudioMixer-ALL</code></td><td><code>voiceover</code></td><td>Audio mix / voiceover file with preset and timing. Marina presets beginning with <code>ST</code> map to the internal <code>ST</code> (stereo, no ducking) preset.</td></tr>
+</table>
+
+<h3>On-Air Sync</h3>
+<p>When Marina is already playing (e.g. after a Pipeline Controller restart), the plugin can calculate the correct entry point so playback picks up where Marina is now.</p>
+<p>The algorithm (priority order):</p>
+<ol>
+  <li>Find the first event with <code>state="Running"</code> in the Marina XML.</li>
+  <li>If no Running event is found, find the event whose <code>schedStartTime … schedEndTime</code> window contains the current local time.</li>
+  <li>Compute a SOM offset: <em>(current time − schedStartTime)</em> in seconds.</li>
+  <li>Pass the resolved <em>start index</em> and <em>SOM offset</em> to Pipeline Controller when loading the playlist.</li>
+</ol>
+
+<div class="callout callout-tip">
+  <strong>Tip:</strong> Set <strong>onAirSync = true</strong> and <strong>autoStart = true</strong> to make Pipeline Controller automatically re-join an in-progress Marina schedule after a restart with no operator action required.
+</div>
+
+<h3>Plugin Status</h3>
+<table>
+  <tr><th>Status</th><th>Meaning</th></tr>
+  <tr><td><span class="badge badge-blue">watching</span></td><td>Watchfolder is active and monitored for changes.</td></tr>
+  <tr><td><span class="badge badge-blue">loading</span></td><td>A file change was detected and is being parsed.</td></tr>
+  <tr><td><span class="badge badge-green">ok</span></td><td>Last import succeeded. Shows event count, filename, and sync event index.</td></tr>
+  <tr><td><span class="badge badge-yellow">warn</span></td><td>File parsed but contained no enabled events, or <code>inotify</code> fell back to polling.</td></tr>
+  <tr><td><span class="badge badge-red">error</span></td><td>Watchfolder not found, Python parse error, or file read failure.</td></tr>
+  <tr><td><span class="badge badge-yellow">idle</span></td><td>Watchfolder not configured.</td></tr>
+</table>
+
+<h3>File Naming Convention</h3>
+<p>Marina Channel Manager typically names autosave files as:</p>
+<pre><code>Autosaved_&lt;ChannelID&gt;_&lt;Date&gt;_&lt;Time&gt;.mpl
+<span class="comment"># Example: Autosaved_5024_16-20-01-09_18-05-2026.mpl</span></code></pre>
+<p>Set <code>channelId</code> to the numeric part (e.g. <code>5024</code>) so the plugin ignores files from other channels sharing the same watchfolder.</p>
+
+<h3>Network Drive Considerations</h3>
+<p><code>inotify</code> events are not always delivered reliably over NFS or SMB mounts. The polling fallback (<code>pollIntervalSec</code>) ensures the plugin still detects changes even when filesystem events are missed. Set a lower poll interval (e.g. <code>10</code>) for faster sync on network drives.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="plugin-entwicklung">
+<h2>Eigene Plugins entwickeln</h2>
+
+<h3>Minimalstruktur</h3>
+<pre><code>plugins/
+  mein-plugin/
+    index.js</code></pre>
+
+<h3>Plugin-Skelett</h3>
+<pre><code><span class="str">'use strict'</span>;
+
+exports.meta = {
+  id:          <span class="str">'mein-plugin'</span>,
+  name:        <span class="str">'Mein Plugin'</span>,
+  version:     <span class="str">'1.0.0'</span>,
+  description: <span class="str">'Beschreibung des Plugins'</span>,
+  hasStatus:   <span class="kw">true</span>,
+
+  <span class="comment">// UI-Konfigurations-Schema</span>
+  schema: [
+    { <span class="key">key</span>: <span class="str">'host'</span>, <span class="key">label</span>: <span class="str">'Host'</span>, <span class="key">type</span>: <span class="str">'string'</span>, <span class="key">default</span>: <span class="str">''</span> },
+    { <span class="key">key</span>: <span class="str">'port'</span>, <span class="key">label</span>: <span class="str">'Port'</span>, <span class="key">type</span>: <span class="str">'number'</span>, <span class="key">default</span>: <span class="num">1234</span> },
+  ],
+
+  <span class="comment">// Abonnierte System-Events</span>
+  subscribes: [<span class="str">'playlist:playing'</span>, <span class="str">'player:cued'</span>, <span class="str">'system:shutdown'</span>],
+};
+
+<span class="kw">let</span> _api;
+
+exports.init = <span class="kw">async function</span>(api, config) {
+  _api = api;
+  api.log(<span class="str">'info'</span>, <span class="str">`Mein Plugin gestartet: ${config.host}:${config.port}`</span>);
+  api.setStatus(<span class="str">'running'</span>, { connected: <span class="kw">true</span> });
+};
+
+exports.onEvent = <span class="kw">async function</span>(name, data) {
+  <span class="kw">if</span> (name === <span class="str">'playlist:playing'</span>) {
+    api.log(<span class="str">'info'</span>, <span class="str">`On Air: ${data.file}`</span>);
+    <span class="comment">// Externe Steuerung hier...</span>
+  }
+};
+
+exports.destroy = <span class="kw">async function</span>() {
+  <span class="comment">// Verbindungen schließen, Cleanup</span>
+};</code></pre>
+
+<h3>Plugin-API (verfügbar in <code>api</code>)</h3>
+<table>
+  <tr><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>api.log(level, msg)</code></td><td>In das System-Log schreiben (<code>'info'</code>, <code>'warn'</code>, <code>'error'</code>)</td></tr>
+  <tr><td><code>api.notify(msg, type)</code></td><td>UI-Benachrichtigung senden</td></tr>
+  <tr><td><code>api.setStatus(state, data)</code></td><td>Plugin-Status setzen (<code>'running'</code>, <code>'error'</code>, <code>'idle'</code>)</td></tr>
+  <tr><td><code>api.updateStatus(data)</code></td><td>Status-Daten aktualisieren ohne State-Änderung</td></tr>
+  <tr><td><code>api.resolveLocal(origPath, localPath)</code></td><td>Pfad-Umleitung registrieren (File Transfer Manager)</td></tr>
+  <tr><td><code>api.clearLocal(origPath)</code></td><td>Pfad-Umleitung entfernen</td></tr>
+  <tr><td><code>api.broadcast(event, data)</code></td><td>Event an alle UI-Clients senden (<code>plugin:event</code>)</td></tr>
+  <tr><td><code>api.setEventProps(id, props)</code></td><td>Playlist-Event-Properties ändern</td></tr>
+  <tr><td><code>await api.getState()</code></td><td>Aktuellen Playout-State abrufen</td></tr>
+  <tr><td><code>await api.getPlaylist()</code></td><td>Aktuelle Playlist-Events abrufen</td></tr>
+  <tr><td><code>await api.getLibrary()</code></td><td>Medien-Bibliothek abrufen</td></tr>
+  <tr><td><code>await api.getConfig()</code></td><td>Eigene Plugin-Konfiguration abrufen</td></tr>
+</table>
+
+<h3>Schema-Feldtypen</h3>
+<table>
+  <tr><th>Typ</th><th>UI-Element</th></tr>
+  <tr><td><code>string</code></td><td>Text-Eingabefeld</td></tr>
+  <tr><td><code>number</code></td><td>Zahlen-Eingabefeld</td></tr>
+  <tr><td><code>boolean</code></td><td>Checkbox</td></tr>
+  <tr><td><code>password</code></td><td>Passwort-Feld (versteckt)</td></tr>
+  <tr><td><code>select</code></td><td>Dropdown mit <code>options: [{ value, label }]</code></td></tr>
+</table>
+
+<p>Felder können mit <code>condition: 'feldname=wert'</code> bedingt angezeigt werden.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="api">
+<h2>REST-API</h2>
+<p>Basis-URL: <code>http://localhost:3000</code></p>
+
+<h3>Master-Pipeline</h3>
+<table>
+  <tr><th>Endpoint</th><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>/api/master/start</code></td><td>POST</td><td>Master-Pipeline starten</td></tr>
+  <tr><td><code>/api/master/stop</code></td><td>POST</td><td>Master-Pipeline stoppen</td></tr>
+  <tr><td><code>/api/master/switch</code></td><td>POST</td><td>Quelle umschalten: <code>{ "pad": 0-5 }</code> (0=SMPTE, 1=Schwarz, 2=Bild, 3=Bild+PL, 4=Player1, 5=Player2)</td></tr>
+  <tr><td><code>/api/master/status</code></td><td>GET</td><td>Master-Status abrufen</td></tr>
+</table>
+
+<h3>Player</h3>
+<table>
+  <tr><th>Endpoint</th><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>/api/player/:id/cue</code></td><td>POST</td><td>Clip vorladen: <code>{ "file": "...", "som": "...", "eom": "..." }</code></td></tr>
+  <tr><td><code>/api/player/:id/play</code></td><td>POST</td><td>Clip starten</td></tr>
+  <tr><td><code>/api/player/:id/pause</code></td><td>POST</td><td>Pause</td></tr>
+  <tr><td><code>/api/player/:id/stop</code></td><td>POST</td><td>Stoppen</td></tr>
+  <tr><td><code>/api/player/:id/status</code></td><td>GET</td><td>Player-Status abrufen</td></tr>
+</table>
+
+<h3>Playlist</h3>
+<table>
+  <tr><th>Endpoint</th><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>/api/playlist</code></td><td>GET</td><td>Aktuelle Playlist abrufen</td></tr>
+  <tr><td><code>/api/playlist</code></td><td>POST</td><td>Playlist setzen (JSON-Array)</td></tr>
+  <tr><td><code>/api/playlist/play</code></td><td>POST</td><td>Playlist von Anfang starten</td></tr>
+  <tr><td><code>/api/playlist/next</code></td><td>POST</td><td>Nächstes Event starten</td></tr>
+  <tr><td><code>/api/playlist/goto</code></td><td>POST</td><td>Zu Event springen: <code>{ "index": N }</code></td></tr>
+  <tr><td><code>/api/playlist/stop</code></td><td>POST</td><td>Playlist stoppen</td></tr>
+  <tr><td><code>/api/playlists</code></td><td>GET</td><td>Gespeicherte Playlists auflisten</td></tr>
+  <tr><td><code>/api/playlists/:name</code></td><td>GET</td><td>Gespeicherte Playlist laden</td></tr>
+  <tr><td><code>/api/playlists/:name</code></td><td>POST</td><td>Playlist speichern</td></tr>
+</table>
+
+<h3>Grafik</h3>
+<table>
+  <tr><th>Endpoint</th><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>/api/grafik/show</code></td><td>POST</td><td><code>{ "template": "name", "data": {}, "layer": 1 }</code></td></tr>
+  <tr><td><code>/api/grafik/hide</code></td><td>POST</td><td><code>{ "id": "&lt;grafik-id&gt;" }</code></td></tr>
+  <tr><td><code>/api/grafik/continue</code></td><td>POST</td><td><code>{ "id": "&lt;grafik-id&gt;" }</code></td></tr>
+  <tr><td><code>/api/grafik/update</code></td><td>POST</td><td><code>{ "id": "...", "data": {} }</code></td></tr>
+  <tr><td><code>/api/grafik/templates</code></td><td>GET</td><td>Verfügbare Templates auflisten</td></tr>
+  <tr><td><code>/api/grafik/status</code></td><td>GET</td><td>Aktive Grafiken abfragen</td></tr>
+</table>
+
+<h3>Voiceover</h3>
+<table>
+  <tr><th>Endpoint</th><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>/api/voiceover/play</code></td><td>POST</td><td><code>{ "filePath": "...", "preset": "AP75", "durationMs": 30000 }</code></td></tr>
+  <tr><td><code>/api/voiceover/stop</code></td><td>POST</td><td>Voiceover stoppen (mit Fade-Out)</td></tr>
+  <tr><td><code>/api/voiceover/presets</code></td><td>GET</td><td>Voiceover-Presets abrufen</td></tr>
+</table>
+
+<h3>Bibliothek &amp; Konfiguration</h3>
+<table>
+  <tr><th>Endpoint</th><th>Methode</th><th>Beschreibung</th></tr>
+  <tr><td><code>/api/library</code></td><td>GET</td><td>Medien-Bibliothek abrufen</td></tr>
+  <tr><td><code>/api/library/scan</code></td><td>POST</td><td>Bibliothek neu einlesen</td></tr>
+  <tr><td><code>/api/config/audio</code></td><td>GET/POST</td><td>Audio-Gruppen + Presets</td></tr>
+  <tr><td><code>/api/config/format</code></td><td>POST</td><td><code>{ "format": "1920x1080@25" }</code></td></tr>
+  <tr><td><code>/api/settings</code></td><td>GET/POST</td><td>Alle Einstellungen lesen/schreiben</td></tr>
+  <tr><td><code>/api/preview</code></td><td>GET</td><td>JPEG-Vorschau des Programmbildes</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="sse">
+<h2>SSE Event-Stream</h2>
+<pre><code>GET /events
+Accept: text/event-stream</code></pre>
+<p>Sendet Server-Sent-Events für Echtzeit-Updates. Alle modernen Browser und HTTP-Clients unterstützen SSE.</p>
+
+<table>
+  <tr><th>Event-Name</th><th>Beschreibung</th></tr>
+  <tr><td><code>state</code></td><td>Vollständiger System-State (Master/Player/Playlist-Status)</td></tr>
+  <tr><td><code>playlist</code></td><td>Playlist wurde geändert (neue Liste)</td></tr>
+  <tr><td><code>player-position</code></td><td>Aktuelle Timecode-Position der Player (10 fps)</td></tr>
+  <tr><td><code>audio-level</code></td><td>VU-Meter-Daten: Pegel pro Audio-Gruppe in dB</td></tr>
+  <tr><td><code>grafik</code></td><td>Grafik-Event: <code>show</code> / <code>hide</code> / <code>continue</code></td></tr>
+  <tr><td><code>log</code></td><td>Server-Log-Einträge (Level: info/warn/error)</td></tr>
+  <tr><td><code>preview</code></td><td>Neue Preview verfügbar (Signal, kein Bild-Inhalt)</td></tr>
+  <tr><td><code>plugin:*</code></td><td>Plugin-spezifische Events (via <code>api.broadcast()</code>)</td></tr>
+</table>
+
+<h3>JavaScript-Beispiel</h3>
+<pre><code><span class="kw">const</span> es = <span class="kw">new</span> EventSource(<span class="str">'http://localhost:3000/events'</span>);
+
+es.addEventListener(<span class="str">'state'</span>, e => {
+  <span class="kw">const</span> state = JSON.parse(e.data);
+  console.log(<span class="str">'Master läuft:'</span>, state.master.running);
+});
+
+es.addEventListener(<span class="str">'audio-level'</span>, e => {
+  <span class="kw">const</span> { levels } = JSON.parse(e.data);
+  <span class="comment">// levels: { "pgm-stereo": { rms: -18.5, peak: -14.2 }, ... }</span>
+});</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="dateien">
+<h2>Dateistruktur</h2>
+<pre><code>PIPELINE CONTROLLER/
+├── server.js                  <span class="comment"># Hauptserver (HTTP + SSE + Pipeline-Steuerung)</span>
+├── ui.html                    <span class="comment"># Web-Benutzeroberfläche (Single Page App)</span>
+├── settings.json              <span class="comment"># Einstellungen (auto-generiert)</span>
+├── audio_config.json          <span class="comment"># Audio-Gruppen + Presets + Clock</span>
+├── library.json               <span class="comment"># Medien-Bibliothek-Cache</span>
+├── grafik_hotkeys.json        <span class="comment"># Grafik-Hotkeys</span>
+├── plugins.json               <span class="comment"># Plugin-Konfigurationen</span>
+├── users.json                 <span class="comment"># Benutzer für HTTP-Auth</span>
+│
+├── lib/                       <span class="comment"># Backend-Module</span>
+│   ├── MasterPipeline.js      <span class="comment"># GStreamer Master-Pipeline</span>
+│   ├── PlayerPipeline.js      <span class="comment"># GStreamer Player-Pipelines</span>
+│   ├── AudioRouter.js         <span class="comment"># Audio-Routing &amp; inter-audio Fragmente</span>
+│   ├── AudioGroupConfig.js    <span class="comment"># Audio-Gruppen, Presets, Clock</span>
+│   ├── PlaylistEngine.js      <span class="comment"># Playlist-Steuerung</span>
+│   ├── TransitionEngine.js    <span class="comment"># Übergangs-Effekte</span>
+│   ├── GrafixEngine.js        <span class="comment"># oGraf/HTML5-Grafik via Puppeteer</span>
+│   ├── VoiceoverEngine.js     <span class="comment"># Voiceover-Wiedergabe</span>
+│   ├── PreviewPipeline.js     <span class="comment"># JPEG-Preview</span>
+│   ├── MediaLibrary.js        <span class="comment"># Medien-Scan &amp; Cache</span>
+│   ├── MediaAnalyzer.js       <span class="comment"># Clip-Analyse (Dauer, Format)</span>
+│   ├── ClockStrategy.js       <span class="comment"># GStreamer Clock-Auswahl</span>
+│   ├── PluginHost.js          <span class="comment"># Plugin-Verwaltung</span>
+│   ├── PluginWorker.js        <span class="comment"># Plugin Worker-Thread Sandbox</span>
+│   ├── AudioRules.js          <span class="comment"># Auto-Preset-Regeln</span>
+│   └── Timecode.js            <span class="comment"># SMPTE-Timecode-Konvertierung</span>
+│
+├── plugins/                   <span class="comment"># Installierte Plugins</span>
+│   ├── broadcast-controller/
+│   └── file-transfer-manager/
+│
+├── media/                     <span class="comment"># Mediendateien (MXF, MP4, …)</span>
+├── playlists/                 <span class="comment"># Gespeicherte Playlists (JSON)</span>
+├── images/                    <span class="comment"># Standbilder</span>
+├── channelbranding/           <span class="comment"># Branding-Overlays (PNG mit Alpha)</span>
+├── asrun/                     <span class="comment"># As-Run-Log (täglich, txt)</span>
+└── templates/
+    └── grafik/                <span class="comment"># oGraf + HTML5-Templates</span></code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="fehlerbehebung">
+<h2>Fehlerbehebung</h2>
+
+<h3>Master-Pipeline startet nicht</h3>
+<div class="callout callout-warn">
+  <strong>Symptom:</strong> <code>Parse-Fehler</code> oder kein Bild/Ton nach START
+</div>
+<pre><code><span class="comment"># GStreamer-Plugins prüfen</span>
+gst-inspect-1.0 intervideosrc
+gst-inspect-1.0 interaudiosrc
+gst-inspect-1.0 compositor
+gst-inspect-1.0 audiomixer
+
+<span class="comment"># Fehlt ein Plugin → gstreamer1.0-plugins-bad installieren</span>
+sudo apt install gstreamer1.0-plugins-bad</code></pre>
+<pre><code><span class="comment"># Display prüfen</span>
+echo $DISPLAY          <span class="comment"># muss gesetzt sein, z.B. :0</span>
+xdpyinfo > /dev/null   <span class="comment"># muss OK sein</span></code></pre>
+
+<h3>Kein Audio</h3>
+<pre><code><span class="comment"># PulseAudio testen</span>
+paplay /usr/share/sounds/alsa/Front_Left.wav
+pactl info
+
+<span class="comment"># Falls PulseAudio nicht läuft</span>
+pulseaudio --start</code></pre>
+<p>Prüfen: Audio-Gruppen-Sink in <code>audio_config.json</code> – alle auf <code>fakesink</code> → kein Ton.</p>
+
+<h3>oGraf / Grafiken fehlen</h3>
+<pre><code><span class="comment"># Puppeteer / Chromium testen</span>
+node -e "const p = require('puppeteer'); p.launch().then(b => { console.log('Chromium OK'); b.close(); })"
+
+<span class="comment"># Fehlende Libs nachinstallieren</span>
+sudo apt install libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+  libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libgbm1</code></pre>
+<div class="callout callout-info">
+  <strong>AppImage-Hinweis:</strong> Wird das AppImage als <em>gemountetes</em> AppImage (ohne <code>--appimage-extract</code>) gestartet, kann Puppeteer Chromium nicht starten. Immer aus dem <em>extrahierten</em> Verzeichnis starten.
+</div>
+
+<h3>MXF-Dateien werden nicht erkannt</h3>
+<pre><code><span class="comment"># gst-discoverer installieren</span>
+sudo apt install gstreamer1.0-tools
+
+<span class="comment"># MXF manuell testen</span>
+gst-discoverer-1.0 /pfad/zur/datei.mxf</code></pre>
+
+<h3>GStreamer-Debug aktivieren</h3>
+<pre><code><span class="comment"># Über die UI: Einstellungen → Debug → Profil wählen</span>
+
+<span class="comment"># Oder als Umgebungsvariable:</span>
+GST_DEBUG="*:2" node server.js 2> gst_debug.log</code></pre>
+
+<h3>Plugin startet nicht</h3>
+<ul>
+  <li>UI → Einstellungen → Plugins → Plugin anklicken → Status prüfen</li>
+  <li>Log in der UI oder Konsole auf Fehlermeldungen prüfen</li>
+  <li>Konfiguration des Plugins (Host, Port, etc.) überprüfen</li>
+  <li>Ein Plugin-Fehler stoppt <em>nicht</em> die Pipeline – Playout läuft weiter</li>
+</ul>
+
+<h3>Preview-Bild schwarz</h3>
+<ul>
+  <li><strong>Master-Pipeline startet nicht:</strong> <code>videoSink</code> in <code>settings.json</code> prüfen — <code>ximagesink</code> braucht ein X11-Display. Auf headless Systemen auf <code>fakesink</code> setzen.</li>
+  <li><strong>GStreamer inter-Plugins fehlen:</strong> <code>gst-inspect-1.0 intervideosrc</code> — bei Fehler: <code>sudo apt install gstreamer1.0-plugins-bad</code></li>
+  <li><strong>Puppeteer blockiert Master-Start:</strong> Wird erkannt wenn nach 10s kein "Master starten"-Log erscheint. Puppeteer-Chrome-Installation prüfen: <code>npx puppeteer browsers install chrome</code></li>
+  <li><strong>Nach Neuinstallation:</strong> Startlog prüfen — er zeigt <code>__dirname</code>, <code>settings.json</code>-Pfad, <code>videoSink</code>, alle Verzeichnisse mit ✓/✗.</li>
+</ul>
+
+<h3>Installer: Pfade zeigen auf alte Maschine</h3>
+<p>Wenn Quell- und Zielmaschine ein gemeinsames Dateisystem (NFS/SSHFS) nutzen, erkennt das Installer-Skript alte Pfade als "gültig". Lösung: Installer neu erstellen und beim Ausführen die Ausgabe der Pfad-Bereinigung prüfen:</p>
+<pre><code><span class="comment"># Auf der Entwicklungsmaschine: Paket neu bauen</span>
+./create_install_package.sh 1.0.1
+
+<span class="comment"># Auf Remote: Pfade nach dem Install prüfen</span>
+grep -E '"mediaDir"|"grafixDir"|"videoSink"' ~/pipeline-controller/settings.json</code></pre>
+
+<h3>Aufzeichnung: kein Ton</h3>
+<p>Im Aufzeichnungs-Panel (⏺) prüfen welche Audio-Gruppe(n) ausgewählt sind. Die Kanal-Namen müssen mit der <code>audio_config.json</code>-Konfiguration übereinstimmen. Bei der Erst-Konfiguration die gewünschten Audio-Gruppen (z.B. <code>pgm-stereo</code>, <code>pgm-51</code>) via Checkbox auswählen und speichern.</p>
+
+<h3>Häufige Fehlermeldungen</h3>
+<table>
+  <tr><th>Fehlermeldung</th><th>Lösung</th></tr>
+  <tr><td><code>no property "buffer-time" in element "autoaudiosink"</code></td><td>Audio-Gruppe auf <code>pulsesink</code> oder <code>fakesink</code> umstellen</td></tr>
+  <tr><td><code>no property "max-latency" in appsink</code></td><td>GStreamer-Version zu alt – Update auf ≥ 1.20</td></tr>
+  <tr><td><code>asink_pgm_stereo: Failed to connect: Connection refused</code></td><td>PulseAudio nicht erreichbar — App <em>nicht</em> mit <code>sudo</code> starten</td></tr>
+  <tr><td><code>Puppeteer launch timeout (10s)</code></td><td>Chromium langsam oder fehlt — <code>npx puppeteer browsers install chrome</code></td></tr>
+  <tr><td><code>EACCES: permission denied</code> beim Template-Write</td><td><code>grafixDir</code> in settings.json zeigt auf falsches Verzeichnis — Installer erneut ausführen</td></tr>
+  <tr><td><code>Failed to typefind for caps: audio/x-dts</code></td><td>Harmloser GStreamer-Log; kein Fehler</td></tr>
+  <tr><td><code>minimum latency bigger than maximum latency</code></td><td>Bekannter GStreamer-Log für sekundäre Audio-Gruppen; kein funktionaler Fehler</td></tr>
+  <tr><td><code>WARN: voiceover_src_* nicht gefunden</code></td><td>Master-Pipeline neu starten</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="open-source">
+<h2>Open-Source-Lizenzen</h2>
+
+<p>Pipeline Controller ist auf einer Reihe herausragender Open-Source-Projekte aufgebaut. Alle verwendeten Komponenten sind kostenfrei nutzbar und quelloffen.</p>
+
+<div class="callout callout-tip">
+  <strong>Open-Source-Basis:</strong> Das gesamte Fundament — GStreamer, Node.js, Chromium, alle npm-Pakete — ist Open Source. Nur der applikationsspezifische Code (server.js, lib/, plugins/, templates/) ist proprietär.
+</div>
+
+<h3>Kern-Abhängigkeiten</h3>
+<table>
+  <tr><th>Komponente</th><th>Version</th><th>Lizenz</th><th>Verwendung</th></tr>
+  <tr>
+    <td><strong>GStreamer</strong></td>
+    <td>1.22+</td>
+    <td><span class="badge badge-green">LGPL 2.0+</span></td>
+    <td>Multimedia-Framework (Video, Audio, Codecs, Pipeline)</td>
+  </tr>
+  <tr>
+    <td><strong>Node.js</strong></td>
+    <td>18+</td>
+    <td><span class="badge badge-green">MIT</span></td>
+    <td>Server-Runtime, Event-Loop, HTTP-Server</td>
+  </tr>
+  <tr>
+    <td><strong>gst-kit</strong></td>
+    <td>0.2.5+</td>
+    <td><span class="badge badge-green">MIT</span></td>
+    <td>Native Node.js-Bindings für GStreamer (C++ Addon)</td>
+  </tr>
+  <tr>
+    <td><strong>Puppeteer</strong></td>
+    <td>24+</td>
+    <td><span class="badge badge-green">Apache 2.0</span></td>
+    <td>Headless-Chromium-Steuerung für oGraf HTML5-Rendering</td>
+  </tr>
+  <tr>
+    <td><strong>Chromium</strong></td>
+    <td>(via Puppeteer)</td>
+    <td><span class="badge badge-green">BSD &amp; andere</span></td>
+    <td>HTML5/CSS3/WebGL-Rendering für Grafik-Templates</td>
+  </tr>
+  <tr>
+    <td><strong>basic-ftp</strong></td>
+    <td>(npm)</td>
+    <td><span class="badge badge-green">MIT</span></td>
+    <td>FTP/FTPS-Client im File Transfer Manager Plugin</td>
+  </tr>
+</table>
+
+<h3>GStreamer-Plugins</h3>
+<table>
+  <tr><th>Paket</th><th>Lizenz</th><th>Enthaltene Plugins</th></tr>
+  <tr><td>gst-plugins-base</td><td><span class="badge badge-green">LGPL 2.0+</span></td><td>audioconvert, audioresample, videoscale, playbin, …</td></tr>
+  <tr><td>gst-plugins-good</td><td><span class="badge badge-green">LGPL 2.0+</span></td><td>pulsesink, jpegenc, level, …</td></tr>
+  <tr><td>gst-plugins-bad</td><td><span class="badge badge-yellow">LGPL 2.0+ / proprietäre Decoder</span></td><td>compositor, intervideo/audiosrc/sink, audiomixer, mxfdemux, dtsdec, …</td></tr>
+  <tr><td>gst-plugins-ugly</td><td><span class="badge badge-yellow">LGPL / GPL</span></td><td>x264enc, mpegaudioparse, …</td></tr>
+  <tr><td>gst-libav</td><td><span class="badge badge-yellow">LGPL (via FFmpeg)</span></td><td>avdec_h264, avdec_mpeg2video, avmux_mxf, …</td></tr>
+</table>
+
+<h3>EBU oGraf-Standard</h3>
+<p>Die Grafik-Engine basiert auf dem <strong>EBU oGraf</strong>-Standard für HTML5-Broadcast-Grafiken. Der Standard ist öffentlich zugänglich:</p>
+<ul>
+  <li>Spezifikation: <a href="https://ograf.ebu.io" target="_blank">https://ograf.ebu.io</a></li>
+  <li>JSON-Schema: <a href="https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json" target="_blank">ograf.ebu.io/…/schema.json</a></li>
+</ul>
+
+<h3>Hinweis zu gst-plugins-bad und gst-plugins-ugly</h3>
+<p><code>gst-plugins-bad</code> und <code>gst-plugins-ugly</code> können Decoder für lizenzpflichtige Formate (H.264, MPEG-2, AC-3, DTS, etc.) enthalten. Für den kommerziellen Betrieb mit diesen Codecs können Lizenzgebühren anfallen. Für Testzwecke und nicht-kommerzielle Nutzung sind die Open-Source-Implementierungen frei nutzbar.</p>
+
+<hr>
+<p style="color: var(--muted); font-size: .82rem; margin-top: 2rem;">
+  Pipeline Controller Handbuch · GStreamer 1.22+ · Node.js 18+ · Debian 12/Ubuntu 22.04<br>
+  Grafik-Engine: EBU oGraf-Standard · Plugin-System: Node.js Worker-Threads
+</p>
+</section>
+
+</main>
+</div>
+
+<script>
+  // Aktiven Nav-Link hervorheben
+  const sections = document.querySelectorAll('section[id]');
+  const links    = document.querySelectorAll('nav a');
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const a = document.querySelector(`nav a[href="#${e.target.id}"]`);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
