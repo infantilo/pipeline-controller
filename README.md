@@ -340,10 +340,3 @@ The foundation (GStreamer, Node.js, Chromium, npm packages) is open source. The 
 - 🕐 Hinweis auf **DST-sicheres Scheduling**
 - 🐍 Python 3 in den Requirements (für Marina Sync)
 :::
-
-:::suggestions
-- Deutsche Version | Übersetze diese aktualisierte README zurück ins Deutsche
-- Kompakter | Mach mir eine deutlich kompaktere "Minimal-README"-Variante
-- Mit Screenshots | Ergänze Screenshot-Platzhalter (UI, Counter-Strip, Asset-Panel)
-- CHANGELOG.md erstellen | Erstelle eine CHANGELOG.md basierend auf den neuen Features
-:::
