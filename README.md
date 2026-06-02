@@ -326,17 +326,3 @@ The foundation (GStreamer, Node.js, Chromium, npm packages) is open source. The 
   <sub>24/7 channel-in-a-box · Linux · Open-Source-based</sub>
 </p>
 ```
-
----
-
-:::tip[Was sich gegenüber der ersten Version geändert hat]
-- ✨ **Drei Installationswege** statt zwei – Installer-Paket als empfohlene Methode
-- 🔐 Neuer Abschnitt **User Management** mit Rollen-Tabelle
-- 🔒 **HTTPS/TLS** dokumentiert
-- 🧩 **Asset Panel** und ⏱️ **Counter Strip** als Highlights aufgenommen
-- 🔌 **Plugin-Tabelle erweitert** um Marina Sync, SNMP Monitor, Subtitle FAB
-- 🔠 **oGraf-Variablen** als eigenes Feature-Highlight (mit Code-Beispielen)
-- 🌍 **Bilinguale UI** (DE/EN) und Light/Dark-Mode erwähnt
-- 🕐 Hinweis auf **DST-sicheres Scheduling**
-- 🐍 Python 3 in den Requirements (für Marina Sync)
-:::
