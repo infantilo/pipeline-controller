@@ -170,8 +170,9 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 .pl-gap-row{display:block;font-size:8px;font-family:var(--mono);line-height:1.3;white-space:nowrap;margin-top:1px;}
 .pl-gap-col{font-size:9px;font-family:var(--mono);font-weight:700;padding:1px 3px;border-radius:2px;white-space:nowrap;display:inline-block;}
 .gap-skip{color:#f97316;background:rgba(249,115,22,.12);letter-spacing:.01em;}
-.pl-item.will-skip{opacity:.55;}
-.pl-item.will-skip .pl-file{text-decoration:line-through;text-decoration-color:rgba(249,115,22,.6);}
+.pl-item.will-skip{opacity:.6;border-left:3px solid rgba(249,115,22,.8)!important;}
+.pl-item.will-skip .pl-file{text-decoration:line-through;text-decoration-color:rgba(249,115,22,.8);}
+.pl-item.will-skip .pl-num{color:var(--orange);}
 .pl-done-mark{font-size:9px;color:var(--dim);flex-shrink:0;}
 /* Status pill */
 .pl-status-pill{font-size:8px;padding:1px 4px;border-radius:10px;border:1px solid;flex-shrink:0;font-weight:600;letter-spacing:.03em;text-transform:uppercase;}
@@ -333,6 +334,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   <button id="btn-logout" class="ib" onclick="doLogout()" title="Abmelden" style="display:none;font-size:10px;padding:1px 5px">⎋</button>
   <div class="sep-v"></div>
   <span style="font-family:var(--mono);font-size:9px;color:var(--dim)">CPU:<span id="perf-cpu" style="color:var(--text)">—</span>%</span>
+  <span style="font-family:var(--mono);font-size:9px;color:var(--dim)">RAM:<span id="perf-ram" style="color:var(--text)">—</span>%</span>
   <span id="perf-drop" style="font-size:9px;padding:1px 4px;border-radius:2px;background:rgba(78,201,78,.15);color:var(--green)">●</span>
   <span title="Clock-Quelle" style="font-size:9px;color:var(--dim)">CLK:<span id="toolbar-clock-provider" style="color:var(--text);font-family:var(--mono)">—</span></span>
   <span style="color:var(--dim);font-size:11px;font-family:var(--mono)" id="clock">00:00:00:00</span>
@@ -1074,6 +1076,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     <button class="cfg-tab"        id="cfg-tab-audio"       onclick="cfgTab('audio')"       data-i18n="tab.audio"      >🔊 Audio</button>
     <button class="cfg-tab"        id="cfg-tab-video"       onclick="cfgTab('video')"       data-i18n="tab.video"      >🎥 Video</button>
     <button class="cfg-tab"        id="cfg-tab-player"      onclick="cfgTab('player')"      data-i18n="tab.player"     >🎬 Player</button>
+    <button class="cfg-tab"        id="cfg-tab-server"      onclick="cfgTab('server')"                                 >🖥 Server</button>
     <button class="cfg-tab"        id="cfg-tab-voiceover"   onclick="cfgTab('voiceover')"   data-i18n="tab.voiceover"  >🎙 Voiceover</button>
     <button class="cfg-tab"        id="cfg-tab-playlist"    onclick="cfgTab('playlist')"    data-i18n="tab.playlist"   >📋 Playlist</button>
     <button class="cfg-tab"        id="cfg-tab-paths"       onclick="cfgTab('paths')"       data-i18n="tab.paths"      >📁 Pfade</button>
@@ -1307,6 +1310,16 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       </div>
 
       <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="savePlayerSettings()">💾 Player speichern</button>
+    </div>
+
+    <!-- ── TAB: SERVER ─────────────────────────────────────────────── -->
+    <div id="cfg-panel-server" style="display:none">
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Clients</div>
+      <div class="fld"><label>Max. gleichzeitige Clients (0 = unbegrenzt)</label>
+        <input type="number" id="cfg-max-clients" min="0" max="50" value="0" style="width:70px;font-family:var(--mono)">
+        <div style="font-size:9px;color:var(--dim);margin-top:3px">Verhindert Überlastung bei vielen Browser-Verbindungen gleichzeitig. 0 = kein Limit.</div>
+      </div>
+      <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="saveServerSettings()">💾 Server speichern</button>
     </div>
 
     <!-- ── TAB: VOICEOVER ─────────────────────────────────────────────── -->
@@ -2522,8 +2535,10 @@ sse.addEventListener('grafik',e=>{
   sse.addEventListener('perf',e=>{
     const d=JSON.parse(e.data);
     const cpu=document.getElementById('perf-cpu');
+    const ram=document.getElementById('perf-ram');
     const drop=document.getElementById('perf-drop');
     if(cpu){cpu.textContent=d.cpu;cpu.style.color=d.cpu>80?'var(--red)':d.cpu>60?'var(--yellow)':'var(--text)';}
+    if(ram){ram.textContent=d.memPct;ram.style.color=d.memPct>85?'var(--red)':d.memPct>70?'var(--yellow)':'var(--text)';}
     if(drop){
       const c=d.dropRisk==='HIGH'?'var(--red)':d.dropRisk==='MEDIUM'?'var(--yellow)':'var(--green)';
       drop.style.color=c;drop.textContent=d.dropRisk==='HIGH'?'⚠':d.dropRisk==='MEDIUM'?'~':'●';
@@ -2609,6 +2624,7 @@ let _nextFixTs=null, _nextFixLabel='', _nextFixIdx=-1;
 let _nextLiveTs=null, _nextLiveLabel='', _nextLiveIdx=-1;
 let _nextActionTs=null, _nextActionLabel='', _nextActionIdx=-1;
 let _nextMissingTs=null, _nextMissingLabel='', _nextMissingIdx=-1;
+let _nextOverlapIdx=-1;
 
 function _parseWallTs(timeStr){
   if(!timeStr) return null;
@@ -2628,6 +2644,7 @@ function updateBigCounter(){
   _nextLiveTs=null; _nextLiveLabel=''; _nextLiveIdx=-1;
   _nextActionTs=null; _nextActionLabel=''; _nextActionIdx=-1;
   _nextMissingTs=null; _nextMissingLabel=''; _nextMissingIdx=-1;
+  _nextOverlapIdx=-1;
   const tl=S._timeline||[];
   const fps=S.config?.fps||25;
   const now=Date.now();
@@ -2642,13 +2659,26 @@ function updateBigCounter(){
     // Fix-Start (pending oder kurz vor Start)
     if(!skipForFix && ev.startType==='fixtime'&&ev.startTime&&_nextFixTs===null){
       const ts=_parseWallTs(ev.startTime);
-      if(ts!==null){ _nextFixTs=ts; _nextFixLabel=`⏰ Event ${i+1}: ${ev.file||ev.source||'?'} @${ev.startTime}`; _nextFixIdx=i; }
+      if(ts!==null){
+        _nextFixTs=ts; _nextFixIdx=i;
+        // Check for overlap: if accumulated timeline time > fixtime, events before will be cut
+        const tlE=tl[i];
+        const hasOverlap=tlE&&tlE.overlapMs>500;
+        const ovlPrev=i>0&&tl[i-1]?.overlapMs>500;
+        if(hasOverlap||ovlPrev){
+          _nextOverlapIdx=i;
+          const ovlSec=((hasOverlap?tlE.overlapMs:tl[i-1].overlapMs)||0)/1000;
+          _nextFixLabel=`⚠ OVERLAP ${ovlSec.toFixed(1)}s · Ev.${i+1}: ${ev.file?.split('/').pop()||ev.source||'?'} @${ev.startTime}`;
+        } else {
+          _nextFixLabel=`⏰ Event ${i+1}: ${ev.file?.split('/').pop()||ev.source||'?'} @${ev.startTime}`;
+        }
+      }
     }
 
     // Fix-End des laufenden Events
     if(state==='playing'&&ev.endType==='fixtime'&&ev.fixTime&&_nextFixTs===null){
       const ts=_parseWallTs(ev.fixTime);
-      if(ts!==null){ _nextFixTs=ts; _nextFixLabel=`🔒 FixEnd Event ${i+1} @${ev.fixTime}`; _nextFixIdx=i; }
+      if(ts!==null){ _nextFixTs=ts; _nextFixLabel=`🔒 FixEnd Ev.${i+1} @${ev.fixTime}`; _nextFixIdx=i; }
     }
 
     // Nächstes echtes Live-Event (decklink, NDI etc.) — smpte/black sind kein Live
@@ -2735,16 +2765,20 @@ function _renderBigCounters(){
   const fps=S.config?.fps||25;
 
   // Counter 1: Fix-Event
+  const _fixHasOverlap=_nextOverlapIdx>=0&&_nextFixIdx===_nextOverlapIdx;
   if(_nextFixTs!==null){
     const remSec=Math.max(0,(_nextFixTs-now)/1000);
     const remDisplay=remSec<=0?'00:00:00':ftCounter(remSec,fps);
-    lbl.textContent='⏰ FIX-START';val.style.color='var(--yellow)';
+    const fixColor=_fixHasOverlap?'var(--orange)':'var(--yellow)';
+    lbl.textContent=_fixHasOverlap?'⚠ OVERLAP':'⏰ FIX-START';val.style.color=fixColor;
     val.textContent=remDisplay;sub.textContent=_nextFixLabel;
     // Counter-Strip links
     const cv=document.getElementById('cstrip-fix-val');
     const cs=document.getElementById('cstrip-fix-sub');
-    if(cv){cv.textContent=remDisplay;cv.style.color='var(--yellow)';}
+    const cl=document.getElementById('cstrip-fix-lbl');
+    if(cv){cv.textContent=remDisplay;cv.style.color=fixColor;}
     if(cs) cs.textContent=_nextFixLabel;
+    if(cl){cl.textContent=_fixHasOverlap?'⚠ OVERLAP':'⏰ FIX-START';cl.style.color=_fixHasOverlap?'var(--orange)':'var(--dim)';}
   } else {
     lbl.textContent='FIX-EVENT'; val.style.color='var(--dim)';
     val.textContent='—'; sub.textContent=S.playlist.running?'Kein Fix-Event pending':'Gestoppt';
@@ -2752,6 +2786,8 @@ function _renderBigCounters(){
     if(cv){cv.textContent='—';cv.style.color='var(--dim)';}
     const cs=document.getElementById('cstrip-fix-sub');
     if(cs) cs.textContent='—';
+    const cl=document.getElementById('cstrip-fix-lbl');
+    if(cl){cl.textContent='⏰ FIX-START';cl.style.color='var(--dim)';}
   }
 
   // Counter 2: Live/SMPTE
@@ -3469,12 +3505,29 @@ async function toggleStill(slot) {
   try {
     const r = await apiFetch(`/api/still/${slot}/toggle`, { method:'POST' });
     const d = await r?.json();
-    if (d?.ok) { if (d.active) showToast(`⏸ Freeze ${slot+1} EIN`); else showToast(`▶ Freeze ${slot+1} AUS`); }
-    else showToast('❌ ' + (d?.error || 'Fehler'));
+    if (d?.ok) {
+      // Optimistically update local state (don't wait for SSE round-trip)
+      const entry = _stillState.find(s => s.slot === slot);
+      if (entry) entry.active = d.active;
+      _renderStillButtons();
+      if (d.active) {
+        showToast(`⏸ Freeze ${slot+1} EIN`);
+      } else {
+        showToast(`▶ Freeze ${slot+1} AUS`);
+      }
+    } else {
+      showToast('❌ ' + (d?.error || 'Fehler'));
+    }
   } catch(e) { showToast('❌ ' + e.message); }
 }
 
 async function captureStill(slot) {
+  // Capture requires preview to be running
+  if (!previewActive) {
+    togglePreview();
+    showToast('⏳ Preview gestartet — bitte nochmal klicken');
+    return;
+  }
   try {
     const r = await apiFetch(`/api/still/${slot}/capture`, { method:'POST' });
     const d = await r?.json();
@@ -3779,7 +3832,19 @@ function calcTimeline(plData,startTime){
             if(ovl>500) prev.overlapMs=Math.max(prev.overlapMs||0,ovl);
           }
           t=fixMs;  // snap back — broadcast always starts fix-event at its wall-clock time
-          // Only mark as truly skipped if the event is already done/skipped in state
+          // Mark preceding pending events whose calculated start >= fixMs as willSkipByFix.
+          // Guard: only when the fix-time is genuinely in the future (>= timeline start).
+          // A past fix-time (e.g. 08:30 while it's already 14:00) must not mark events.
+          if(fixMs>=startTime.getTime()){
+            for(let j=result.length-1;j>=0;j--){
+              const jr=result[j];
+              const jev=plData[jr.index];
+              const jst=jev._state||'pending';
+              if(jst==='done'||jst==='skipped'||jst==='playing') break;
+              if(jr.start.getTime()<fixMs) break;
+              jr.willSkipByFix=true;
+            }
+          }
           const st=e._state||'pending';
           if(st==='done'||st==='skipped') skippedByOverlap=true;
         }
@@ -4066,6 +4131,8 @@ function _renderPlHeader(C, gridCols) {
   if(C.dur)      cells.push(`<span class="pl-th">${t('col.dur')}</span>`);
   if(C.trans)    cells.push(`<span class="pl-th" style="text-align:center" title="Transition Type">Tr</span>`);
   if(C.speed)    cells.push(`<span class="pl-th" style="text-align:center" title="Transition Speed">Sp</span>`);
+  if(C.segment)  cells.push(`<span class="pl-th" style="font-size:8px" title="Segment-Name">Seg</span>`);
+  if(C.playmode) cells.push(`<span class="pl-th" style="text-align:center;font-size:8px" title="Abspielmodus">Mode</span>`);
   cells.push(`<span class="pl-th" style="text-align:center">${t('col.gap')}</span>`);
   cells.push(`<span class="pl-th" style="text-align:right">${t('col.rem')}</span>`);
   cells.push(`<span class="pl-th"></span>`);
@@ -4212,7 +4279,7 @@ function renderPl(){
     const isCueing=!isCur&&_isPlayerEv(e)&&playerState?.cueing&&!isErr;
 
     const tlEntry=tl[i];
-    const willSkip=!isDone&&!isSkipped&&!isCur&&tlEntry?.skippedByOverlap;
+    const willSkip=!isDone&&!isSkipped&&!isCur&&(tlEntry?.skippedByOverlap||tlEntry?.willSkipByFix);
     // ── Comment / Block meta-events ────────────────────────────────
     if(e.source==='comment'){
       const isSelC=isSel;
@@ -4298,7 +4365,8 @@ function renderPl(){
     // Gap/Overlap-Spalte (eigene Spalte, immer sichtbar)
     let gapColHtml='';
     if(willSkip){
-      gapColHtml=`<span class="pl-gap-col gap-skip" title="Wird durch Overlap übersprungen">⊗</span>`;
+      const _skipTip=tlEntry?.willSkipByFix?'Wird durch Fix-Event übersprungen':'Wird durch Overlap übersprungen';
+      gapColHtml=`<span class="pl-gap-col gap-skip" title="${_skipTip}">⊗</span>`;
     } else if(tlEntry&&tlEntry.gapMs>500){
       gapColHtml=`<span class="pl-gap-col gap-pos" title="Gap: ${ft(tlEntry.gapMs/1000)} bis nächstem Event">+${ft(tlEntry.gapMs/1000)}</span>`;
     } else if(tlEntry&&tlEntry.overlapMs>500){
@@ -4376,7 +4444,7 @@ function renderPl(){
     cells.push(`<span class="pl-cell" style="text-align:center">${SRC_ICON[e.source]||_liveSourceIcon(e.source)||'?'}</span>`);
     cells.push(`<div class="pl-cell-file"><div class="pl-file" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}${gapHtml}</div></div>`);
     if(C.status)   cells.push(`<span class="pl-cell" style="text-align:center">${statusHtml}</span>`);
-    if(C.audio)    cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono)">${e.audioConfig?.pgm||''}</span>`);
+    if(C.audio)    cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono)">${e.audioPreset||e.audioConfig?.preset||e.audioConfig?.pgm||''}</span>`);
     if(C.branding) cells.push(`<span class="pl-cell" style="text-align:center" title="${e.branding||''}">${e.branding?'🏷':''}</span>`);
     if(C.avail)    cells.push(_availHtml(e.file));
     const _tr=e.transition||'cut';const _tc=_tr==='cut'?'var(--dim)':'var(--accent2)';
@@ -4588,10 +4656,14 @@ document.addEventListener('keydown',async ev=>{
   }
   if((ev.key==='Delete'||ev.key==='Backspace')&&(_selectedSet.size>0||_selectedIdx!=null)&&!ev.ctrlKey){
     const toDelete = _selectedSet.size ? [..._selectedSet] : [_selectedIdx];
-    const n = toDelete.length;
+    const curIdx = S.playlist.currentIndex;
+    const safeToDelete = S.playlist.running ? toDelete.filter(idx=>idx!==curIdx) : toDelete;
+    if(safeToDelete.length<toDelete.length) showToast('⚠ On-Air-Event kann nicht gelöscht werden');
+    if(!safeToDelete.length) return;
+    const n = safeToDelete.length;
     if(!await _confirm(n>1?t('confirm.deleteEvents',{n}):t('confirm.deleteEvent'),{ok:'Löschen',danger:true})) return;
     pushUndo();
-    toDelete.sort((a,b)=>b-a).forEach(idx=>S.plData.splice(idx,1));
+    safeToDelete.sort((a,b)=>b-a).forEach(idx=>S.plData.splice(idx,1));
     _selectedSet.clear(); _selectedIdx=null;
     _recalcTimeline();renderPl();_suppressPlSSECount++;api('POST','/api/playlist/set',{events:S.plData});return;
   }
@@ -4996,7 +5068,7 @@ function selectImage(name){
 // ── Settings Modal ────────────────────────────────────────────────────────
 // ── Settings Tabs ─────────────────────────────────────────────────────────
 function cfgTab(tab){
-  ['idle','audio','video','player','playlist','paths','darstellung','debug','users','live','voiceover','shortcuts','classif'].forEach(t=>{
+  ['idle','audio','video','player','server','playlist','paths','darstellung','debug','users','live','voiceover','shortcuts','classif'].forEach(t=>{
     document.getElementById(`cfg-tab-${t}`)?.classList.toggle('active',t===tab);
     document.getElementById(`cfg-panel-${t}`)?.style.setProperty('display',t===tab?'block':'none');
   });
@@ -6167,6 +6239,9 @@ function openSettings(){
     // Still Slots
     const ssSel = document.getElementById('cfg-still-slots');
     if (ssSel) ssSel.value = String(cfg.stillSlots ?? 2);
+    // Max Clients
+    const mcSel = document.getElementById('cfg-max-clients');
+    if (mcSel) mcSel.value = String(cfg.maxClients ?? 0);
     // Anzahl Player
     const npSel = document.getElementById('cfg-num-players');
     if (npSel) npSel.value = String(cfg.numPlayers || 2);
@@ -6415,6 +6490,13 @@ async function savePlayerSettings(){
   const needsRestart = npChanged || nvosChanged;
   showToast(needsRestart ? 'Player-Einstellungen gespeichert — Neustart läuft…' : 'Player-Einstellungen gespeichert ✓');
   if(needsRestart) closeModal('settings-modal');
+}
+
+async function saveServerSettings(){
+  const mc = Math.max(0, parseInt(document.getElementById('cfg-max-clients')?.value ?? '0') || 0);
+  await api('POST', '/api/settings', { maxClients: mc });
+  if (S.config) S.config.maxClients = mc;
+  showToast('Server-Einstellungen gespeichert ✓');
 }
 
 // ── Debug-Funktionen ──────────────────────────────────────────────────────
@@ -8970,8 +9052,8 @@ function drawTimeline() {
       ctx.restore();
     }
 
-    // ── Child Events (Grafik/oGraf/Voiceover) — zweite Reihe ─────────
-    const kids = (ev.children || []).map(_normalizeChild).filter(c => c.source === 'grafik' || c.source === 'oGraf' || c.source === 'voiceover');
+    // ── Child Events (Grafik/oGraf/Voiceover/Record) — zweite Reihe ─────────
+    const kids = (ev.children || []).map(_normalizeChild).filter(c => c.source === 'grafik' || c.source === 'oGraf' || c.source === 'voiceover' || c.source === 'record');
     if (kids.length) {
       // Für block_start: clipDurMs = Gesamtdauer aller inneren Block-Events
       let clipDurMs = entry.durMs;
@@ -8986,17 +9068,21 @@ function drawTimeline() {
         clipDurMs = blockDur;
       }
       kids.forEach((c, ci) => {
-        // Timing-Felder: voiceover direkt auf c, grafik in c.grafik
-        const g = (c.source === 'voiceover') ? c : (c.grafik || c);
+        const isVo  = c.source === 'voiceover';
+        const isRec = c.source === 'record';
+        // Timing-Felder: voiceover direkt auf c, record in c.record, grafik in c.grafik
+        const g = isVo ? c : isRec ? (c.record || c) : (c.grafik || c);
         const fps = S.config?.fps || 25;
         const delayMs   = g.delayFrames != null ? (g.delayFrames / fps) * 1000 : (g.delay ?? 0) * 1000;
         const endOffset = g.endOffsetFrames != null ? (g.endOffsetFrames / fps) * 1000 : (g.endOffset ?? 0) * 1000;
         let durationMs;
         if (g._endRelEnd || g.endOffsetFrames != null || g.endOffset != null) {
-          // Endet relativ zum Block-/Clip-Ende
           durationMs = clipDurMs - delayMs + endOffset;
         } else if (g.durationFrames != null) {
           durationMs = (g.durationFrames / fps) * 1000;
+        } else if (isRec) {
+          // Record child runs until clip end by default
+          durationMs = clipDurMs - delayMs;
         } else {
           durationMs = (g.duration ?? 5) * 1000;
         }
@@ -9009,19 +9095,26 @@ function drawTimeline() {
         const cx2 = Math.min(PAD_L + TW, tPx(chEnd));
         const cbw = Math.max(cx2 - cx1, 2);
 
-        const isVo = c.source === 'voiceover';
-        ctx.fillStyle   = isVo ? (_isLight ? '#cceedd' : '#1a3a2a') : (_isLight ? '#e8dcff' : '#3a2070');
+        if (isRec) {
+          ctx.fillStyle   = _isLight ? '#ffe0e0' : '#3a1010';
+          ctx.strokeStyle = _isLight ? '#cc4444' : '#f05050';
+        } else if (isVo) {
+          ctx.fillStyle   = _isLight ? '#cceedd' : '#1a3a2a';
+          ctx.strokeStyle = _isLight ? '#2a8a6a' : '#7dc';
+        } else {
+          ctx.fillStyle   = _isLight ? '#e8dcff' : '#3a2070';
+          ctx.strokeStyle = _isLight ? '#7755cc' : '#a78bfa';
+        }
         ctx.fillRect(cx1, CHILD_Y + 1, cbw, CHILD_H - 2);
-        ctx.strokeStyle = isVo ? (_isLight ? '#2a8a6a' : '#7dc') : (_isLight ? '#7755cc' : '#a78bfa');
         ctx.lineWidth = 1;
         ctx.strokeRect(cx1 + .5, CHILD_Y + 1.5, cbw - 1, CHILD_H - 3);
 
         if (cbw > 18) {
-          ctx.fillStyle = isVo ? (_isLight ? '#1a6a4a' : '#7dc') : (_isLight ? '#5533aa' : '#c4b5fd');
+          ctx.fillStyle = isRec ? (_isLight ? '#aa2222' : '#f05050') : isVo ? (_isLight ? '#1a6a4a' : '#7dc') : (_isLight ? '#5533aa' : '#c4b5fd');
           ctx.font = '7px system-ui';
           ctx.save();
           ctx.beginPath(); ctx.rect(cx1 + 1, CHILD_Y, cbw - 2, CHILD_H); ctx.clip();
-          const lbl = isVo ? ('🎙 ' + (c.file?.split('/').pop() || 'vo')) : (g.template || 'g');
+          const lbl = isRec ? ('⏺ ' + (g.slot || 'rec')) : isVo ? ('🎙 ' + (c.file?.split('/').pop() || 'vo')) : (g.template || 'g');
           ctx.fillText(lbl, cx1 + 2, CHILD_Y + CHILD_H - 2.5);
           ctx.restore();
         }
@@ -9032,7 +9125,7 @@ function drawTimeline() {
   // ── Child-Row Beschriftung ────────────────────────────────────────────
   ctx.fillStyle = _isLight ? 'rgba(80,60,160,.4)' : 'rgba(167,139,250,.35)';
   ctx.font = '7px system-ui';
-  ctx.fillText('grafik / vo', PAD_L + 1, CHILD_Y + CHILD_H - 2.5);
+  ctx.fillText('grafik / vo / rec', PAD_L + 1, CHILD_Y + CHILD_H - 2.5);
 
   // ── Info-Zeile ────────────────────────────────────────────────────────
   const hintEl = document.getElementById('timeline-hint');
@@ -9292,6 +9385,7 @@ function scrollToCurrentPlItem(idx) {
   el.style.outline = '2px solid var(--accent2)';
   setTimeout(() => { el.style.outline = ''; }, 800);
 }
+function scrollToPlItem(idx) { scrollToCurrentPlItem(idx); }
 
 // ── Follow-on-Air toggle ──────────────────────────────────────────────────
 let _followOnAir = false;

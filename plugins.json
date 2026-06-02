@@ -16,7 +16,7 @@
       "fileExtensions": "mxf,mov,mp4,ts,mpeg,mpg,mkv",
       "enabled": true
     },
-    "enabled": true
+    "enabled": false
   },
   "broadcast-controller": {
     "enabled": false

@@ -1390,6 +1390,12 @@ async function _requestHandler(req, res) {
       const sess = _getSession(req);
       if (!sess) { res.writeHead(401); res.end('Unauthorized'); return; }
     }
+    const maxC = parseInt(_settings.maxClients || '0');
+    if (maxC > 0 && clients.size >= maxC) {
+      res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: `Maximale Anzahl gleichzeitiger Clients (${maxC}) erreicht` }));
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
     res.write(':\n\n');
     clients.add(res);
@@ -2314,6 +2320,8 @@ async function _requestHandler(req, res) {
       playlist.opts.autoGap = !!b.autoGap;
       _settings.autoGap = !!b.autoGap;
     }
+    if (b.stillSlots !== undefined) _settings.stillSlots = Math.max(0, Math.min(9, parseInt(b.stillSlots) || 0));
+    if (b.maxClients !== undefined) _settings.maxClients = Math.max(0, parseInt(b.maxClients) || 0);
     saveSettings(_settings);
     broadcast('state', getState());
     return json(res, { ok: true });
@@ -2484,25 +2492,26 @@ function getState() {
     slots:    { onAir: playlist._onAirSlot, idle: playlist._idleSlot },
     playlist: { running: playlist._running, paused: playlist._paused, currentIndex: playlist.currentIndex, length: playlist.playlist.length },
     playing:  _currentPlaying ? { ..._currentPlaying, elapsedMs: Date.now() - _currentPlaying.startMs } : null,
-    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))) },
+    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0 },
     grafik:   { active: activeGrafiks },
   };
 }
 
 const os = require('os');
 // CPU-Messung via process.cpuUsage() – misst diesen Prozess inkl. GStreamer-Native-Addon.
-// Ergibt zuverlässig > 0, auch auf Mehrkern-Systemen mit niedriger Systemlast.
+// Normiert durch Anzahl logischer CPUs damit der Wert dem Systemmonitor entspricht.
 let _cpuPercent = 0;
 {
-  let _lastUsage = process.cpuUsage();
-  let _lastTime  = Date.now();
+  const _numCpus  = Math.max(1, os.cpus().length);
+  let _lastUsage  = process.cpuUsage();
+  let _lastTime   = Date.now();
   function _sampleCpu() {
     const now   = Date.now();
     const usage = process.cpuUsage();
     const elapsedUs = (now - _lastTime) * 1000;          // ms → µs
     if (elapsedUs > 0) {
       const usedUs = (usage.user - _lastUsage.user) + (usage.system - _lastUsage.system);
-      _cpuPercent = Math.max(0, Math.min(100, Math.round(usedUs / elapsedUs * 100)));
+      _cpuPercent = Math.max(0, Math.min(100, Math.round(usedUs / elapsedUs / _numCpus * 100)));
     }
     _lastUsage = usage;
     _lastTime  = now;
@@ -2512,7 +2521,8 @@ let _cpuPercent = 0;
 function getCpuPercent() { return _cpuPercent; }
 function getPerf() {
   const cpu=getCpuPercent(), mf=os.freemem();
-  return { cpu, memPct:Math.round((1-mf/os.totalmem())*100), memFreeMB:Math.round(mf/1048576), fps:FPS, dropRisk:cpu>90?'HIGH':cpu>70?'MEDIUM':'LOW' };
+  return { cpu, memPct:Math.round((1-mf/os.totalmem())*100), memFreeMB:Math.round(mf/1048576),
+           cpus:os.cpus().length, fps:FPS, dropRisk:cpu>90?'HIGH':cpu>70?'MEDIUM':'LOW' };
 }
 setInterval(()=>broadcast('perf',getPerf()),1000);
 
