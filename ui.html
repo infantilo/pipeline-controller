@@ -220,6 +220,9 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 /* Fix-time early-start: always visible, yellow accent to signal "bypass fixtime" */
 .pl-start-fix{visibility:visible!important;color:var(--yellow)!important;border-color:var(--yellow)!important;width:52px;}
 .pl-start-fix:hover{background:var(--yellow)!important;color:#000!important;border-color:var(--yellow)!important;}
+.pl-search-match{background:rgba(255,208,64,.1)!important;outline:1px solid rgba(255,208,64,.35);}
+#pl-search-row input::placeholder{color:var(--dim);}
+#pl-search-row input:focus{outline:none;border-color:var(--accent2);}
 
 /* Log */
 .log-panel{grid-column:1/3;grid-row:2/3;border-top:none;}
@@ -572,7 +575,6 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <span class="sec-hdr-title">Video Mixer</span>
       <span id="asset-section-dot" style="width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block;flex-shrink:0"></span>
       <button id="btn-asset-expand" class="ib" onclick="toggleAssetExpand(event)" title="Video Mixer maximieren" style="font-size:10px;padding:1px 4px;margin-left:2px">⤢</button>
-      <button class="ib" onclick="openAssetEditorList();event.stopPropagation()" title="Assets verwalten" style="font-size:10px;padding:1px 4px;margin-left:2px" tabindex="-1">⚙</button>
     </div>
     <div class="sec-body" id="sec-asset" style="padding:3px 0">
       <!-- Active cut status bar -->
@@ -589,10 +591,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <div class="mx-sec-hdr">Freeze / Still</div>
         <div id="mixer-still-grid" class="mx-grid" style="margin-bottom:6px"></div>
       </div>
-      <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
-        <span class="mx-sec-hdr" style="margin:0;flex:1">Assets</span>
-        <button class="ib" style="font-size:9px;padding:0 4px" onclick="openAssetEditor(-1)" title="Neues Asset">＋</button>
-      </div>
+      <div class="mx-sec-hdr">Assets</div>
       <div id="mixer-asset-grid" class="mx-grid"></div>
     </div>
     </div><!-- /asset-section-wrap -->
@@ -619,7 +618,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div class="pl-hdr-row">
         <button class="btn btn-g" id="btn-play" onclick="startPlaylist()" title="Play (ab ausgewähltem Event wenn markiert)">▶ Play</button>
         <button class="btn btn-o" id="btn-playnext" onclick="playNext()" disabled data-i18n="btn.next">▶▶ Next</button>
-        <button class="btn btn-r" onclick="stopPlaylist()" data-i18n="btn.stop">■ Stop</button>
+        <button class="btn btn-r" id="btn-stop" onclick="stopPlaylist()" data-i18n="btn.stop">■ Stop</button>
         <button class="btn" id="btn-next-live" onclick="playNextLive()" disabled style="display:none" data-i18n="btn.live">▶ Live</button>
         <button class="btn" id="btn-gap-fill" onclick="gapFill()" style="display:none" data-i18n="btn.gapFill">⬛ Gap Fill</button>
         <span style="flex:1"></span>
@@ -638,6 +637,9 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
             <label><input type="checkbox" id="col-avail" onchange="saveCols();loadAvailability()"> <span>Verfügbarkeit</span></label>
             <label><input type="checkbox" id="col-segment" onchange="saveCols()"> <span>Segment</span></label>
             <label><input type="checkbox" id="col-playmode" onchange="saveCols()"> <span>Abspielmodus</span></label>
+            <label><input type="checkbox" id="col-classif" onchange="saveCols()"> <span>Klassifikation</span></label>
+            <label><input type="checkbox" id="col-title"   checked onchange="saveCols()"> <span>Titel</span></label>
+            <label><input type="checkbox" id="col-file"    checked onchange="saveCols()"> <span>Datei</span></label>
           </div>
         </div>
         <button class="btn" id="btn-undo" onclick="plUndo()" disabled data-i18n="btn.undo">↩ Undo</button>
@@ -662,6 +664,12 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   </div>
   <!-- ── Hauptbereich: Liste + Timeline ── -->
   <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+  <div id="pl-search-row" style="display:flex;align-items:center;gap:3px;padding:2px 4px;flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border)">
+    <span style="font-size:10px;color:var(--dim);flex-shrink:0">🔍</span>
+    <input type="text" id="pl-search-input" placeholder="Titel / Datei / Klassifikation…" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:10px;padding:2px 5px;min-width:0" oninput="plSearchUpdate(this.value)">
+    <button class="ib" id="pl-search-mode" onclick="plSearchToggleMode()" title="Suchmodus umschalten" style="font-size:9px;padding:1px 5px;flex-shrink:0">🎯 Mark</button>
+    <button class="ib" onclick="plSearchClear()" title="Suche löschen" style="font-size:9px;padding:1px 4px;flex-shrink:0">✕</button>
+  </div>
   <div id="pl-thead" style="flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 4px"></div>
   <div class="pb" id="pl-body" style="padding:3px 4px;flex:1;overflow-y:auto;background:var(--pl-bg)">
     <div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">Keine Events</div>
@@ -2466,7 +2474,7 @@ sse.addEventListener('grafik',e=>{
     const{slotId}=JSON.parse(e.data);
     S.players[slotId]={running:true,cued:false};
     const _pst=document.getElementById(`pstate-${slotId}`);if(_pst)_pst.textContent='▶ PLAY';
-    updateDot(slotId);
+    updateDot(slotId);updateSwSub(slotId);
   });
   sse.addEventListener('player-stopped',e=>{
     const{slotId}=JSON.parse(e.data);
@@ -2487,6 +2495,9 @@ sse.addEventListener('grafik',e=>{
     clearInterval(S._playingTimer);clearInterval(S._holdTimer);S._holdTimer=null;S._playingClipDur=0;S._playingFixEnd=null;
     S._plStartTime = null;  // Reset: Timeline zeigt wieder Vorschau ab jetzt
     ['cstrip-cur-val','cstrip-cur-bar','cstrip-cur-sub','cstrip-cur-gap','cstrip-cur-gap-lbl'].forEach(id=>{const el=document.getElementById(id);if(el){if(id.includes('bar'))el.style.width='0%';else if(id.includes('val')){el.textContent='—';el.style.color='var(--green)';}else{el.textContent='—';el.style.color='var(--dim)';}}});
+    // Reset all player cued/running states so no event shows as cued/onair after stop
+    Object.keys(S.players).forEach(k=>{S.players[k]={running:false,cued:false};});
+    S.playlist.currentIndex=-1;
     S._plStartTime=null;S.playlist.running=false;_recalcTimeline();renderPl();updateAll();updateBigCounter();
     _updateOnAirPresetRow(null);
   });
@@ -2717,11 +2728,20 @@ function updateBigCounter(){
         const st=ev._state||'pending';
         if(st==='done'||st==='skipped') continue;
         if(_isMetaEv(ev)) continue;
-        if(tl[i]){
+        const lbl=ev.title||ev.file?.split('/').pop()||ev.source||'?';
+        // Use actual clip remaining time for the immediately-next event to avoid timeline drift
+        if(i===nextIdx&&S._playingClipDur>0){
+          const elapsed2=(performance.now()-S._playingStart)/1000;
+          const clipRemMs=Math.max(0,(S._playingClipDur-elapsed2)*1000);
+          if(clipRemMs>0){
+            _nextActionTs=Date.now()+clipRemMs;
+            _nextActionLabel=`⏭ Ev.${i+1}: ${lbl}`;
+            _nextActionIdx=i;
+          }
+        } else if(tl[i]){
           const ms=tl[i].start.getTime()-now;
           if(ms>0){
             _nextActionTs=tl[i].start.getTime();
-            const lbl=ev.title||ev.file?.split('/').pop()||ev.source||'?';
             _nextActionLabel=`⏭ Ev.${i+1}: ${lbl}`;
             _nextActionIdx=i;
           }
@@ -3227,10 +3247,6 @@ function _renderAssetPanel() {
   const assetGrid = document.getElementById('mixer-asset-grid');
   if (!assetGrid) return;
   const assets = S.assets || [];
-  if (!assets.length) {
-    assetGrid.innerHTML = '<div style="color:var(--dim);font-size:10px;padding:8px 0;grid-column:1/-1">Keine Assets — ＋ hinzufügen</div>';
-    return;
-  }
 
   assetGrid.innerHTML = assets.map((a, i) => {
     const col        = a.color || '#5aabff';
@@ -3243,13 +3259,26 @@ function _renderAssetPanel() {
     const offTag     = offEvs.length ? ` <span style="font-size:8px;opacity:.7">+${offEvs.length}OC</span>` : '';
     const onairCls   = isOnAir ? ' mx-onair' : '';
     const cdText     = isOnAir ? (_mxCountdownTimer ? _mxFmtTime(Math.max(0, _mxTotalMs - (Date.now() - state.startMs))) : _mxFmtTime(totalSec*1000)) : durLabel;
-    return `<button class="mx-btn${onairCls}" style="border-color:${isOnAir?'var(--red)':col+'66'}" onclick="cutAsset(${i})" title="CUT: ${a.label||'Asset'}">` +
-      `<span class="mx-icon">${a.icon||'🎬'}</span>` +
-      `<span class="mx-label" style="color:${isOnAir?'var(--red)':col}">${a.label||'Asset'}${offTag}</span>` +
-      `<span class="mx-dur${isOnAir?' countdown':''}" id="mx-dur-${a.id}">${cdText}</span>` +
-      (isOnAir ? `<div class="mx-prog"><div class="mx-prog-fill" style="width:0%"></div></div>` : '') +
-      `</button>`;
-  }).join('');
+    return `<div style="display:flex;flex-direction:column;gap:1px">` +
+      `<button class="mx-btn${onairCls}" style="flex:1;border-color:${isOnAir?'var(--red)':col+'66'}" onclick="cutAsset(${i})" title="CUT: ${a.label||'Asset'}">` +
+        `<span class="mx-icon">${a.icon||'🎬'}</span>` +
+        `<span class="mx-label" style="color:${isOnAir?'var(--red)':col}">${a.label||'Asset'}${offTag}</span>` +
+        `<span class="mx-dur${isOnAir?' countdown':''}" id="mx-dur-${a.id}">${cdText}</span>` +
+        (isOnAir ? `<div class="mx-prog"><div class="mx-prog-fill" style="width:0%"></div></div>` : '') +
+      `</button>` +
+      `<div style="display:flex;gap:1px">` +
+        `<button class="mx-btn" title="Asset bearbeiten" style="flex:1;min-height:18px;padding:2px 4px;font-size:8px;color:var(--dim)" onclick="openAssetEditor(${i})">✏ Edit</button>` +
+        `<button class="mx-btn" title="Asset löschen" style="min-height:18px;padding:2px 6px;font-size:8px;color:var(--red)" onclick="deleteAsset(${i})">✕</button>` +
+      `</div>` +
+    `</div>`;
+  }).join('') +
+  // Always add an empty "new asset" button at the end
+  `<div style="display:flex;flex-direction:column;gap:1px">` +
+    `<button class="mx-btn" onclick="openAssetEditor(-1)" title="Neues Asset anlegen" style="flex:1;opacity:.5;border-style:dashed">` +
+      `<span class="mx-icon">＋</span>` +
+      `<span class="mx-label">Neu</span>` +
+    `</button>` +
+  `</div>`;
 
   // Countdown starten/neustarten
   if (state.active && state.startMs) {
@@ -3947,6 +3976,38 @@ function _updateAssetStateBadge() {
   if (!document.getElementById('sec-asset')?.classList.contains('collapsed')) _renderAssetPanel();
 }
 
+// ── Playlist Search ───────────────────────────────────────────────────────
+let _plSearch = '';
+let _plSearchMode = 'highlight'; // 'highlight' | 'filter'
+
+function plSearchUpdate(q) {
+  _plSearch = (q||'').trim().toLowerCase();
+  renderPl();
+}
+function plSearchToggleMode() {
+  _plSearchMode = _plSearchMode === 'highlight' ? 'filter' : 'highlight';
+  const btn = document.getElementById('pl-search-mode');
+  if (btn) btn.textContent = _plSearchMode === 'highlight' ? '🎯 Mark' : '🔎 Filter';
+  if (_plSearch) renderPl();
+}
+function plSearchClear() {
+  _plSearch = '';
+  const inp = document.getElementById('pl-search-input');
+  if (inp) inp.value = '';
+  renderPl();
+}
+function _plSearchMatch(e) {
+  if (!_plSearch) return false;
+  const q = _plSearch;
+  if ((e.title||'').toLowerCase().includes(q)) return true;
+  if ((e.file||'').toLowerCase().includes(q)) return true;
+  if ((e.source||'').toLowerCase().includes(q)) return true;
+  if ((e.classification||'').toLowerCase().includes(q)) return true;
+  const c = _classifById(e.classification);
+  if (c && (c.label||'').toLowerCase().includes(q)) return true;
+  return false;
+}
+
 // ── Render Playlist ───────────────────────────────────────────────────────
 // Berechnet S._timeline neu basierend auf aktuellem Zustand.
 // Muss bei ALLEN Änderungen aufgerufen werden die Timeline beeinflussen:
@@ -3958,7 +4019,7 @@ function _recalcTimeline() {
   updateBigCounter();
 }
 // ── Spalten-Konfiguration ──────────────────────────────────────────────────
-const COL_DEFAULTS = { tc:true, status:true, dur:true, trans:true, speed:true, branding:false, audio:false, children:true, avail:false, segment:false, playmode:false };
+const COL_DEFAULTS = { tc:true, status:true, dur:true, trans:true, speed:true, branding:false, audio:false, children:true, avail:false, segment:false, playmode:false, classif:false, title:true, file:true };
 let _cols = {...COL_DEFAULTS};
 function loadCols() {
   try { const s=localStorage.getItem(_lsKey('pl_cols')); if(s) _cols={...COL_DEFAULTS,...JSON.parse(s)}; } catch{}
@@ -3995,7 +4056,9 @@ function _plGridCols(C) {
   ];
   if(C.tc)       cols.push('78px');
   cols.push('16px');    // src icon
-  cols.push('1fr');     // filename
+  if(C.classif) cols.push('44px');             // classification
+  if(C.title)   cols.push('minmax(60px,.8fr)'); // title
+  if(C.file||(!C.title)) cols.push('minmax(80px,1.2fr)'); // file (always if title off)
   if(C.status)   cols.push('58px');
   if(C.audio)    cols.push('52px');
   if(C.branding) cols.push('18px');
@@ -4123,7 +4186,9 @@ function _renderPlHeader(C, gridCols) {
   ];
   if(C.tc)       cells.push(`<span class="pl-th">${t('col.tc')}</span>`);
   cells.push(`<span class="pl-th"></span>`);
-  cells.push(`<span class="pl-th">${t('col.title')}</span>`);
+  if(C.classif)       cells.push(`<span class="pl-th" style="font-size:7px">Klasse</span>`);
+  if(C.title)         cells.push(`<span class="pl-th">Titel</span>`);
+  if(C.file||!C.title) cells.push(`<span class="pl-th">Datei</span>`);
   if(C.status)   cells.push(`<span class="pl-th" style="text-align:center">${t('col.status')}</span>`);
   if(C.audio)    cells.push(`<span class="pl-th">${t('col.audio')}</span>`);
   if(C.branding) cells.push(`<span class="pl-th" style="text-align:center">🏷</span>`);
@@ -4337,6 +4402,9 @@ function renderPl(){
       </div>`;
     }
     const isBlockInner=row.inBlock;
+    const _srchMatch=_plSearchMatch(e);
+    // In filter mode skip non-matching rows (when search is active)
+    if(_plSearch&&_plSearchMode==='filter'&&!_srchMatch) return '';
     let cls='pl-item';
     if(isBlockInner) cls+=' pl-block-inner';
     if(isCur)       cls+=' cur';
@@ -4348,6 +4416,7 @@ function renderPl(){
     if(isCueing)    cls+=' cueing';
     if(isDone||isSkipped||isIdleFallback) cls+=' done';
     if(willSkip)    cls+=' will-skip';
+    if(_srchMatch)  cls+=' pl-search-match';
     let tcStr='',tcCls='pl-tc';
     if(e.startType==='fixtime'&&e.startTime){
       const _stp=e.startTime.split(':'); tcStr=`${(_stp[0]||'00').padStart(2,'0')}:${(_stp[1]||'00').padStart(2,'0')}:${(_stp[2]||'00').padStart(2,'0')}:${(_stp[3]||'00').padStart(2,'0')}`;
@@ -4424,9 +4493,6 @@ function renderPl(){
     const durWarnBadge = e._durationWarning ? `<span style="font-size:8px;color:var(--yellow);margin-left:4px" title="${e._durationWarning}">⏱</span>` : '';
     const classifBadge = _classifBadge(e.classification);
     const subtitleBadge = e.subtitle?.file ? `<span style="font-size:8px;color:#60a5fa;margin-left:3px" title="Subtitle: ${e.subtitle.file}">SUB</span>` : '';
-    const label=e.title
-      ?`${classifBadge}<span style="font-weight:600;color:var(--accent)">${e.title}</span> <span style="font-size:9px;color:var(--dim)">${e.file||e.source||''}</span>${durWarnBadge}${subtitleBadge}`
-      :classifBadge+mainLabel+durWarnBadge+subtitleBadge;
 
     // ── Child Events (Grafik) ─────────────────────────────────────
     let childrenHtml='';
@@ -4442,7 +4508,9 @@ function renderPl(){
     ];
     if(C.tc)       cells.push(`<span class="pl-cell ${tcCls}">${tcStr}</span>`);
     cells.push(`<span class="pl-cell" style="text-align:center">${SRC_ICON[e.source]||_liveSourceIcon(e.source)||'?'}</span>`);
-    cells.push(`<div class="pl-cell-file"><div class="pl-file" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}${gapHtml}</div></div>`);
+    if(C.classif) cells.push(`<span class="pl-cell" style="overflow:hidden;padding:0 2px" title="${e.classification||''}">${classifBadge||'<span style="color:var(--dim);font-size:8px">—</span>'}</span>`);
+    if(C.title)   cells.push(`<div class="pl-cell" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:10px">${e.title?`<span style="font-weight:600;color:var(--accent)">${e.title}</span>`:'<span style="color:var(--dim);font-size:9px">—</span>'}</div>`);
+    if(C.file||!C.title) cells.push(`<div class="pl-cell-file"><div class="pl-file" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${mainLabel}${durWarnBadge}${subtitleBadge}${gapHtml}</div></div>`);
     if(C.status)   cells.push(`<span class="pl-cell" style="text-align:center">${statusHtml}</span>`);
     if(C.audio)    cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono)">${e.audioPreset||e.audioConfig?.preset||e.audioConfig?.pgm||''}</span>`);
     if(C.branding) cells.push(`<span class="pl-cell" style="text-align:center" title="${e.branding||''}">${e.branding?'🏷':''}</span>`);
@@ -8750,6 +8818,8 @@ function updateAll(){
   document.getElementById('master-badge').textContent=S.master.running?'LIVE':'OFFLINE';
   document.getElementById('btn-master-start').disabled= S.master.running;
   document.getElementById('btn-master-stop') .disabled=!S.master.running;
+  document.getElementById('btn-play') .disabled= S.playlist.running;
+  document.getElementById('btn-stop') .disabled=!S.playlist.running;
   updateSw();
   (S.config?.slotIds||['player1','player2']).forEach(id=>updateDot(id));
   _updateIdleDot();
@@ -9599,6 +9669,7 @@ fetch('/api/state').then(r=>r.json()).then(d=>{
     _updateGrafikDot(true);
     _updateGrafikPanelState();
     _renderHotkeys();
+    _renderGrafikOnairStrip();
   }
   updateAll(); renderPl();
   // Reconstruct counter state if a clip was playing when we (re)loaded
