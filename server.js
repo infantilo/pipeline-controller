@@ -509,6 +509,88 @@ function _onPlayingCheckAsset(d) {
   // Normale Asset-Events: Playlist fließt automatisch weiter
 }
 
+// ── URI-basierte Live-Quellen (RTSP, HLS, UDP, HTTP, SRT) ─────────────────────
+// Generiert einen GStreamer-Source-String aus einer URI.
+// RTSP: rtspsrc → rtph264depay/rtpjpegdepay → decoder → videoconvert
+// HLS:  souphttpsrc → hlsdemux → decoder
+// UDP:  udpsrc → tsdemux → decoder
+// Allgemein: uridecodebin (für HTTP-progressive, Dateien, etc.)
+function _buildUriLiveSrc(uri, latencyMs = 200) {
+  if (!uri) return null;
+  if (/^rtsp:\/\//i.test(uri)) {
+    return `rtspsrc location="${uri}" latency=${latencyMs} ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert`;
+  }
+  if (/^srt:\/\//i.test(uri)) {
+    return `srtsrc uri="${uri}" ! tsdemux ! h264parse ! avdec_h264 ! videoconvert`;
+  }
+  if (/^udp:\/\//i.test(uri)) {
+    const m = uri.match(/^udp:\/\/([^:]+):(\d+)/i);
+    const host = m?.[1] || '0.0.0.0', port = m?.[2] || '1234';
+    return `udpsrc address="${host}" port=${port} ! tsdemux ! h264parse ! avdec_h264 ! videoconvert`;
+  }
+  // Allgemein (HTTP-HLS, Datei, etc.)
+  return `uridecodebin uri="${uri}" ! videoconvert`;
+}
+
+function _buildUriLiveAudioSrc(uri, latencyMs = 200) {
+  if (!uri) return null;
+  if (/^rtsp:\/\//i.test(uri)) {
+    return `rtspsrc location="${uri}" latency=${latencyMs} ! rtppcmadepay ! alawdec ! audioconvert ! audioresample`;
+  }
+  if (/^srt:\/\//i.test(uri)) {
+    return `srtsrc uri="${uri}" ! tsdemux ! aacparse ! avdec_aac ! audioconvert`;
+  }
+  if (/^udp:\/\//i.test(uri)) {
+    const m = uri.match(/^udp:\/\/([^:]+):(\d+)/i);
+    const host = m?.[1] || '0.0.0.0', port = m?.[2] || '1234';
+    return `udpsrc address="${host}" port=${port} ! tsdemux ! aacparse ! avdec_aac ! audioconvert`;
+  }
+  return `uridecodebin uri="${uri}" ! audioconvert ! audioresample`;
+}
+
+// ── Pipeline-Latenz-Messung ────────────────────────────────────────────────────
+// Misst die aktuelle GStreamer-Pipeline-Latenz (min/max) und gibt Empfehlungen.
+// GStreamer-Pipelines propagieren Latenz-Queries von Senken zu Quellen.
+// Das Ergebnis hilft beim Kalibrieren von grafikLatencyMs.
+function _measurePipelineLatency() {
+  const result = {
+    timestamp: new Date().toISOString(),
+    measured: {},
+    recommendation: {},
+    note: '',
+  };
+
+  // GStreamer-Latenz-Query über gst-kit Pipeline-Objekt
+  // queryLatency() gibt { minLatencyNs, maxLatencyNs, live } zurück (falls implementiert)
+  try {
+    if (master?.pipeline?.queryLatency) {
+      const q = master.pipeline.queryLatency();
+      if (q) {
+        result.measured.masterMinMs = Math.round((q.minLatencyNs || 0) / 1e6);
+        result.measured.masterMaxMs = Math.round((q.maxLatencyNs || 0) / 1e6);
+        result.measured.live        = !!q.live;
+      }
+    }
+  } catch {}
+
+  // Grafik-Latenz: Puppeteer-Screenshot + RGBA-Konvertierung + GStreamer-appsrc
+  // Schätzung: 1 Render-Zyklus (40ms@25fps) + appsrc→compositor (1-2 Frames) + Sink-Buffer
+  const fps = masterOpts.fps || FPS;
+  const frameDurMs = Math.round(1000 / fps);
+  const estimatedGrafikLatencyMs = frameDurMs * 2 + 20;  // 2 Frames + 20ms Overhead
+
+  result.recommendation.grafikLatencyMs = estimatedGrafikLatencyMs;
+  result.recommendation.note = `Empfohlen: grafikLatencyMs=${estimatedGrafikLatencyMs} (${fps}fps, 2 Frames + Overhead). Fein-Kalibrierung mit Testgrafik auf Frame-Monitor empfohlen.`;
+
+  if (result.measured.masterMaxMs > 0) {
+    result.note = `GStreamer-Pipeline: min=${result.measured.masterMinMs}ms max=${result.measured.masterMaxMs}ms`;
+  } else {
+    result.note = `GStreamer queryLatency nicht verfügbar. Schätzung basiert auf ${fps}fps Framerate.`;
+  }
+
+  return result;
+}
+
 function broadcast(event, data) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of clients) {
@@ -626,6 +708,8 @@ library.on('analyzed', ({ fileName, info }) => {
 library.on('error',   ({ fileName, error }) => log(`⚠ Analyse-Fehler ${fileName}: ${error}`, 'warn', 'library'));
 library.on('removed', ({ fileName }) => { log(`🗑 Entfernt: ${fileName}`, 'info', 'library'); broadcast('library', _enrichLibrary(library.getAll())); });
 library.setAudioConfig(audioGroupConfig.groups, audioGroupConfig.presets);
+// dead.dir: korrupte/nicht-analysierbare Dateien werden automatisch verschoben
+library.setDeadDir(_settings.deadDir || null);  // null = Standardpfad <media>/../dead
 library.startWatching();
 
 // ── Master + Players ───────────────────────────────────────────────────────────
@@ -649,6 +733,9 @@ const masterOpts = {
   liveSources:      _settings.liveSources || [],
   slotIds:          _slotIds,
   numVoSlots:       Math.max(1, Math.min(4, parseInt(_settings.numVoSlots || '2'))),
+  // A/V-Sync Delay-Korrektur (runtime-änderbar via /api/pipeline/av-sync)
+  videoDelayMs:     _settings.videoDelayMs  ?? 0,
+  audioDelayMs:     _settings.audioDelayMs  || {},
 };
 
 // ── VoiceoverEngine ───────────────────────────────────────────────────────────
@@ -877,22 +964,25 @@ recordEngine.on('stopped', d => { broadcast('record-stopped', d); _arOnRecord('s
 recordEngine.on('remuxed', d => { library.unlock(d.outputPath); if (RECORD_IN_LIBRARY && d.ok) library.scan(); });
 
 const playlist = new PlaylistEngine(master, players, transitionEngine, {
-  mediaDir:       MEDIA_DIR,
-  gapSource:      _settings.gapSource || 'black',
-  gapFile:        _settings.gapFile   || null,
-  autoGap:        _settings.autoGap   ?? false,
-  missingBehavior: _settings.missingBehavior || 'skip',
-  fps:            FPS,
+  mediaDir:         MEDIA_DIR,
+  gapSource:        _settings.gapSource || 'black',
+  gapFile:          _settings.gapFile   || null,
+  autoGap:          _settings.autoGap   ?? false,
+  missingBehavior:  _settings.missingBehavior || 'skip',
+  fps:              FPS,
   library,
-  idleSource:     masterOpts.idleSource,
-  idleSlot:       'playerIdle',
+  idleSource:       masterOpts.idleSource,
+  idleSlot:         'playerIdle',
   grafixEngine,
   voiceoverEngine,
   recordEngine,
-  liveSources:    _settings.liveSources || [],
-  slotIds:        _slotIds,
-  backupSlot:     _settings.backupSlot     || null,
-  backupMediaDirs: _settings.backupMediaDirs || [],
+  liveSources:      _settings.liveSources     || [],
+  liveCueMode:      _settings.liveCueMode     || 'timed',   // 'asap' | 'timed'
+  liveCueLeadSec:   _settings.liveCueLeadSec  ?? 5,         // Sekunden Vorlauf für 'timed'
+  grafikLatencyMs:  _settings.grafikLatencyMs ?? 0,         // Pipeline-Latenz-Kompensation
+  slotIds:          _slotIds,
+  backupSlot:       _settings.backupSlot     || null,
+  backupMediaDirs:  _settings.backupMediaDirs || [],
   resolveFilePath: (file) => pluginHost.resolveFilePath(file),
   getSegment:  (file, segName) => {
     const segs = _segments[file] || [];
@@ -990,6 +1080,7 @@ playlist.on('playing',      d  => {
 playlist.on('cut',          d  => broadcast('cut', d));
 playlist.on('ready-to-cut', d  => broadcast('ready-to-cut', d));
 playlist.on('ended',        () => { _currentPlaying = null; log('Playlist fertig', 'info', 'playlist'); broadcast('playlist-ended', {}); _arFlushPlay(Date.now(), 'Completed'); });
+playlist.on('stopped',      () => { _currentPlaying = null; broadcast('playlist-ended', {}); broadcast('state', getState()); });
 playlist.on('manual-hold',  d  => { broadcast('manual-hold', d); broadcast('state', getState()); });
 playlist.on('live-precue',    d  => { broadcast('live-precue', d); pluginHost.dispatch('live:precue', d); });
 playlist.on('backup-active',  d  => { broadcast('backup-active', d); log(`⚠ FAILOVER: ${d.fromSlot||'(file)'} → ${d.toSlot||'backup-path'} (${d.event?.file||'?'})`, 'warn', 'playlist'); });
@@ -1392,9 +1483,52 @@ async function _requestHandler(req, res) {
     }
     const maxC = parseInt(_settings.maxClients || '0');
     if (maxC > 0 && clients.size >= maxC) {
-      res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-      res.end(JSON.stringify({ error: `Maximale Anzahl gleichzeitiger Clients (${maxC}) erreicht` }));
-      return;
+      // Emergency Override: Admin kann ältesten Client verdrängen
+      const overrideToken = url.searchParams.get('override_token') || '';
+      const isAdmin = overrideToken && _sessions.get(overrideToken)?.roles?.includes('admin');
+      const authDisabled = !_settings.authEnabled || !_users;
+      const allowOverride = isAdmin || (authDisabled && url.searchParams.get('override') === '1');
+
+      if (allowOverride && clients.size > 0) {
+        const [oldest] = clients;
+        clients.delete(oldest);
+        try { oldest.write('event: kicked\ndata: {"reason":"emergency_override"}\n\n'); oldest.end(); } catch {}
+        log(`SSE Override: ältester Client verdrängt (${clients.size + 1}→${clients.size} + 1 neu)`, 'warn', 'system');
+      } else {
+        // Browser erhält eine HTML-Seite statt rohem JSON
+        const accept = req.headers['accept'] || '';
+        if (accept.includes('text/html')) {
+          res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+          res.end(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="15">
+<title>Pipeline Controller — Max Clients</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.6 'Courier New',monospace;background:#111;color:#ccc;
+  display:flex;align-items:center;justify-content:center;height:100vh}
+.box{text-align:center;max-width:460px;padding:32px}
+.h{font-size:20px;color:#f0a830;margin-bottom:16px;letter-spacing:.04em}
+.info{color:#888;font-size:12px;margin-top:24px;line-height:1.8}
+a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
+.badge{display:inline-block;background:#222;border:1px solid #444;border-radius:4px;
+  padding:2px 10px;font-size:13px;color:#ff9944;margin:4px 0}
+</style></head><body>
+<div class="box">
+  <div class="h">&#9888; Maximum Clients Reached</div>
+  <div>Maximale Anzahl gleichzeitiger Verbindungen erreicht.</div>
+  <div class="badge">${clients.size} / ${maxC} verbunden</div>
+  <div class="info">
+    Seite lädt automatisch alle 15 Sekunden neu.<br><br>
+    Emergency-Zugriff (Admin):
+    <a href="?override=1">Override (verdrängt ältesten Client)</a>
+  </div>
+</div></body></html>`);
+        } else {
+          res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end(JSON.stringify({ error: 'max_clients', maxClients: maxC, connected: clients.size }));
+        }
+        return;
+      }
     }
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
     res.write(':\n\n');
@@ -1869,10 +2003,18 @@ async function _requestHandler(req, res) {
       idleImagePath: masterOpts.idleImagePath || null,
       idleImageName: masterOpts.idleImagePath ? path.basename(masterOpts.idleImagePath) : null,
       numPlayers:        _numPlayers,
+      numVoSlots:        _settings.numVoSlots || 2,
       slotIds:           _slotIds,
       backupSlot:        _settings.backupSlot       || null,
       backupMediaDirs:   _settings.backupMediaDirs  || [],
       transitionSpeeds:  _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 },
+      scaleMode:         masterOpts.scaleMode        || 'fit',
+      scaleMethod:       masterOpts.scaleMethod      ?? 1,
+      deinterlaceMode:   masterOpts.deinterlaceMode  || 'auto',
+      stillSlots:        Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))),
+      maxClients:        parseInt(_settings.maxClients || '0') || 0,
+      videoDelayMs:      _settings.videoDelayMs      ?? 0,
+      audioDelayMs:      _settings.audioDelayMs      || {},
     });
   }
   if (meth === 'GET'  && p === '/api/config/sinks') {
@@ -2320,8 +2462,31 @@ async function _requestHandler(req, res) {
       playlist.opts.autoGap = !!b.autoGap;
       _settings.autoGap = !!b.autoGap;
     }
-    if (b.stillSlots !== undefined) _settings.stillSlots = Math.max(0, Math.min(9, parseInt(b.stillSlots) || 0));
-    if (b.maxClients !== undefined) _settings.maxClients = Math.max(0, parseInt(b.maxClients) || 0);
+    if (b.stillSlots        !== undefined) _settings.stillSlots       = Math.max(0, Math.min(9, parseInt(b.stillSlots) || 0));
+    if (b.maxClients        !== undefined) _settings.maxClients       = Math.max(0, parseInt(b.maxClients) || 0);
+    if (b.grafikLatencyMs   !== undefined) {
+      _settings.grafikLatencyMs = Math.max(0, parseInt(b.grafikLatencyMs) || 0);
+      playlist.opts.grafikLatencyMs = _settings.grafikLatencyMs;
+    }
+    if (b.videoDelayMs !== undefined) {
+      _settings.videoDelayMs = Math.max(-500, Math.min(2000, parseInt(b.videoDelayMs) || 0));
+      if (master?.running) master.setVideoDelay(_settings.videoDelayMs);
+    }
+    if (b.audioDelayMs !== undefined && typeof b.audioDelayMs === 'object') {
+      if (!_settings.audioDelayMs) _settings.audioDelayMs = {};
+      for (const [gid, ms] of Object.entries(b.audioDelayMs)) {
+        _settings.audioDelayMs[gid] = Math.max(-500, Math.min(2000, parseInt(ms) || 0));
+        if (master?.running) master.setAudioDelay(gid, _settings.audioDelayMs[gid]);
+      }
+    }
+    if (b.liveCueMode       !== undefined && ['asap','timed'].includes(b.liveCueMode)) {
+      _settings.liveCueMode = b.liveCueMode;
+      playlist.opts.liveCueMode = b.liveCueMode;
+    }
+    if (b.liveCueLeadSec    !== undefined) {
+      _settings.liveCueLeadSec = Math.max(0, parseFloat(b.liveCueLeadSec) || 0);
+      playlist.opts.liveCueLeadSec = _settings.liveCueLeadSec;
+    }
     saveSettings(_settings);
     broadcast('state', getState());
     return json(res, { ok: true });
@@ -2336,16 +2501,121 @@ async function _requestHandler(req, res) {
     if (!_requireAuth(req, res, ['admin'])) return;
     const b = await parseBody(req);
     if (!Array.isArray(b.liveSources)) return json(res, { error: 'liveSources muss ein Array sein' }, 400);
-    // Validierung: jede Quelle braucht id + gstSrc
+    // Validierung: jede Quelle braucht id + (gstSrc | uri)
     for (const ls of b.liveSources) {
-      if (!ls.id || !ls.gstSrc) return json(res, { error: 'Jede Quelle braucht id und gstSrc' }, 400);
+      if (!ls.id) return json(res, { error: 'Jede Quelle braucht eine id' }, 400);
       if (!/^[a-zA-Z0-9_-]+$/.test(ls.id)) return json(res, { error: `Ungültige id: "${ls.id}" (nur a-z, 0-9, _, -)` }, 400);
+      // uri-Shorthand: RTSP / HLS / UDP / HTTP → automatisch gstSrc generieren
+      if (ls.uri && !ls.gstSrc) {
+        ls.gstSrc = _buildUriLiveSrc(ls.uri, ls.uriLatencyMs ?? 200);
+        if (!ls.gstAudioSrc) ls.gstAudioSrc = _buildUriLiveAudioSrc(ls.uri, ls.uriLatencyMs ?? 200);
+        ls.hasAudio = ls.hasAudio !== false;
+      }
+      if (!ls.gstSrc) return json(res, { error: `Quelle "${ls.id}": gstSrc oder uri erforderlich` }, 400);
     }
     _settings.liveSources = b.liveSources;
     saveSettings(_settings);
     broadcast('state', getState());
     log(`Live-Quellen aktualisiert: ${b.liveSources.length} Einträge (Neustart erforderlich)`, 'info', 'system');
     return json(res, { ok: true, note: 'Neustart erforderlich damit GStreamer-Pipeline neu aufgebaut wird' });
+  }
+
+  // ── Pipeline-Latenz-Messung ─────────────────────────────────────────────────
+  if (meth === 'GET' && p === '/api/pipeline/latency') {
+    if (!_requireAuth(req, res, ['admin','operator'])) return;
+    try {
+      const info = _measurePipelineLatency();
+      return json(res, info);
+    } catch(e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
+  // ── A/V-Sync: automatische Messung ─────────────────────────────────────────
+  // Injiziert SMPTE-Testsignal, misst Audio-Onset via Level-Meter, schätzt Video-Latenz.
+  // Empfiehlt welchen Pfad und um wie viele ms zu verzögern.
+  if (meth === 'POST' && p === '/api/pipeline/av-sync/measure') {
+    if (!_requireAuth(req, res, ['admin','operator'])) return;
+    if (!master?.running) return json(res, { error: 'Pipeline nicht aktiv' }, 409);
+    const b = await parseBody(req);
+    const timeoutMs = Math.min(5000, Math.max(500, parseInt(b.timeoutMs || '1500')));
+    try {
+      const result = await master.measureAvSync(timeoutMs);
+      return json(res, result);
+    } catch(e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
+  // ── A/V-Sync: Delay manuell setzen oder Messergebnis übernehmen ────────────
+  // PATCH body: { videoDelayMs?: number, audioDelayMs?: {groupId: ms}, applyRecommendation?: true }
+  if (meth === 'PATCH' && p === '/api/pipeline/av-sync') {
+    if (!_requireAuth(req, res, ['admin','operator'])) return;
+    const b = await parseBody(req);
+
+    // applyRecommendation: Messung ausführen und automatisch anwenden
+    if (b.applyRecommendation) {
+      if (!master?.running) return json(res, { error: 'Pipeline nicht aktiv' }, 409);
+      const mres = await master.measureAvSync(1500).catch(e => ({ error: e.message }));
+      if (mres.error) return json(res, mres, 500);
+      if (mres.recommendation) {
+        const { delayPath, delayMs } = mres.recommendation;
+        if (delayPath === 'video') {
+          const newVms = Math.round((_settings.videoDelayMs || 0) + delayMs);
+          _settings.videoDelayMs = newVms;
+          master.setVideoDelay(newVms);
+        } else {
+          const newAms = { ...(_settings.audioDelayMs || {}) };
+          for (const group of (audioGroupConfig?.groups || [])) {
+            newAms[group.id] = Math.round((newAms[group.id] || 0) + delayMs);
+            master.setAudioDelay(group.id, newAms[group.id]);
+          }
+          _settings.audioDelayMs = newAms;
+        }
+        saveSettings(_settings);
+        broadcast('state', getState());
+        return json(res, { ok: true, applied: mres.recommendation, current: master.getDelays() });
+      }
+      return json(res, { ok: false, note: 'Keine Empfehlung (Audio-Onset nicht erkannt)', measurement: mres });
+    }
+
+    // Manuell setzen
+    if (b.videoDelayMs !== undefined) {
+      const ms = Math.max(-500, Math.min(2000, parseInt(b.videoDelayMs) || 0));
+      _settings.videoDelayMs = ms;
+      if (master?.running) master.setVideoDelay(ms);
+    }
+    if (b.audioDelayMs !== undefined && typeof b.audioDelayMs === 'object') {
+      if (!_settings.audioDelayMs) _settings.audioDelayMs = {};
+      for (const [groupId, ms] of Object.entries(b.audioDelayMs)) {
+        const msVal = Math.max(-500, Math.min(2000, parseInt(ms) || 0));
+        _settings.audioDelayMs[groupId] = msVal;
+        if (master?.running) master.setAudioDelay(groupId, msVal);
+      }
+    }
+    // Reset: alle Delays auf 0
+    if (b.reset) {
+      _settings.videoDelayMs = 0;
+      _settings.audioDelayMs = {};
+      if (master?.running) {
+        master.setVideoDelay(0);
+        for (const group of (audioGroupConfig?.groups || [])) master.setAudioDelay(group.id, 0);
+      }
+    }
+
+    saveSettings(_settings);
+    broadcast('state', getState());
+    return json(res, { ok: true, current: master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs || 0, audioMs: _settings.audioDelayMs || {} } });
+  }
+
+  // ── A/V-Sync: aktuellen Status abfragen ────────────────────────────────────
+  if (meth === 'GET' && p === '/api/pipeline/av-sync') {
+    if (!_requireAuth(req, res, ['admin','operator'])) return;
+    return json(res, {
+      current:    master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs||0, audioMs: _settings.audioDelayMs||{} },
+      configured: { videoDelayMs: _settings.videoDelayMs||0, audioDelayMs: _settings.audioDelayMs||{} },
+      groups:     (audioGroupConfig?.groups || []).map(g => g.id),
+    });
   }
   if (meth === 'POST' && p === '/api/playlist/gap-fill') {
     // Lücken in der Playlist auffüllen: Gap-Clip zwischen Events einfügen
@@ -2492,7 +2762,8 @@ function getState() {
     slots:    { onAir: playlist._onAirSlot, idle: playlist._idleSlot },
     playlist: { running: playlist._running, paused: playlist._paused, currentIndex: playlist.currentIndex, length: playlist.playlist.length },
     playing:  _currentPlaying ? { ..._currentPlaying, elapsedMs: Date.now() - _currentPlaying.startMs } : null,
-    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0 },
+    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{} },
+    avSync:   master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs??0, audioMs: _settings.audioDelayMs||{} },
     grafik:   { active: activeGrafiks },
   };
 }
