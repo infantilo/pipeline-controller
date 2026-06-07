@@ -62,15 +62,17 @@
       "label": "Zwei Ton",
       "routes": [
         {
-          "from": "mxf_ch1",
+          "from": "mxf_ch3",
           "to": [
-            "pgm-stereo:L"
+            "pgm-stereo:L",
+            "begl-stereo:L"
           ]
         },
         {
-          "from": "mxf_ch2",
+          "from": "mxf_ch4",
           "to": [
-            "pgm-stereo:R"
+            "pgm-stereo:R",
+            "begl-stereo:R"
           ]
         }
       ],
