@@ -9,10 +9,13 @@
  *   http/s    — JSON-Webhook (POST)
  *   tcp       — Generischer Text-TCP mit {{variable}}-Template
  *
- * Meldezeitpunkte:
- *   live:precue      — Live-Event vor On-Air: routet Upstream-Signal auf idle Decklink-Eingang
- *   player:cued      — Clip pre-cued (5s vor On-Air)
- *   playlist:playing — tatsächliches On-Air-Event
+ * Schaltzeitpunkte für Live-Quellen:
+ *   asap   — Sofort beim Erkennen eines bevorstehenden Live-Events vorlegen
+ *   timed  — Einstellbarer Vorlauf (routeLeadSec) vor der kalkulierten Startzeit
+ *
+ * Sonderfälle:
+ *   - Das nächste zu spielende Event ist immer sofort — unabhängig vom Modus
+ *   - live:precue dient als Sicherheitsnetz (manuelle Starts, Latenzkorrekturen)
  */
 
 const net   = require('net');
@@ -23,7 +26,7 @@ const https = require('https');
 const meta = exports.meta = {
   id:          'broadcast-controller',
   name:        'Broadcast Controller',
-  version:     '2.0.0',
+  version:     '3.0.0',
   description: 'Router-Steuerung via SW-P-08 (Nevion IPATH, EVS Cerebrum), CERECONTROL-TCP oder HTTP-Webhook.',
   hasStatus:   true,
 
@@ -69,10 +72,10 @@ const meta = exports.meta = {
     },
     {
       key: 'swp08PgmDest',
-      label: 'SW-P-08 PGM-Destination (On-Air)',
+      label: 'SW-P-08 PGM-Destination (Pre-Cue)',
       type: 'string', default: '',
       condition: 'protocol=sw-p-08',
-      help: 'Für On-Air-Meldung: Ziel-Port-Name oder -Nummer (z.B. "PGM" oder 0). Leer = keine On-Air-Route.',
+      help: 'Für Clip-Pre-Cue-Meldung: Ziel-Port-Name oder -Nummer (z.B. "PGM" oder 0). Leer = keine Clip-Route.',
     },
 
     // ── Cerebrum ───────────────────────────────────────────────────────────────
@@ -98,24 +101,41 @@ const meta = exports.meta = {
       help: 'Variablen: {{source}}, {{file}}, {{title}}, {{timecode}}, {{slotId}}, {{eventType}}, {{upstreamSource}}, {{inputId}}, {{liveSlot}}',
     },
 
-    // ── Meldezeitpunkte ────────────────────────────────────────────────────────
+    // ── Live-Routing Zeitpunkt ─────────────────────────────────────────────────
     {
-      key: 'reportOnCue', label: 'Bei Pre-Cue melden (player:cued)', type: 'boolean', default: true,
-      help: 'Sendet Meldung wenn Clip-Player geladen wird (~5s vor On-Air).',
+      key: 'routeMode',
+      label: 'Schaltzeitpunkt Live-Routing',
+      type: 'select',
+      options: [
+        { value: 'asap',  label: 'a) Sofort — beim ersten Erkennen vorlegen (auch Stunden vor Sendung)' },
+        { value: 'timed', label: 'b) Normal — einstellbarer Vorlauf vor kalkulierter Startzeit' },
+      ],
+      default: 'timed',
+      help: 'Bestimmt wann die Schaltung für bevorstehende Live-Events ausgelöst wird. Das nächste Event wird immer sofort vorgelegt.',
     },
     {
-      key: 'reportOnPlay', label: 'Bei On-Air melden (playlist:playing)', type: 'boolean', default: true,
+      key: 'routeLeadSec',
+      label: 'Vorlauf (Sekunden)',
+      type: 'number', default: 15,
+      condition: 'routeMode=timed',
+      help: 'Sekunden vor der kalkulierten Event-Startzeit. Ausreichend für langsames Schaltverhalten wählen.',
     },
+
+    // ── Pre-Cue Clip-Meldung ───────────────────────────────────────────────────
     {
-      key: 'liveSourcesOnly', label: 'Nur Live-Quellen melden', type: 'boolean', default: false,
-      help: 'Filtert clip-basierte Events heraus — nur Live-Routing-Befehle werden gesendet.',
+      key: 'reportOnCue',
+      label: 'Clip Pre-Cue melden (player:cued)',
+      type: 'boolean', default: false,
+      help: 'Sendet Meldung wenn ein Clip-Player geladen wird (~5 s vor On-Air). Gilt nicht für Live-Events.',
     },
   ],
 
   subscribes: [
-    'playlist:playing',
     'player:cued',
     'live:precue',
+    'playlist:started',
+    'playlist:ended',
+    'playlist:jumped',
     'system:shutdown',
   ],
 };
@@ -134,7 +154,7 @@ function _updateStatus(state, extra = {}) {
 }
 function _log(msg, level = 'info') { _api?.log?.(level, msg); }
 
-// ── TCP-Verbindung (alle TCP-basierten Protokolle) ────────────────────────────
+// ── TCP-Verbindung ─────────────────────────────────────────────────────────────
 function _ensureTcp(onReady) {
   if (_tcpSocket?.writable) { onReady(_tcpSocket); return; }
   if (_tcpConnecting) { setTimeout(() => _ensureTcp(onReady), 200); return; }
@@ -160,10 +180,9 @@ function _ensureTcp(onReady) {
   sock.on('close', () => {
     if (_tcpSocket === sock) { _tcpSocket = null; _updateStatus('disconnected'); }
   });
-  sock.on('data', _onTcpData); // empfange Antworten (SW-P-08 sendet ggf. Status zurück)
+  sock.on('data', _onTcpData);
 }
 
-// Empfangene TCP-Daten (SW-P-08 Quittierungen, Cerebrum-Antworten) — nur loggen
 let _rxBuf = Buffer.alloc(0);
 function _onTcpData(chunk) {
   _rxBuf = Buffer.concat([_rxBuf, chunk]);
@@ -177,25 +196,10 @@ function _tcpSend(data) {
   });
 }
 
-// ── SW-P-08 Protokoll ─────────────────────────────────────────────────────────
-//
-// Frame-Format:  DLE STX [CMD] [DATA mit DLE-Stuffing] DLE ETX
-//   DLE = 0x10, STX = 0x02, ETX = 0x03
-//
-// Crosspoint Connect (CMD = 0x04):
-//   DATA = dst_hi dst_lo src_hi src_lo level
-//   Alle Bytes 0x10 in DATA werden als 0x10 0x10 gesendet (DLE-Stuffing).
-//
-// Adressierung: 16-bit Big-Endian (0–65535)
-//   Level: 0=Video, 1=Audio, 255=alle Ebenen
-//
-const _SWP_DLE = 0x10;
-const _SWP_STX = 0x02;
-const _SWP_ETX = 0x03;
-const _SWP_CONNECT = 0x04;
+// ── SW-P-08 ────────────────────────────────────────────────────────────────────
+const _SWP_DLE = 0x10, _SWP_STX = 0x02, _SWP_ETX = 0x03, _SWP_CONNECT = 0x04;
 
 function _swp08BuildConnect(dstAddr, srcAddr, level) {
-  // DLE-Stuffing der Datenbytes
   const raw = [
     (dstAddr >> 8) & 0xFF, dstAddr & 0xFF,
     (srcAddr >> 8) & 0xFF, srcAddr & 0xFF,
@@ -206,8 +210,6 @@ function _swp08BuildConnect(dstAddr, srcAddr, level) {
   return Buffer.from([_SWP_DLE, _SWP_STX, _SWP_CONNECT, ...stuffed, _SWP_DLE, _SWP_ETX]);
 }
 
-// Löst einen Namen oder direkte Nummer aus einer Lookup-Tabelle auf.
-// Direkte Ganzzahl-Strings (z.B. "5") werden ohne Tabelle akzeptiert.
 function _swp08Resolve(mapObj, key) {
   if (key === null || key === undefined || key === '') return null;
   const direct = parseInt(key, 10);
@@ -225,11 +227,9 @@ function _parseMap(val) {
 function _swp08Connect(srcName, dstName) {
   const srcMap = _parseMap(_cfg.swp08SourceMap);
   const dstMap = _parseMap(_cfg.swp08DestMap);
-
   const srcAddr = _swp08Resolve(srcMap, srcName);
   const dstAddr = _swp08Resolve(dstMap, dstName);
   const level   = parseInt(_cfg.swp08Matrix) || 0;
-
   if (srcAddr === null) {
     _log(`SW-P-08: Kein Mapping für Quelle "${srcName}" — swp08SourceMap prüfen`, 'warn');
     _updateStatus('error', { error: `Kein Source-Mapping: "${srcName}"` }); return;
@@ -238,15 +238,13 @@ function _swp08Connect(srcName, dstName) {
     _log(`SW-P-08: Kein Mapping für Ziel "${dstName}" — swp08DestMap prüfen`, 'warn');
     _updateStatus('error', { error: `Kein Dest-Mapping: "${dstName}"` }); return;
   }
-
   const frame = _swp08BuildConnect(dstAddr, srcAddr, level);
   _log(`SW-P-08 CONNECT src=${srcName}(${srcAddr}) → dst=${dstName}(${dstAddr}) Level=${level}`);
   _tcpSend(frame);
   _updateStatus('ok', { lastEvent: `SW-P-08: ${srcName}(${srcAddr}) → ${dstName}(${dstAddr}) L${level}` });
 }
 
-// ── EVS Cerebrum CERECONTROL ───────────────────────────────────────────────────
-// Format: TAKE <router> <destination> <source>\r\n
+// ── Cerebrum ───────────────────────────────────────────────────────────────────
 function _cerebrumTake(srcName, dstName) {
   const router = _cfg.cerebrumRouterName || 'VPR';
   const dst    = dstName || _cfg.cerebrumDestination || 'PGM1';
@@ -288,75 +286,163 @@ function _tcpTemplate(vars) {
   _updateStatus('ok', { lastEvent: `TCP → ${msg.trim()}` });
 }
 
-// ── Live Pre-Cue Routing ───────────────────────────────────────────────────────
-// data = { liveSlot, inputId, upstreamSource, upstreamLabel, index }
-//   inputId        = physischer Decklink-Eingang (z.B. "DL_IN_2" oder "2")
-//   upstreamSource = Upstream-Signal-ID (z.B. "FeedWien" oder "5")
-function _dispatchLivePrecue(data) {
+// ── Live-Input Routing ─────────────────────────────────────────────────────────
+// data = { liveSlot, inputId, upstreamSource, upstreamLabel }
+function _dispatchLiveRoute(data) {
   const { inputId, upstreamSource, upstreamLabel, liveSlot } = data;
   if (!upstreamSource) return;
-
   const tc = new Date().toTimeString().slice(0, 8);
-
   switch (_cfg.protocol) {
     case 'sw-p-08':
-      // Route: upstreamSource → inputId (Decklink-Eingang)
       _swp08Connect(upstreamSource, inputId);
       break;
     case 'cerebrum':
-      // TAKE VPR <inputId> <upstreamSource>
       _cerebrumTake(upstreamSource, inputId);
       break;
     case 'tcp':
       _tcpTemplate({
-        eventType: 'live-precue', source: upstreamSource,
+        eventType: 'live-route', source: upstreamSource,
         liveSlot: liveSlot || '', inputId: inputId || '',
         upstreamSource, upstreamLabel: upstreamLabel || upstreamSource,
         file: '', title: upstreamLabel || upstreamSource, timecode: tc, slotId: liveSlot || '',
       });
       break;
-    default: // http / https
-      _httpPost({ eventType: 'live-precue', liveSlot, inputId, upstreamSource,
+    default:
+      _httpPost({ eventType: 'live-route', liveSlot, inputId, upstreamSource,
         upstreamLabel: upstreamLabel || upstreamSource, ts: Date.now() });
   }
 }
 
-// ── On-Air / Pre-Cue Dispatch (Clips + generisch) ─────────────────────────────
-let _cachedLiveSources = [];
+// ── Clip Pre-Cue Dispatch ──────────────────────────────────────────────────────
 async function _refreshLiveSources() {
-  try { _cachedLiveSources = (await _api?.getState?.())?.config?.liveSources || []; } catch {}
+  try { _cachedLiveSrcs = (await _api?.getState?.())?.config?.liveSources || []; } catch {}
 }
 
-function _dispatch(eventType, data) {
-  const source  = data.event?.source || data.slotId || '';
-  const file    = data.event?.file   || '';
-  const title   = data.event?.title  || '';
-  const slotId  = data.slotId        || '';
-  const tc      = new Date().toTimeString().slice(0, 8);
-  const isLive  = _cachedLiveSources.some(ls => ls.id === source) || source === 'live';
-  const liveLabel = _cachedLiveSources.find(ls => ls.id === source)?.label || source;
+function _isLiveEvent(ev) {
+  if (!ev?.source) return false;
+  return _cachedLiveSrcs.some(ls => ls.id === ev.source) || ev.source === 'live';
+}
 
-  if (_cfg.liveSourcesOnly && !isLive) return;
-
+function _dispatchClipCue(data) {
+  const source = data.event?.source || data.slotId || '';
+  const file   = data.event?.file   || '';
+  const title  = data.event?.title  || '';
+  const slotId = data.slotId        || '';
+  const tc     = new Date().toTimeString().slice(0, 8);
   switch (_cfg.protocol) {
     case 'sw-p-08': {
       const pgmDst = (_cfg.swp08PgmDest || '').trim();
-      if (!pgmDst) return; // kein PGM-Ziel konfiguriert → kein On-Air-Route
+      if (!pgmDst) return;
       _swp08Connect(source, pgmDst);
       break;
     }
     case 'cerebrum':
-      if (!isLive) return;
       _cerebrumTake(source, _cfg.cerebrumDestination || 'PGM1');
       break;
     case 'tcp':
-      _tcpTemplate({ source, file, title, timecode: tc, slotId, eventType,
-        liveLabel: isLive ? liveLabel : '', upstreamSource: source, inputId: '', liveSlot: '' });
+      _tcpTemplate({ source, file, title, timecode: tc, slotId, eventType: 'pre-cue',
+        liveLabel: '', upstreamSource: source, inputId: '', liveSlot: '' });
       break;
     default:
-      _httpPost({ eventType, source, file, title, slotId, timecode: tc,
-        isLive, liveLabel: isLive ? liveLabel : null, ts: Date.now() });
+      _httpPost({ eventType: 'pre-cue', source, file, title, slotId, timecode: tc, ts: Date.now() });
   }
+}
+
+// ── Live-Routing Scheduler ─────────────────────────────────────────────────────
+// Tracks which events have been routed and schedules future routes.
+// Key: event.id (stable across playlist mutations)
+const _routed  = new Set();   // IDs already dispatched this playlist run
+const _timers  = new Map();   // eventId → setTimeout handle
+let   _pollTimer = null;
+
+function _clearScheduled() {
+  for (const t of _timers.values()) clearTimeout(t);
+  _timers.clear();
+}
+
+function _routeNow(ev, lsConf) {
+  if (_routed.has(ev.id)) return;
+  _routed.add(ev.id);
+  _timers.delete(ev.id);
+  const inputId        = lsConf.inputId        || ev.source;
+  const upstreamSource = ev.upstreamSource      || lsConf.upstreamSource || ev.source;
+  const upstreamLabel  = ev.upstreamLabel       || lsConf.label          || ev.source;
+  _log(`Live-Route: ${upstreamSource} → ${inputId} (Event: ${ev.title || ev.source})`);
+  _dispatchLiveRoute({ liveSlot: ev.source, inputId, upstreamSource, upstreamLabel });
+}
+
+// Estimate cumulative start time (ms from now) for events starting at pl[fromIdx].
+// Uses playing.durMs/elapsedMs for the current event, then sums subsequent durations.
+function _estimateStartMs(pl, fromIdx, playing) {
+  let base = Date.now();
+  if (playing) {
+    base += Math.max(0, (playing.durMs || 0) - (playing.elapsedMs || 0));
+  }
+  for (let i = 0; i < fromIdx; i++) {
+    base += ((pl[i]?.duration || 0) * 1000);
+  }
+  return base;
+}
+
+async function _scan() {
+  try {
+    const state = await _api?.getState?.();
+    if (!state?.playlist?.running) {
+      _clearScheduled();
+      _routed.clear();
+      return;
+    }
+
+    const curIdx = state.playlist.currentIndex ?? -1;
+    const pl     = (await _api?.getPlaylist?.()) || [];
+    if (!pl.length) return;
+
+    // Remove routed/timer entries for already-played or removed events
+    const upcomingIds = new Set(pl.slice(curIdx + 1).map(e => e.id));
+    for (const [id, t] of _timers) {
+      if (!upcomingIds.has(id)) { clearTimeout(t); _timers.delete(id); }
+    }
+    for (const id of _routed) {
+      if (!upcomingIds.has(id)) _routed.delete(id);
+    }
+
+    const mode    = _cfg.routeMode || 'timed';
+    const leadMs  = Math.max(0, (parseInt(_cfg.routeLeadSec) || 15)) * 1000;
+
+    for (let i = curIdx + 1; i < pl.length; i++) {
+      const ev     = pl[i];
+      const lsConf = _cachedLiveSrcs.find(ls => ls.id === ev.source);
+      if (!lsConf) continue;
+      if (_routed.has(ev.id) || _timers.has(ev.id)) continue;
+
+      const isNext        = i === curIdx + 1;
+      const startMs       = _estimateStartMs(pl.slice(curIdx + 1, i), i - curIdx - 1, state.playing);
+      const msUntilRoute  = startMs - Date.now() - leadMs;
+
+      if (mode === 'asap' || isNext || msUntilRoute <= 0) {
+        // Route immediately
+        _routeNow(ev, lsConf);
+      } else {
+        // Schedule for (startMs - leadMs)
+        const timer = setTimeout(() => {
+          _timers.delete(ev.id);
+          _routeNow(ev, lsConf);
+        }, msUntilRoute);
+        _timers.set(ev.id, timer);
+        _log(`Live-Route geplant: ${ev.title || ev.source} in ${Math.round(msUntilRoute/1000)}s`, 'debug');
+      }
+    }
+  } catch(e) {
+    _log(`scan: ${e.message}`, 'debug');
+  }
+}
+
+function _schedulePoll() {
+  clearTimeout(_pollTimer);
+  _pollTimer = setTimeout(async () => {
+    await _scan();
+    _schedulePoll(); // re-arm
+  }, 5000);
 }
 
 // ── Plugin-API ─────────────────────────────────────────────────────────────────
@@ -366,26 +452,62 @@ exports.init = async function(config, api) {
   await _refreshLiveSources();
   _updateStatus('idle');
 
-  // SW-P-08 / Cerebrum: Verbindung proaktiv aufbauen
   if (_cfg.protocol === 'sw-p-08' || _cfg.protocol === 'cerebrum') {
-    _ensureTcp(() => {}); // connect im Hintergrund
+    _ensureTcp(() => {});
   }
+
+  await _scan();
+  _schedulePoll();
 };
 
 exports.onEvent = async function(type, data) {
   try {
     switch (type) {
-      case 'playlist:playing':
-        await _refreshLiveSources();
-        if (_cfg.reportOnPlay !== false) _dispatch('on-air', data);
-        break;
       case 'player:cued':
-        if (_cfg.reportOnCue !== false) _dispatch('pre-cue', data);
+        // Clip pre-cue notification (non-live events, if configured)
+        if (_cfg.reportOnCue) {
+          await _refreshLiveSources();
+          if (!_isLiveEvent(data.event)) _dispatchClipCue(data);
+        }
+        // Trigger a scan: next event may now have changed
+        await _scan();
         break;
+
       case 'live:precue':
-        _dispatchLivePrecue(data);
+        // Safety-net: fires immediately before on-air for live events.
+        // Routes if not already done (handles manual jumps / forceJump starts).
+        {
+          const { liveSlot, inputId, upstreamSource, upstreamLabel } = data;
+          if (upstreamSource && inputId) {
+            // Use event index to build a stable key if no id available
+            const key = `__precue_${data.index ?? liveSlot}`;
+            if (!_routed.has(key)) {
+              _routed.add(key);
+              _log(`Live-Route (safety-net / live:precue): ${upstreamSource} → ${inputId}`);
+              _dispatchLiveRoute({ liveSlot, inputId, upstreamSource, upstreamLabel });
+            }
+          }
+          await _scan();
+        }
         break;
+
+      case 'playlist:started':
+      case 'playlist:jumped':
+        // Playlist started or manually jumped — re-evaluate scheduling immediately
+        _clearScheduled();
+        _routed.clear();
+        await _refreshLiveSources();
+        await _scan();
+        break;
+
+      case 'playlist:ended':
+        _clearScheduled();
+        _routed.clear();
+        break;
+
       case 'system:shutdown':
+        clearTimeout(_pollTimer);
+        _clearScheduled();
         try { _tcpSocket?.destroy(); } catch {}
         _tcpSocket = null;
         break;
@@ -400,13 +522,18 @@ exports.onConfigUpdate = function(newCfg) {
   _cfg = newCfg;
   try { _tcpSocket?.destroy(); } catch {}
   _tcpSocket = null;
+  _clearScheduled();
+  _routed.clear();
   if (_cfg.protocol === 'sw-p-08' || _cfg.protocol === 'cerebrum') {
     _ensureTcp(() => {});
   }
+  _scan();
   _updateStatus('idle');
 };
 
 exports.destroy = function() {
+  clearTimeout(_pollTimer);
+  _clearScheduled();
   try { _tcpSocket?.destroy(); } catch {}
   _tcpSocket = null;
 };

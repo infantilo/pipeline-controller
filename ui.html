@@ -12,10 +12,32 @@
   --pl-bg:var(--bg2);--prep-bg:var(--bg2);
 }
 :root.light{
-  --bg:#f0f0f0;--bg2:#ffffff;--bg3:#e8e8e8;--bg4:#d8d8d8;
-  --border:#c0c0c0;--text:#1a1a1a;--dim:#555;
-  --pl-bg:#ffffff;--prep-bg:#f8f8f8;
+  --bg:#e4e4e4;--bg2:#f2f2f2;--bg3:#d8d8d8;--bg4:#c4c4c4;
+  --border:#a6a6a6;--text:#111111;--dim:#484848;
+  /* semantic colours shifted darker so they read on light backgrounds */
+  --col-play:#1a7a1a;--col-cued:#1058a8;--col-cueing:#926000;
+  --yellow:#7a5500;--red:#be1a1a;--green:#1a7a1a;--orange:#9e4200;
+  --pl-bg:#f2f2f2;--prep-bg:#e6e6e6;
 }
+/* Light-mode class overrides — must come after :root to take effect */
+.light .pl-item.cur{background:color-mix(in srgb,var(--col-play) 22%,var(--bg3))!important;}
+.light .pl-item.err{background:rgba(190,26,26,.13)!important;}
+.light .pl-item.warn{background:rgba(150,110,0,.11)!important;}
+.light .pl-item.hold{background:rgba(158,66,0,.13)!important;}
+.light .pl-item.cued{background:color-mix(in srgb,var(--col-cued) 18%,var(--bg3))!important;}
+.light .pl-item.cueing{background:color-mix(in srgb,var(--col-cueing) 18%,var(--bg3))!important;}
+.light .pl-item.will-skip{opacity:.65;}
+.light .pl-item.pl-gap-wait{background:rgba(146,96,0,.16);border-color:rgba(146,96,0,.62);}
+.light .pl-item.pl-overlap-warn{background:rgba(190,26,26,.14);border-color:rgba(190,26,26,.58);}
+.light .gap-pos{background:rgba(146,96,0,.20);}
+.light .gap-neg{background:rgba(190,26,26,.20);}
+.light .gap-skip{background:rgba(158,66,0,.20);}
+.light .pl-prog{background:rgba(0,0,0,.15);}
+.light .stp-miss{background:rgba(190,26,26,.16);border-color:rgba(190,26,26,.52);}
+.light .stp-warn{background:rgba(146,96,0,.15);border-color:rgba(146,96,0,.52);}
+.light .pl-tc{color:#355e8a;}
+.light .pl-tc.fx{color:var(--yellow);}
+.light .pl-dur{color:#456080;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
 
@@ -200,6 +222,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 .pl-block-wrap{border-left:3px solid rgba(90,171,255,.55);margin-left:5px;padding-left:1px;}
 .pl-item.pl-collapsed{background:rgba(90,171,255,.09);border-color:rgba(90,171,255,.5);}
 .pl-item.pl-gap-wait{background:rgba(255,180,0,.08);border-color:rgba(255,180,0,.5);border-style:dashed;}
+.pl-item.pl-overlap-warn{background:rgba(220,50,50,.07);border-color:rgba(220,50,50,.45);border-style:dashed;}
 .pl-block-toggle{cursor:pointer;user-select:none;color:var(--accent2);font-size:10px;margin-right:2px;}
 .pl-comment-icon{color:#aaa;font-size:10px;}
 .pl-comment-text{color:#ccc;font-style:italic;font-size:10px;}
@@ -633,6 +656,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
             <label><input type="checkbox" id="col-audio"           onchange="saveCols()"> <span data-i18n="colcfg.audio">Audio</span></label>
             <label><input type="checkbox" id="col-children" checked onchange="saveCols()"> <span data-i18n="colcfg.children">Graphic Events</span></label>
             <label><input type="checkbox" id="col-avail" onchange="saveCols();loadAvailability()"> <span>Verfügbarkeit</span></label>
+            <label><input type="checkbox" id="col-starttype" onchange="saveCols()"> <span>Start-Typ</span></label>
+            <label><input type="checkbox" id="col-endtype"   onchange="saveCols()"> <span>End-Typ</span></label>
             <label><input type="checkbox" id="col-segment" onchange="saveCols()"> <span>Segment</span></label>
             <label><input type="checkbox" id="col-playmode" onchange="saveCols()"> <span>Abspielmodus</span></label>
             <label><input type="checkbox" id="col-classif" onchange="saveCols()"> <span>Klassifikation</span></label>
@@ -2215,7 +2240,7 @@ function _connectSSE(){
         updateAll(); renderPl();
       }).catch(()=>{});
       fetch('/api/assets').then(r=>r.json()).then(d=>{ S.assets=d; _renderAssetPanel(); }).catch(()=>{});
-      fetch('/api/still/state').then(r=>r.json()).then(d=>{ _stillState=d||[]; _renderStillButtons(); }).catch(()=>{});
+      fetch('/api/still/state').then(r=>r.json()).then(d=>{ _stillState=d||[]; _renderStillButtons(); _updateAssetStateBadge(); }).catch(()=>{});
       fetch('/api/record/status').then(r=>r.json()).then(d=>{ S.recordStatus=d; _updateRecordBadge(); }).catch(()=>{});
     }, 300);
   });
@@ -2618,6 +2643,7 @@ sse.addEventListener('grafik',e=>{
   sse.addEventListener('still-state', e => {
     _stillState = JSON.parse(e.data);
     _renderStillButtons();
+    _updateAssetStateBadge();
   });
   sse.addEventListener('asset-state', e => {
     S.assetState = JSON.parse(e.data);
@@ -3989,7 +4015,10 @@ function _updateAssetStateBadge() {
   const badge = document.getElementById('asset-active-badge');
   if (badge) badge.style.display = S.assetState?.active ? 'inline-flex' : 'none';
   const dot = document.getElementById('asset-section-dot');
-  if (dot) dot.style.background = S.assetState?.active ? 'var(--red)' : 'var(--dim)';
+  if (dot) {
+    const freezeOnAir = _stillState.some(s => s.active);
+    dot.style.background = (S.assetState?.active || freezeOnAir) ? 'var(--red)' : 'var(--dim)';
+  }
   if (!document.getElementById('sec-asset')?.classList.contains('collapsed')) _renderAssetPanel();
 }
 
@@ -4036,8 +4065,16 @@ function _recalcTimeline() {
   updateBigCounter();
 }
 // ── Spalten-Konfiguration ──────────────────────────────────────────────────
-const COL_DEFAULTS = { tc:true, status:true, dur:true, trans:true, speed:true, branding:false, audio:false, children:true, avail:false, segment:false, playmode:false, classif:false, title:true, file:true };
+const COL_DEFAULTS = { tc:true, status:true, dur:true, trans:true, speed:true, branding:false, audio:false, children:true, avail:false, segment:false, playmode:false, classif:false, title:true, file:true, starttype:false, endtype:false };
 let _cols = {...COL_DEFAULTS};
+
+// ── Virtual playlist scroller ─────────────────────────────────────────────
+let _renderOnePlRow = null;   // closure set by renderPl — captures tl/fps/C/gridCols
+let _vsRows = [];
+let _vsHeights = new Int32Array(0);
+let _vsPrefixSum = new Int32Array(1);
+let _vsRafId = 0;
+const VS_BUF = 35;            // rows buffered above/below viewport
 function loadCols() {
   try { const s=localStorage.getItem(_lsKey('pl_cols')); if(s) _cols={...COL_DEFAULTS,...JSON.parse(s)}; } catch{}
   for(const [k,v] of Object.entries(_cols)) { const el=document.getElementById(`col-${k}`); if(el) el.checked=v; }
@@ -4071,7 +4108,8 @@ function _plGridCols(C) {
     '26px',  // nummer (inkl. ✓/⊘ done-mark)
     // fix-badge: integriert in TC-Spalte (kein eigene Spalte mehr)
   ];
-  if(C.tc)       cols.push('84px');   // TC (breiter für ⏰ prefix)
+  if(C.tc)        cols.push('84px');   // TC (breiter für ⏰ prefix)
+  if(C.starttype) cols.push('22px');   // start type icon
   cols.push('18px');    // src icon
   if(C.classif) cols.push('44px');             // classification
   if(C.title)   cols.push('minmax(60px,.8fr)'); // title
@@ -4081,6 +4119,7 @@ function _plGridCols(C) {
   if(C.branding) cols.push('18px');
   if(C.avail)    cols.push('28px');
   if(C.dur)      cols.push('70px');
+  if(C.endtype)  cols.push('22px');   // end type icon
   // trans + speed: eine Spalte wenn beide aktiv
   if(C.trans && C.speed)  cols.push('40px');   // "CUT" / "⇢F" combined
   else if(C.trans)         cols.push('24px');   // type icon only
@@ -4123,9 +4162,10 @@ function _buildChildrenHtml(e, fps, isBlock){
       const t = (c.source==='image'||c.source==='voiceover') ? c : (c.source==='record' ? (c.record||{}) : (c.grafik||{}));
       const delaySec = t.delayFrames!=null ? t.delayFrames/fps : (t.delayMs!=null ? t.delayMs/1000 : (t.delay??0));
       const startIsRel = t._startRelEnd===true;
-      const delayStr = delaySec>0
-        ? (startIsRel ? `-${delaySec.toFixed(1)}s vor ${endRef}` : `+${delaySec.toFixed(1)}s`)
-        : (startIsRel ? `${endRef} -0` : 'sofort');
+      const delayStr = startIsRel
+        ? (delaySec>0 ? `-${delaySec.toFixed(1)}s vor ${endRef}` : `${endRef} -0`)
+        : delaySec<0 ? `-${Math.abs(delaySec).toFixed(1)}s vor Start`
+        : delaySec>0 ? `+${delaySec.toFixed(1)}s` : 'sofort';
       const hasEndOff = t.endOffsetFrames!=null || t._endRelEnd===true;
       let endStr;
       if(hasEndOff){
@@ -4170,7 +4210,7 @@ function _buildChildrenHtml(e, fps, isBlock){
       const g=c.grafik||{};
       const fields=Object.entries(g).filter(([k,v2])=>v2!=null&&v2!==''&&k!=='id'&&k!=='template'&&k!=='type'
         &&k!=='delayFrames'&&k!=='durationFrames'&&k!=='endOffsetFrames'&&k!=='delay'&&k!=='duration'&&k!=='endOffset'
-        &&k!=='_startRelEnd'&&k!=='_endRelEnd').map(([k,v2])=>{
+        &&k!=='_startRelEnd'&&k!=='_endRelEnd'&&k!=='_startBeforeClip').map(([k,v2])=>{
         const vs=typeof v2==='object'?JSON.stringify(v2):v2;return`${k}: ${vs}`;
       }).join(' · ');
       return `<div class="pl-child ch-grafik">
@@ -4205,7 +4245,8 @@ function _renderPlHeader(C, gridCols) {
     H(''),   // drag
     HR('#'), // num
   ];
-  if(C.tc)       cells.push(H(t('col.tc')));
+  if(C.tc)        cells.push(H(t('col.tc')));
+  if(C.starttype) cells.push(HC('S'));
   cells.push(H(''));   // src icon
   if(C.classif)  cells.push(H('Klasse'));
   if(C.title)    cells.push(H('Titel'));
@@ -4214,7 +4255,8 @@ function _renderPlHeader(C, gridCols) {
   if(C.audio)    cells.push(H(t('col.audio')));
   if(C.branding) cells.push(HC('B'));
   if(C.avail)    cells.push(HC('MB'));
-  if(C.dur)      cells.push(HR(t('col.dur')));
+  if(C.dur)       cells.push(HR(t('col.dur')));
+  if(C.endtype)   cells.push(HC('E'));
   if(C.trans && C.speed) cells.push(HC('Trans'));
   else if(C.trans)       cells.push(HC('Tr'));
   else if(C.speed)       cells.push(HC('Sp'));
@@ -4259,6 +4301,15 @@ function renderPl(){
           const isActive=S._gapActive&&i===S.playlist.currentIndex;
           _plRows.push({type:'gap_wait',gapMs,fixTime:e0.startTime,isActive,forIdx:i});
         }
+        const overlapMs=tl[i-1]?.overlapMs||0;
+        if(overlapMs>500){
+          let skipCount=0;
+          for(let j=i-1;j>=0;j--){
+            if(tl[j]?.willSkipByFix||tl[j]?.skippedByOverlap) skipCount++;
+            else break;
+          }
+          _plRows.push({type:'overlap_warn',overlapMs,skipCount,fixTime:e0.startTime,forIdx:i});
+        }
       }
       const e=S.plData[i];
       if(e.source==='block_start'){
@@ -4275,8 +4326,21 @@ function renderPl(){
       }
     }
   }
-  body.innerHTML=_plRows.map(row=>{
-    if(row.type==='gap_wait'){ // eslint-disable-line no-unused-vars
+  // Only the single next pending player event per slot can be cued.
+  // Build a set of the first upcoming player event index per slot so we don't
+  // colour every future event that happens to share the same alternating slot.
+  const _curIdx = S.playlist.currentIndex ?? -1;
+  const _firstPendingPerSlot = {};
+  for (let x = _curIdx + 1; x < S.plData.length; x++) {
+    const ev = S.plData[x];
+    if (!_isPlayerEv(ev)) continue;
+    const st = ev._state || 'pending';
+    if (st === 'done' || st === 'skipped') continue;
+    const sl = _slotForIdx(x);
+    if (_firstPendingPerSlot[sl] === undefined) _firstPendingPerSlot[sl] = x;
+  }
+  _renderOnePlRow=(row)=>{
+    if(row.type==='gap_wait'){
       const fps=S.config?.fps||25;
       const gapSrc=S.config?.gapSource||'black';
       let remStr,progPct=0;
@@ -4297,6 +4361,17 @@ function renderPl(){
         <span style="flex:1"></span>
         <span style="font-family:var(--mono);font-size:10px;color:var(--yellow);font-weight:600" ${idAttr}>${remStr}</span>
         <span class="pl-prog" style="min-width:40px"><span class="pl-prog-bar" ${barAttr} style="width:${progPct.toFixed(1)}%;background:var(--yellow)"></span></span>
+      </div>`;
+    }
+    if(row.type==='overlap_warn'){
+      const durStr=ftFF(row.overlapMs/1000,fps);
+      const skipStr=row.skipCount>0?`· ${row.skipCount} Event${row.skipCount!==1?'s':''} übersprungen`:'';
+      return `<div class="pl-item pl-overlap-warn" style="display:flex;align-items:center;gap:6px;padding:3px 8px">
+        <span style="font-size:9px;color:var(--red);font-weight:700">⚠ OVERLAP</span>
+        <span style="font-size:9px;color:var(--dim)">→ ${row.fixTime}</span>
+        ${skipStr?`<span style="font-size:9px;color:#f97316">${skipStr}</span>`:''}
+        <span style="flex:1"></span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--red);font-weight:600">-${durStr}</span>
       </div>`;
     }
     if(row.type==='block_start'&&row.collapsed){
@@ -4360,8 +4435,9 @@ function renderPl(){
     const isHold=isCur&&S.playlist.paused;
     const slot=_slotForIdx(i);
     const playerState=S.players?.[slot];
-    const isCued=!isCur&&_isPlayerEv(e)&&playerState?.cued&&!isErr;
-    const isCueing=!isCur&&_isPlayerEv(e)&&playerState?.cueing&&!isErr;
+    const isNextForSlot=_firstPendingPerSlot[slot]===i;
+    const isCued=!isCur&&isNextForSlot&&_isPlayerEv(e)&&playerState?.cued&&!isErr;
+    const isCueing=!isCur&&isNextForSlot&&_isPlayerEv(e)&&playerState?.cueing&&!isErr;
 
     const tlEntry=tl[i];
     const willSkip=!isDone&&!isSkipped&&!isCur&&(tlEntry?.skippedByOverlap||tlEntry?.willSkipByFix);
@@ -4538,6 +4614,12 @@ function renderPl(){
     // TC-Spalte: ⏰ prefix wenn fixtime
     const _tcPrefix = e.startType==='fixtime' ? '<span style="font-size:8px;margin-right:2px">⏰</span>' : '';
     if(C.tc)       cells.push(`<span class="pl-cell ${tcCls}">${_tcPrefix}${tcStr}</span>`);
+    if(C.starttype){
+      const _st=e.startType||'sequential';
+      const _stIcon=_st==='fixtime'?'⏰':_st==='manual'?'⏸':'→';
+      const _stCol=_st==='fixtime'?'var(--yellow)':_st==='manual'?'var(--accent)':'rgba(128,128,128,.35)';
+      cells.push(`<span class="pl-cell" style="text-align:center;font-size:10px;color:${_stCol}" title="Start: ${_st}">${_stIcon}</span>`);
+    }
     cells.push(`<span class="pl-cell" style="text-align:center;font-size:11px">${SRC_ICON[e.source]||_liveSourceIcon(e.source)||'?'}</span>`);
     if(C.classif) cells.push(`<span class="pl-cell" style="overflow:hidden;padding:0 2px" title="${e.classification||''}">${classifBadge||'<span style="color:rgba(128,128,128,.3);font-size:8px">·</span>'}</span>`);
     if(C.title)   cells.push(`<div class="pl-cell" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:10px">${e.title?`<span style="font-weight:600;color:var(--accent)">${e.title}</span>`:'<span style="color:rgba(128,128,128,.3)">—</span>'}</div>`);
@@ -4550,6 +4632,12 @@ function renderPl(){
     const _endBadge=e.endType==='fixtime'?'<span style="color:var(--yellow);font-size:8px"> 🔒</span>':e.endType==='manual'?'<span style="color:var(--dim);font-size:8px"> ⏸</span>':'';
     const _spd=e.transitionSpeed||'fast';const _spdAbbr={fast:'F',medium:'M',slow:'S'}[_spd]||'F';
     if(C.dur)   cells.push(`<span class="pl-cell pl-dur">${durStr}${_endBadge}</span>`);
+    if(C.endtype){
+      const _et=e.endType||'sequential';
+      const _etIcon=_et==='manual'?'⏸':_et==='fixtime'?'🔒':'→';
+      const _etCol=_et==='manual'?'var(--accent)':_et==='fixtime'?'var(--yellow)':'rgba(128,128,128,.35)';
+      cells.push(`<span class="pl-cell" style="text-align:center;font-size:10px;color:${_etCol}" title="End: ${_et}">${_etIcon}</span>`);
+    }
     // trans+speed: eine Spalte wenn beide aktiv
     if(C.trans && C.speed){
       const _trIcon=TRANS_ICON[_tr]||'│';
@@ -4596,11 +4684,105 @@ function renderPl(){
       ${cells.join('')}
       ${childrenHtml?`<div style="grid-column:1/-1;margin-top:2px">${childrenHtml}</div>`:''}
     </div>`;
-  }).join('');
+  };
 
-  // Sync header after body is rendered (scrollbar may now appear/disappear)
+  _vsRows = _plRows;
+  _vsRebuild();
+  if (!body._vsListening) {
+    body.addEventListener('scroll', _vsOnScroll, { passive: true });
+    body._vsListening = true;
+  }
+  _vsApply(body);
   requestAnimationFrame(_syncTheadScrollbar);
   updateBigCounter();
+}
+
+// ── VS: build prefix-sum height table ────────────────────────────────────
+function _vsRebuild() {
+  const n = _vsRows.length;
+  _vsHeights = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    const row = _vsRows[i];
+    if (row.type !== 'normal') { _vsHeights[i] = 28; continue; }
+    const e = S.plData[row.i];
+    const cc = _cols.children && e?.children?.length ? e.children.length : 0;
+    _vsHeights[i] = 28 + cc * 17;
+  }
+  _vsPrefixSum = new Int32Array(n + 1);
+  for (let i = 0; i < n; i++) _vsPrefixSum[i + 1] = _vsPrefixSum[i] + _vsHeights[i];
+}
+
+// ── VS: binary-search row index for a scroll offset ──────────────────────
+function _vsRowAtY(y) {
+  let lo = 0, hi = _vsRows.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (_vsPrefixSum[mid + 1] <= y) lo = mid + 1;
+    else hi = mid;
+  }
+  return Math.min(lo, Math.max(0, _vsRows.length - 1));
+}
+
+// ── VS: render only the visible window ───────────────────────────────────
+function _vsApply(container) {
+  if (!_vsRows.length || !_renderOnePlRow) return;
+  const scrollTop = container.scrollTop;
+  const viewH     = container.clientHeight || 500;
+  const totalH    = _vsPrefixSum[_vsRows.length];
+  const first = Math.max(0, _vsRowAtY(scrollTop) - VS_BUF);
+  const last  = Math.min(_vsRows.length - 1, _vsRowAtY(scrollTop + viewH) + VS_BUF);
+
+  // Ensure structure: sizer sets total scroll height, items is abs-positioned
+  // and moved with transform — transforms don't trigger layout or shift scrollTop.
+  let sizer = document.getElementById('pl-vs-sizer');
+  let items = document.getElementById('pl-vs-items');
+  if (!sizer) {
+    container.innerHTML = '';
+    container.style.position = 'relative';
+    sizer = document.createElement('div');
+    sizer.id = 'pl-vs-sizer';
+    sizer.style.cssText = 'position:absolute;top:0;left:0;width:1px;pointer-events:none;visibility:hidden';
+    items = document.createElement('div');
+    items.id = 'pl-vs-items';
+    items.style.cssText = 'position:absolute;top:0;left:0;right:0;will-change:transform';
+    container.append(sizer, items);
+  }
+  sizer.style.height = totalH + 'px';
+  items.style.transform = `translateY(${_vsPrefixSum[first]}px)`;
+
+  // Handle pl-block-wrap open/close across viewport boundaries.
+  let inBlock = false;
+  for (let i = first - 1; i >= 0; i--) {
+    const r = _vsRows[i];
+    if (r.type === 'block_end')                   { break; }
+    if (r.type === 'block_start' && !r.collapsed) { inBlock = true; break; }
+  }
+
+  const parts = [];
+  if (inBlock) parts.push('<div class="pl-block-wrap">');
+  let depth = inBlock ? 1 : 0;
+  for (let i = first; i <= last; i++) {
+    const row = _vsRows[i];
+    let html = _renderOnePlRow(row);
+    if (row.type === 'block_end') {
+      if (depth === 0) html = html.replace(/^<\/div>/, '');
+      else depth--;
+    }
+    if (row.type === 'block_start' && !row.collapsed) depth++;
+    parts.push(html);
+  }
+  while (depth-- > 0) parts.push('</div>');
+
+  items.innerHTML = parts.join('');
+}
+
+function _vsOnScroll() {
+  if (_vsRafId) return;
+  _vsRafId = requestAnimationFrame(() => {
+    _vsRafId = 0;
+    const c = document.getElementById('pl-body');
+    if (c) _vsApply(c);
+  });
 }
 
 let _expandedChildren = {};
@@ -5061,17 +5243,20 @@ function openEventEditor(idx,ev){
       if(c.source==='image') return { type:'image', src:c.src||'', delay:c.delay, duration:c.duration,
         delayFrames:c.delayFrames, durationFrames:c.durationFrames,
         endOffset:c.endOffset, endOffsetFrames:c.endOffsetFrames,
-        layer:c.layer||'overlay', _startRelEnd:c._startRelEnd, _endRelEnd:c._endRelEnd };
+        layer:c.layer||'overlay', _startRelEnd:c._startRelEnd, _endRelEnd:c._endRelEnd,
+        _startBeforeClip:c._startBeforeClip };
       if(c.source==='voiceover') return { type:'voiceover', file:c.file||c.voiceover?.file||'',
         preset:c.preset||c.voiceover?.preset||'AP100',
         delay:c.delay??c.voiceover?.delay??0, duration:c.duration??c.voiceover?.duration??null,
         endOffset:c.endOffset??c.voiceover?.endOffset??0,
         _startRelEnd:c._startRelEnd??c.voiceover?._startRelEnd??false,
-        _endRelEnd:c._endRelEnd??c.voiceover?._endRelEnd??false };
+        _endRelEnd:c._endRelEnd??c.voiceover?._endRelEnd??false,
+        _startBeforeClip:c._startBeforeClip??c.voiceover?._startBeforeClip??false };
       if(c.source==='record'){ const r=c.record||{}; return { type:'record',
         slot:r.slot||'auto', videoSource:r.videoSource||'pgm',
         delay:r.delay??0, duration:r.duration??null, endOffset:r.endOffset??null,
         _startRelEnd:r._startRelEnd??false, _endRelEnd:r._endRelEnd??false,
+        _startBeforeClip:r._startBeforeClip??false,
         fileTemplate:r.fileTemplate||r.filename||'{date}_{time}_{title}',
         overwrite:r.overwrite??false }; }
       return { type:'grafik', ...c.grafik };
@@ -6847,15 +7032,17 @@ function saveEvent(){
 function _mapGrafikChild(g) {
   if(g.type==='voiceover') return { source:'voiceover', file:g.file, preset:g.preset,
     delay:g.delay, duration:g.duration, endOffset:g.endOffset,
-    _startRelEnd:g._startRelEnd, _endRelEnd:g._endRelEnd };
+    _startRelEnd:g._startRelEnd, _endRelEnd:g._endRelEnd, _startBeforeClip:g._startBeforeClip };
   if(g.type==='image') return { source:'image', src:g.src, delay:g.delay, duration:g.duration,
     delayFrames:g.delayFrames, durationFrames:g.durationFrames,
     endOffset:g.endOffset, endOffsetFrames:g.endOffsetFrames,
-    layer:g.layer||'overlay', _startRelEnd:g._startRelEnd, _endRelEnd:g._endRelEnd };
+    layer:g.layer||'overlay', _startRelEnd:g._startRelEnd, _endRelEnd:g._endRelEnd,
+    _startBeforeClip:g._startBeforeClip };
   if(g.type==='record') return { source:'record', record:{
     slot:g.slot||'rec1', videoSource:g.videoSource||'pgm',
     delay:g.delay??0, duration:g.duration??null, endOffset:g.endOffset??null,
     _startRelEnd:g._startRelEnd??false, _endRelEnd:g._endRelEnd??false,
+    _startBeforeClip:g._startBeforeClip??false,
     fileTemplate:g.fileTemplate||'{date}_{time}_{title}',
     overwrite:g.overwrite??false,
   }};
@@ -7258,9 +7445,14 @@ function _renderGrafikList(){
 
   el.innerHTML = list.map((g, i) => {
     // Start/Ende timing — shared für HTML und Bild
-    const startIsRel = g._startRelEnd === true;
-    // Frames → TC-String
-    const startFrames = g.delayFrames ?? Math.round((g.delay ?? 0) * fps);
+    // Start-Anchor: 'start' (ab Block-Beginn) | 'preStart' (vor Block-Beginn) | 'end' (vor Block-/Clip-Ende)
+    const startMode = g._startRelEnd === true ? 'end' : (g._startBeforeClip === true ? 'preStart' : 'start');
+    // 'vor Start' (negativer Delay) wird nur für HTML-Grafik-Children pre-gecuet
+    // (siehe PlaylistEngine._doCue negativeOnly-Phase) — für VO/Rec/Bild läuft die
+    // Planung erst NACH Clip-Start, ein negativer Delay würde dort nur auf 0 clampen.
+    const supportsPreStart = (g.type !== 'voiceover' && g.type !== 'record' && g.type !== 'image');
+    // Frames → TC-String (Anzeige immer als positiver Betrag, Vorzeichen ergibt sich aus startMode)
+    const startFrames = Math.abs(g.delayFrames ?? Math.round((g.delay ?? 0) * fps));
     const endFrames   = g.endOffsetFrames != null ? Math.abs(g.endOffsetFrames)
                       : g.durationFrames != null  ? null  // Dauer-Modus
                       : g.duration != null        ? Math.round(g.duration * fps)
@@ -7278,17 +7470,18 @@ function _renderGrafikList(){
         <div>
           <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
             <span style="color:var(--dim);font-size:9px;flex:1">▶ Start</span>
-            <label style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:3px;white-space:nowrap">
-              <input type="checkbox" ${startIsRel?'checked':''}
-                onchange="emGrafikSetStartRel(${i},this.checked)"
-                style="width:auto;margin:0"> vor Ende
-            </label>
+            <select onchange="emGrafikSetStartMode(${i},this.value)"
+              style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--dim);padding:1px 3px;border-radius:2px">
+              <option value="start"${startMode==='start'?' selected':''}>ab Start</option>
+              ${supportsPreStart ? `<option value="preStart"${startMode==='preStart'?' selected':''}>vor Start</option>` : ''}
+              <option value="end"${startMode==='end'?' selected':''}>vor ${endRef}</option>
+            </select>
           </div>
-          <input type="text" value="${_framesToTC(g.delayFrames ?? Math.round((g.delay??0)*(S.config?.fps||25)), S.config?.fps||25)}" placeholder="00:00:03:00"
+          <input type="text" value="${startTC}" placeholder="00:00:03:00"
             oninput="emGrafikTcField(${i},'start',this.value)"
             style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:11px;font-family:var(--mono)">
           <div style="color:var(--dim);font-size:8px;margin-top:1px">
-            ${startIsRel ? `🔚 vor ${endRef}` : '🎬 ab Block-Beginn'}
+            ${startMode==='end' ? `🔚 vor ${endRef}` : startMode==='preStart' ? '⏪ vor Block-Beginn' : '🎬 ab Block-Beginn'}
           </div>
         </div>
         <div>
@@ -7343,6 +7536,7 @@ function _renderGrafikList(){
             style="background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:10px">
             <option value="overlay"${(g.layer||'overlay')==='overlay'?' selected':''}>Overlay</option>
             <option value="full"${g.layer==='full'?' selected':''}>Full</option>
+            <option value="auto"${g.layer==='auto'?' selected':''}>Auto</option>
           </select>
           <button class="ib" style="color:var(--red)" onclick="emRemoveGrafik(${i})">✕</button>
         </div>
@@ -7397,7 +7591,7 @@ function _renderGrafikList(){
       if (!g.data) g.data = {};
       const marinaKeys = Object.keys(g).filter(k =>
         !['type','template','layer','delay','duration','endOffset','delayFrames',
-          'durationFrames','endOffsetFrames','_startRelEnd','_endRelEnd','data',
+          'durationFrames','endOffsetFrames','_startRelEnd','_endRelEnd','_startBeforeClip','data',
           '_marinaFieldsMapped'].includes(k) && typeof g[k] === 'string'
       );
       for (const f of (knownTpl.fields || [])) {
@@ -7463,7 +7657,7 @@ function _renderGrafikList(){
     // Marina-Felder (direkt auf g, nicht in g.data) als read-only Übersicht
     const marinaFieldKeys = Object.keys(g).filter(k =>
       !['type','template','layer','delay','duration','endOffset','delayFrames','durationFrames',
-        'endOffsetFrames','_startRelEnd','_endRelEnd','data'].includes(k) && typeof g[k] === 'string'
+        'endOffsetFrames','_startRelEnd','_endRelEnd','_startBeforeClip','data'].includes(k) && typeof g[k] === 'string'
     );
     const marinaFieldsHtml = isMissingTpl && marinaFieldKeys.length
       ? `<div style="background:var(--bg4);border:1px solid var(--border);border-radius:2px;padding:5px 7px;margin-bottom:6px;font-size:9px;color:var(--dim)">
@@ -7493,7 +7687,7 @@ function _renderGrafikList(){
           style="background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:10px">
           <option value="overlay"${(g.layer||'overlay')==='overlay'?' selected':''}>Overlay</option>
           <option value="full"${g.layer==='full'?' selected':''}>Full</option>
-          <option value="Auto"${g.layer==='Auto'?' selected':''}>Auto</option>
+          <option value="auto"${g.layer==='auto'?' selected':''}>Auto</option>
         </select>
         <button class="ib" style="color:var(--red)" onclick="emRemoveGrafik(${i})">✕</button>
       </div>
@@ -7573,8 +7767,11 @@ function emGrafikTcField(i, which, val) {
   const frames = _tcToFrames(val, fps);
 
   if (which === 'start') {
-    g.delayFrames = frames ?? 0;
-    g.delay       = (frames ?? 0) / fps;
+    // 'vor Start' speichert den Betrag als negativen Delay (Engine startet Children
+    // mit delay<0 bereits in der Pre-Cue-Phase vor dem eigentlichen Clip-Start).
+    const signed = g._startBeforeClip ? -(frames ?? 0) : (frames ?? 0);
+    g.delayFrames = signed;
+    g.delay       = signed / fps;
   } else {  // 'end'
     const useEndOff = document.getElementById(`em-gfk-end-${i}`)?.closest('div')
                         ?.querySelector('input[type=checkbox]')?.checked
@@ -7600,13 +7797,17 @@ function emGrafikTcField(i, which, val) {
   }
 }
 
-function emGrafikSetStartRel(i, isRel) {
+function emGrafikSetStartMode(i, mode) {
   const g = S._editGrafik[i]; if (!g) return;
-  g._startRelEnd = isRel;
-  // Wenn relativ zu Ende: delay wird als endOffset vor Ende interpretiert
-  // (negatives delay = Start N frames vor Ende)
-  // Wir speichern die Flag, PlaylistEngine rechnet das um
-  // Hinweis im Label aktualisieren via Re-render
+  if (mode === 'preStart' && (g.type === 'voiceover' || g.type === 'record' || g.type === 'image')) return;
+  const fps = S.config?.fps || 25;
+  // Aktuellen Betrag (ohne Vorzeichen) beibehalten, nur Anchor + Vorzeichen wechseln.
+  const frames = Math.abs(g.delayFrames ?? Math.round((g.delay ?? 0) * fps));
+  g._startRelEnd     = (mode === 'end');
+  g._startBeforeClip = (mode === 'preStart');
+  const signed = (mode === 'preStart') ? -frames : frames;
+  g.delayFrames = signed;
+  g.delay       = signed / fps;
   _renderGrafikList();
 }
 
@@ -9160,6 +9361,15 @@ function drawTimeline() {
   }
 
   // ── Haupt-Events ──────────────────────────────────────────────────────
+  const _tlFirstPendingPerSlot = {};
+  for (let x = curIdx + 1; x < S.plData.length; x++) {
+    const ev = S.plData[x];
+    if (!_isPlayerEv(ev)) continue;
+    const st = ev._state || 'pending';
+    if (st === 'done' || st === 'skipped') continue;
+    const sl = _slotForIdx(x);
+    if (_tlFirstPendingPerSlot[sl] === undefined) _tlFirstPendingPerSlot[sl] = x;
+  }
   tl.forEach((entry, i) => {
     const ev = S.plData[i];
     if (!ev) return;
@@ -9182,7 +9392,8 @@ function drawTimeline() {
     const isDone = ev._state === 'done' || ev._state === 'skipped' || ev._state === 'idle-fallback';
     const isErr  = (S.plValid[ev.id] && !S.plValid[ev.id].ok) ||
                    (!ev.file && (ev.source==='player'||ev.source==='player1'||ev.source==='player2'));
-    const isCued = S.players?.[_slotForIdx(i)]?.cued && !isCur;
+    const _tlSlot = _slotForIdx(i);
+    const isCued = !isCur && _tlFirstPendingPerSlot[_tlSlot] === i && !!(S.players?.[_tlSlot]?.cued);
 
     // Modern gradient fill
     const r = ctx.canvas.getContext ? ctx : ctx;
@@ -9560,14 +9771,39 @@ function _initCounterStrip() {
 function scrollToCurrentPlItem(idx) {
   const i = idx ?? S.playlist.currentIndex;
   if (i == null || i < 0) return;
+  const body = document.getElementById('pl-body');
+  if (!body) return;
+  if (_vsRows.length) {
+    const ri = _vsRows.findIndex(r => r.i === i);
+    if (ri >= 0) {
+      const targetY = Math.max(0, _vsPrefixSum[ri] - ((body.clientHeight - _vsHeights[ri]) >> 1));
+      body.scrollTop = targetY;
+      _vsApply(body);
+      return;
+    }
+  }
+  // Fallback: find in DOM (non-virtual or before first renderPl)
   const el = document.querySelector(`[data-pl-idx="${i}"]`);
-  if (!el) return;
-  // 'center': keeps done events above and upcoming events below — better context than 'nearest'
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  el.style.outline = '2px solid var(--accent2)';
-  setTimeout(() => { el.style.outline = ''; }, 800);
+  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
-function scrollToPlItem(idx) { scrollToCurrentPlItem(idx); }
+function scrollToPlItem(idx) {
+  if (idx == null || idx < 0) return;
+  _selectedIdx = idx;
+  _selectedSet.clear();
+  _selectedSet.add(idx);
+  const body = document.getElementById('pl-body');
+  // Scroll first (before renderPl so the right window is rendered)
+  if (body && _vsRows.length) {
+    const ri = _vsRows.findIndex(r => r.i === idx || r.forIdx === idx);
+    if (ri >= 0) {
+      const targetY = Math.max(0, _vsPrefixSum[ri] - ((body.clientHeight - _vsHeights[ri]) >> 1));
+      body.scrollTop = targetY;
+    }
+  }
+  renderPl();
+  const btn = document.getElementById('btn-play');
+  if (btn) btn.textContent = `${t('btn.playFrom')} ${idx + 1}`;
+}
 
 // ── Follow-on-Air toggle ──────────────────────────────────────────────────
 let _followOnAir = false;
