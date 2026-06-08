@@ -390,9 +390,22 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     <div id="cstrip-cur-sub" style="font-size:8px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;text-align:center;margin-top:1px">—</div>
     <!-- On-Air Audio Preset hot-swap -->
     <div id="cstrip-preset-row" style="display:none;margin-top:3px;width:100%;cursor:default" onclick="event.stopPropagation()">
-      <select id="cstrip-preset-sel" title="Audio Preset live ändern (kurzer Audio-Gap)"
+      <select id="cstrip-preset-sel" title="Audio Preset live ändern (synchroner Crossfade-Wechsel)"
         style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;font-size:8px;padding:1px 3px"
         onchange="_onAirPresetChange(this.value)"></select>
+    </div>
+    <!-- On-Air AFD/Format hot-swap -->
+    <div id="cstrip-afd-row" style="display:none;margin-top:3px;width:100%;cursor:default" onclick="event.stopPropagation()">
+      <select id="cstrip-afd-sel" title="AFD/Format live ändern (synchroner Crossfade-Wechsel)"
+        style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;font-size:8px;padding:1px 3px"
+        onchange="_onAirAfdChange(this.value)">
+        <option value="auto">Standard (Pipeline-Einstellung)</option>
+        <option value="16:9">16:9 nativ</option>
+        <option value="4:3-pillarbox">4:3 Pillarbox → 16:9</option>
+        <option value="4:3-letterbox">16:9 Letterbox in 4:3 → 16:9</option>
+        <option value="14:9-letterbox">14:9 Letterbox → 16:9</option>
+        <option value="anamorphic">Anamorph 16:9 in 4:3</option>
+      </select>
     </div>
   </div>
   <!-- GAP / OVERLAP zum nächsten Event -->
@@ -2426,6 +2439,7 @@ sse.addEventListener('grafik',e=>{
     // Gap-Zustand: slotId=null + fixEnd gesetzt → warten auf Fix-Zeit
     S._gapActive=(d.slotId===null||d.slotId===undefined)&&!!d.fixEnd;
     _updateOnAirPresetRow(d.event);
+    _updateOnAirAfdRow(d.event);
 
     // Recalibrate whenever a real event starts (not a fixtime-gap re-emit).
     // Gap re-emits have slotId=null AND fixEnd set; all other events (including
@@ -2582,6 +2596,7 @@ sse.addEventListener('grafik',e=>{
     S.playlist.currentIndex=-1;
     S._plStartTime=null;S.playlist.running=false;_recalcTimeline();renderPl();updateAll();updateBigCounter();
     _updateOnAirPresetRow(null);
+    _updateOnAirAfdRow(null);
   });
   sse.addEventListener('manual-hold',e=>{
     S.playlist.paused=true;
@@ -2620,6 +2635,13 @@ sse.addEventListener('grafik',e=>{
     if (curEv) { curEv.audioPreset = d.preset; if (curEv.audioConfig) curEv.audioConfig.preset = d.preset; }
     const sel = document.getElementById('cstrip-preset-sel');
     if (sel && sel.value !== d.preset) sel.value = d.preset;
+  });
+  sse.addEventListener('onair-afd', e => {
+    const d = JSON.parse(e.data);
+    const curEv = S.plData[S.playlist.currentIndex ?? -1];
+    if (curEv) curEv.afd = d.afd;
+    const sel = document.getElementById('cstrip-afd-sel');
+    if (sel && sel.value !== d.afd) sel.value = d.afd;
   });
   sse.addEventListener('log',e=>appendLog(JSON.parse(e.data)));
   sse.addEventListener('branding',e=>{
@@ -3678,6 +3700,26 @@ async function _onAirPresetChange(presetId) {
     const r = await api('POST', '/api/playlist/onair-preset', { preset: presetId });
     if (r?.ok) showToast(`🔊 Audio: ${presetId}`);
     else showToast('❌ Preset-Änderung fehlgeschlagen');
+  } catch(e) { showToast('❌ ' + e.message); }
+}
+
+// ── On-Air AFD/Format Hot-Swap ────────────────────────────────────────────
+function _updateOnAirAfdRow(event) {
+  const row = document.getElementById('cstrip-afd-row');
+  const sel = document.getElementById('cstrip-afd-sel');
+  if (!row || !sel) return;
+  const isClip = event?.source === 'player' || (!['smpte','black','image','live','comment','block_start','block_end'].includes(event?.source||'') && !_isLiveSourceEv(event));
+  if (!isClip || !S.playlist.running) { row.style.display = 'none'; return; }
+  sel.value = event.afd || 'auto';
+  row.style.display = '';
+}
+
+async function _onAirAfdChange(afd) {
+  if (!afd) return;
+  try {
+    const r = await api('POST', '/api/playlist/onair-afd', { afd });
+    if (r?.ok) showToast(`🖼 Format: ${afd}`);
+    else showToast('❌ Format-Änderung fehlgeschlagen');
   } catch(e) { showToast('❌ ' + e.message); }
 }
 
@@ -10106,6 +10148,7 @@ Promise.all([
     // der Wiedergabe. Ohne diesen Aufruf bleibt die Zeile bis zum nächsten
     // Event-Wechsel unsichtbar (genau das gemeldete Verhalten).
     _updateOnAirPresetRow(p.event);
+    _updateOnAirAfdRow(p.event);
     // Anchor performance.now() to the server's elapsed time
     S._playingStart = performance.now() - (p.elapsedMs || 0);
     if (S._playingClipDur > 0) {

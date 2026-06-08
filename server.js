@@ -1831,19 +1831,25 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const presetId = b.preset;
     if (!presetId) return json(res, { ok: false, error: 'preset required' }, 400);
     const slotId = playlist._onAirSlot;
-    const player = slotId ? players[slotId] : null;
-    if (!player?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
-    const ok = await player.reloadAudioPreset(presetId).catch(e => { log(`onair-preset: ${e.message}`, 'warn', 'playlist'); return false; });
+    if (!slotId || !players[slotId]?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
+    const ok = await playlist.swapOnAirVariant({ audioPreset: presetId }).catch(e => { log(`onair-preset: ${e.message}`, 'warn', 'playlist'); return false; });
     if (ok) {
-      // Update the playlist event so the UI and as-run reflect the change
-      const curEv = playlist.playlist[playlist.currentIndex];
-      if (curEv) {
-        curEv.audioPreset = presetId;
-        if (!curEv.audioConfig) curEv.audioConfig = {};
-        curEv.audioConfig.preset = presetId;
-      }
-      log(`On-Air Audio-Preset → ${presetId} (${slotId})`, 'info', 'playlist');
-      broadcast('onair-preset', { preset: presetId, slotId });
+      log(`On-Air Audio-Preset → ${presetId} (${playlist._onAirSlot})`, 'info', 'playlist');
+      broadcast('onair-preset', { preset: presetId, slotId: playlist._onAirSlot });
+    }
+    return json(res, { ok });
+  }
+  if (meth === 'POST' && p === '/api/playlist/onair-afd') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    const b = await parseBody(req);
+    const afd = b.afd;
+    if (!afd) return json(res, { ok: false, error: 'afd required' }, 400);
+    const slotId = playlist._onAirSlot;
+    if (!slotId || !players[slotId]?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
+    const ok = await playlist.swapOnAirVariant({ afd }).catch(e => { log(`onair-afd: ${e.message}`, 'warn', 'playlist'); return false; });
+    if (ok) {
+      log(`On-Air AFD → ${afd} (${playlist._onAirSlot})`, 'info', 'playlist');
+      broadcast('onair-afd', { afd, slotId: playlist._onAirSlot });
     }
     return json(res, { ok });
   }
