@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; }
+  html { background: transparent !important; }
+  body { width:640px; height:360px; overflow:hidden; background:#000; }
+  .fs { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .title { color:#fff; font-size:24px; font-weight:700; font-family:Arial; text-align:center; }
+  .sub   { color:#ccc; font-size:12px; font-weight:300; font-family:Arial; text-align:center; margin-top:7px; }
+</style>
+</head><body>
+<div class="fs">
+  <div class="title" id="t"></div>
+  <div class="sub"   id="s"></div>
+</div>
+<script>
+  const d = window.__GRAFIX_DATA__ || {};
+  document.getElementById('t').textContent = d.title || '';
+  document.getElementById('s').textContent = d.subtitle || '';
+</script>
+</body></html>
