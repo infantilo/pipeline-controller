@@ -1832,12 +1832,16 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     if (!presetId) return json(res, { ok: false, error: 'preset required' }, 400);
     const slotId = playlist._onAirSlot;
     if (!slotId || !players[slotId]?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
-    const ok = await playlist.swapOnAirVariant({ audioPreset: presetId }).catch(e => { log(`onair-preset: ${e.message}`, 'warn', 'playlist'); return false; });
-    if (ok) {
-      log(`On-Air Audio-Preset → ${presetId} (${playlist._onAirSlot})`, 'info', 'playlist');
-      broadcast('onair-preset', { preset: presetId, slotId: playlist._onAirSlot });
-    }
-    return json(res, { ok });
+    if (playlist._swapping) return json(res, { ok: false, error: 'swap in progress' }, 409);
+    // Respond immediately — swapOnAirVariant takes 3-4 s and must never block the event loop.
+    json(res, { ok: true });
+    playlist.swapOnAirVariant({ audioPreset: presetId }).then(ok => {
+      if (ok) {
+        log(`On-Air Audio-Preset → ${presetId} (${playlist._onAirSlot})`, 'info', 'playlist');
+        broadcast('onair-preset', { preset: presetId, slotId: playlist._onAirSlot });
+      }
+    }).catch(e => { log(`onair-preset: ${e.message}`, 'warn', 'playlist'); });
+    return;
   }
   if (meth === 'POST' && p === '/api/playlist/onair-afd') {
     const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
