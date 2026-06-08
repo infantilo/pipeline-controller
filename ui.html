@@ -168,8 +168,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 .pl-hdr-row{display:flex;align-items:center;gap:3px;}
 .pl-item{background:var(--bg3);border:1px solid var(--border);border-left:3px solid transparent;border-radius:2px;margin-bottom:1px;cursor:pointer;min-height:26px;user-select:none;}
 .pl-item:hover{background:var(--bg4);}
-.pl-item.cur{border-left-color:var(--col-play)!important;background:color-mix(in srgb,var(--col-play) 7%,var(--bg3));}
-.pl-item.err{border-left-color:var(--red)!important;}
+.pl-item.cur{border-left-color:var(--col-play)!important;background:color-mix(in srgb,var(--col-play) 13%,var(--bg3));}
+.pl-item.err{border-left-color:var(--red)!important;background:color-mix(in srgb,var(--red) 13%,var(--bg3));}
 .pl-item.warn{border-left-color:var(--yellow)!important;}
 .pl-item.hold{border-left-color:var(--orange)!important;background:rgba(255,170,51,.06);}
 .pl-item.sel{outline:2px solid var(--accent2);outline-offset:-1px;}
@@ -693,7 +693,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     <button class="ib" id="pl-search-mode" onclick="plSearchToggleMode()" title="Suchmodus umschalten" style="font-size:9px;padding:1px 5px;flex-shrink:0">🎯 Mark</button>
     <button class="ib" onclick="plSearchClear()" title="Suche löschen" style="font-size:9px;padding:1px 4px;flex-shrink:0">✕</button>
   </div>
-  <div id="pl-thead" style="flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 4px"></div>
+  <div id="pl-thead" style="flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 10px 0 7px"></div>
   <div class="pb" id="pl-body" style="padding:3px 4px;flex:1;overflow-y:auto;background:var(--pl-bg)">
     <div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">Keine Events</div>
   </div>
@@ -1448,6 +1448,47 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         </div>
       </div>
       <button class="btn btn-p" style="font-size:10px" onclick="saveTransitionSpeeds()">💾 Übergangszeiten speichern</button>
+
+      <div class="sep" style="margin:14px 0"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Neues Event – Vorgaben</div>
+      <div style="font-size:9px;color:var(--dim);margin-bottom:8px">Werte, mit denen ein neu erstelltes Event vorbelegt wird.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+        <div class="fld"><label>Wiedergabemodus</label>
+          <select id="cfg-def-sommode" onchange="saveDefaultEventSettings()">
+            <option value="user">Manuell (SOM/EOM)</option>
+            <option value="media">Vollständig (erstes–letztes Frame)</option>
+            <option value="segment">Segment</option>
+          </select>
+        </div>
+        <div class="fld"><label>Ende</label>
+          <select id="cfg-def-endtype" onchange="saveDefaultEventSettings()">
+            <option value="sequential">Sequential</option>
+            <option value="manual">⏸ Manual Hold</option>
+            <option value="fixtime">🔒 Fix-Zeit</option>
+          </select>
+        </div>
+        <div class="fld"><label>Übergang</label>
+          <select id="cfg-def-transition" onchange="saveDefaultEventSettings()">
+            <option value="cut">| Cut</option>
+            <option value="v-fade">.\/ V-Fade (Schwarzblende)</option>
+            <option value="fade-cut">\| Fade-Cut</option>
+            <option value="cut-fade">|/ Cut-Fade</option>
+            <option value="xfade">X X-Fade (Überblende)</option>
+          </select>
+        </div>
+        <div class="fld"><label>Geschwindigkeit</label>
+          <select id="cfg-def-speed" onchange="saveDefaultEventSettings()">
+            <option value="fast">Fast</option>
+            <option value="medium">Medium</option>
+            <option value="slow">Slow</option>
+          </select>
+        </div>
+        <div class="fld" style="grid-column:1/-1"><label>Channelbranding</label>
+          <select id="cfg-def-branding" onchange="saveDefaultEventSettings()">
+            <option value="">(kein)</option>
+          </select>
+        </div>
+      </div>
 
       <div class="sep" style="margin:14px 0"></div>
       <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Anzeige</div>
@@ -2400,17 +2441,16 @@ sse.addEventListener('grafik',e=>{
         : Date.now();
       if (tlEntry && S._plStartTime) {
         const drift = anchorMs - tlEntry.start.getTime();
-        // Aggressive correction to prevent cumulative rightward drift over long playlists.
-        // Dead zone ≤150ms absorbs normal jitter without visible jumps.
-        // Larger drifts corrected at 70-100% so the timeline converges quickly.
-        if (Math.abs(drift) > 3000) {
+        // Fully re-anchor on every event start instead of partial/dead-zone correction:
+        // a "≤150ms = ignore" dead zone lets small systematic per-event errors (e.g.
+        // cached vs. measured clip duration) accumulate unbounded over long playlists
+        // ("läuft zu schnell" — timeline drifts further ahead the longer it runs).
+        // Full re-anchoring resets the base to the observed truth every single time,
+        // so residual error can never compound — only true sub-frame jitter (≤30ms)
+        // is ignored to avoid pointless micro-adjustments.
+        if (Math.abs(drift) > 30) {
           S._plStartTime = new Date(S._plStartTime.getTime() + drift);
-        } else if (Math.abs(drift) > 1000) {
-          S._plStartTime = new Date(S._plStartTime.getTime() + Math.round(drift * 0.9));
-        } else if (Math.abs(drift) > 150) {
-          S._plStartTime = new Date(S._plStartTime.getTime() + Math.round(drift * 0.7));
         }
-        // |drift| ≤ 150ms: noise — no correction
       } else {
         // Bootstrap (first clip or after reset)
         let accumMs = 0;
@@ -4226,13 +4266,16 @@ function _buildChildrenHtml(e, fps, isBlock){
 
 
 function _syncTheadScrollbar() {
-  // When pl-body has a vertical scrollbar, its content width < offsetWidth.
-  // Compensate pl-thead right-padding so its grid aligns with the body grid.
+  // pl-thead sits OUTSIDE pl-body's scroll area, so its width never shrinks
+  // by the scrollbar's width while pl-body's rows do (clientWidth < offsetWidth).
+  // Base right-padding (10px) already matches the row grid's right inset
+  // (pl-body padding-right 4px + row padding-right 6px); add the live
+  // scrollbar width on top so both grids end up the same width and align.
   const body  = document.getElementById('pl-body');
   const thead = document.getElementById('pl-thead');
   if (!body || !thead) return;
-  const sw = body.offsetWidth - body.clientWidth;  // scrollbar width (0 when no scrollbar)
-  thead.style.paddingRight = (4 + sw) + 'px';      // base 4px + scrollbar
+  const sw = body.offsetWidth - body.clientWidth;  // scrollbar width (0 when no scrollbar / overlay scrollbars)
+  thead.style.paddingRight = (10 + sw) + 'px';
 }
 
 function _renderPlHeader(C, gridCols) {
@@ -4267,7 +4310,7 @@ function _renderPlHeader(C, gridCols) {
   cells.push(H(''));   // progress
   cells.push(H(''));   // start-btn
   cells.push(H(''));   // actions
-  th.innerHTML = `<div style="display:grid;grid-template-columns:${gridCols};align-items:center;padding:0 4px">${cells.join('')}</div>`;
+  th.innerHTML = `<div style="display:grid;grid-template-columns:${gridCols};align-items:center">${cells.join('')}</div>`;
   requestAnimationFrame(_syncTheadScrollbar);
 }
 
@@ -5155,9 +5198,11 @@ function openEventEditor(idx,ev){
   S.editIdx=idx;
   const isNew=idx<0;
   const isOnAir=!isNew&&idx===S.playlist.currentIndex&&S.playlist.running;
+  const _de=S.config?.defaultEvent||{};
   const e=_emAssetEventData || (isNew?{source:'player',file:'',som:null,eom:null,duration:null,postroll:null,
-    endType:'sequential',startType:'sequential',startTime:null,fixTime:null,
-    transition:'cut',transitionSpeed:'fast',audioConfig:{pgm:'pgm-de'},branding:null}
+    endType:_de.endType||'sequential',startType:'sequential',startTime:null,fixTime:null,
+    transition:_de.transition||'cut',transitionSpeed:_de.transitionSpeed||'fast',
+    audioConfig:{pgm:'pgm-de'},branding:_de.branding||null,somMode:_de.somMode||'user'}
     :S.plData[idx]);
   if (_emAssetEventData) _emAssetEventData = null;
   document.getElementById('em-title').textContent=_emAssetMode?'Asset Event bearbeiten':(isNew?'Neues Event':`Event ${idx+1} bearbeiten${isOnAir?' 🔴 ON AIR':''}`);
@@ -6240,7 +6285,26 @@ function _loadPlaylistTab(){
     }
     const gcf = document.getElementById('gap-clip-file');
     if(gcf && d.gapFile) gcf.value = d.gapFile;
+    const de = d.defaultEvent || {};
+    const dSom = document.getElementById('cfg-def-sommode');     if(dSom) dSom.value = de.somMode || 'user';
+    const dEnd = document.getElementById('cfg-def-endtype');     if(dEnd) dEnd.value = de.endType || 'sequential';
+    const dTr  = document.getElementById('cfg-def-transition');  if(dTr)  dTr.value  = de.transition || 'cut';
+    const dSp  = document.getElementById('cfg-def-speed');       if(dSp)  dSp.value  = de.transitionSpeed || 'fast';
+    const dBr  = document.getElementById('cfg-def-branding');
+    if(dBr) dBr.innerHTML = '<option value="">(kein)</option>' +
+      [...S.branding].map(f=>`<option value="${f}"${de.branding===f?' selected':''}>${f}</option>`).join('');
   }).catch(()=>{});
+}
+async function saveDefaultEventSettings(){
+  const defaultEvent = {
+    somMode:         document.getElementById('cfg-def-sommode')?.value || 'user',
+    endType:         document.getElementById('cfg-def-endtype')?.value || 'sequential',
+    transition:      document.getElementById('cfg-def-transition')?.value || 'cut',
+    transitionSpeed: document.getElementById('cfg-def-speed')?.value || 'fast',
+    branding:        document.getElementById('cfg-def-branding')?.value || null,
+  };
+  S.config.defaultEvent = defaultEvent;
+  await api('POST','/api/config/paths',{ defaultEvent });
 }
 async function saveValidationSettings(){
   const dm = document.getElementById('cfg-duration-mismatch')?.value || undefined;
@@ -10002,8 +10066,17 @@ function initSections(){
   });
 }
 
-// Init — sofort State laden (auch bevor SSE verbunden ist)
-fetch('/api/state').then(r=>r.json()).then(d=>{
+// Init — sofort State laden (auch bevor SSE verbunden ist).
+// audioConfig wird sonst NUR lazy beim Öffnen bestimmter Settings-Panels
+// geladen (S.audioConfig bleibt bis dahin {groups:[],presets:{}}) — ohne
+// diesen Vorab-Fetch bliebe cstrip-preset-row beim Reload mitten in der
+// Wiedergabe leer/unsichtbar, weil _updateOnAirPresetRow() unten dann
+// keine Presets zum Anzeigen findet (genau das gemeldete Verhalten).
+Promise.all([
+  fetch('/api/state').then(r=>r.json()),
+  fetch('/api/audio/config').then(r=>r.json()).catch(()=>null),
+]).then(([d, ac])=>{
+  if (ac) { S.audioConfig = ac; _rebuildRoleCls(ac.groups); }
   Object.assign(S.master,   d.master   || {});
   Object.assign(S.playlist, d.playlist || {});
   Object.assign(S.config,   d.config   || {});
@@ -10028,6 +10101,11 @@ fetch('/api/state').then(r=>r.json()).then(d=>{
     S._playingFixEnd    = p.fixEnd     || null;
     S._playingClipName  = p.event?.file || p.event?.source || '';
     S._gapActive        = (!p.slotId) && !!p.fixEnd;
+    // Preset-Auswahl (cstrip-preset-sel) wird sonst NUR vom 'playlist-playing'
+    // SSE-Event gezeigt — das feuert aber nicht erneut beim Reload mitten in
+    // der Wiedergabe. Ohne diesen Aufruf bleibt die Zeile bis zum nächsten
+    // Event-Wechsel unsichtbar (genau das gemeldete Verhalten).
+    _updateOnAirPresetRow(p.event);
     // Anchor performance.now() to the server's elapsed time
     S._playingStart = performance.now() - (p.elapsedMs || 0);
     if (S._playingClipDur > 0) {

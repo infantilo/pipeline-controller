@@ -83,6 +83,30 @@
           "method": "ltrt"
         }
       ]
+    },
+    "TEST": {
+      "label": "TEST",
+      "routes": [
+        {
+          "from": "mxf_ch5",
+          "to": [
+            "pgm-stereo:L"
+          ]
+        },
+        {
+          "from": "mxf_ch6",
+          "to": [
+            "pgm-stereo:R"
+          ]
+        }
+      ],
+      "upmix": [
+        {
+          "from": "pgm-stereo",
+          "to": "pgm-51",
+          "method": "loro"
+        }
+      ]
     }
   },
   "clock": {
