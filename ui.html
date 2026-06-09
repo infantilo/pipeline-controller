@@ -768,7 +768,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
           <label><input type="checkbox" id="pcol-speed"    onchange="savePrepCols()"> Übergang Speed</label>
           <label><input type="checkbox" id="pcol-branding" onchange="savePrepCols()"> Branding</label>
           <label><input type="checkbox" id="pcol-audio"    onchange="savePrepCols()"> Audio</label>
-          <label><input type="checkbox" id="pcol-rate"  checked onchange="savePrepCols()"> Rate</label>
+          <label><input type="checkbox" id="pcol-title"   onchange="savePrepCols()"> Titel</label>
+          <label><input type="checkbox" id="pcol-file"    onchange="savePrepCols()"> Datei</label>
         </div>
       </div>
     </div>
@@ -1505,6 +1506,12 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
       <div class="sep" style="margin:14px 0"></div>
       <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Anzeige</div>
+      <div class="fld"><label>Abgespielte Events (Done)</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="number" id="cfg-done-keep" min="0" value="3" style="font-family:var(--mono);width:70px" oninput="saveDoneKeep()" placeholder="∞">
+          <span style="font-size:9px;color:var(--dim)">in Liste behalten (leer = alle)</span>
+        </div>
+      </div>
 
       <div class="sep" style="margin:14px 0"></div>
       <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Validation Errors</div>
@@ -2323,6 +2330,18 @@ function _connectSSE(){
     S.players=d.players||S.players;
     if(d.config?.transitionSpeeds) _applyTransitionSpeeds(d.config.transitionSpeeds);
     if(d.audioConfig){ S.audioConfig=d.audioConfig; _rebuildRoleCls(d.audioConfig.groups); _populatePresetSelect(); }
+    // Reconnect bootstrap: server includes _currentPlaying in state; use it to restore
+    // playing counters and _plStartTime (playlist SSE fires next and will finalize _plStartTime).
+    if(d.playing&&d.playlist?.running){
+      S._reconnectPlaying=d.playing;
+      S._playingClipDur  =d.playing.clipDur||0;
+      S._playingPostroll =d.playing.postrollSec||0;
+      S._playingFixEnd   =d.playing.fixEnd||null;
+      S._playingClipName =d.playing.event?.file||d.playing.event?.source||'';
+      S._playingStart    =performance.now()-(d.playing.elapsedMs||0);
+    } else {
+      S._reconnectPlaying=null;
+    }
     // Switcher und Player-Karten neu rendern wenn slotIds sich geändert hat
     if(JSON.stringify(S.config?.slotIds)!==prevSlots){
       _renderSwitcherGrid();
@@ -2395,6 +2414,18 @@ sse.addEventListener('grafik',e=>{
         _clipDur:ev._clipDur??local._clipDur,
       };
     });
+    // Reconnect: bootstrap _plStartTime now that S.plData is ready
+    if(S._reconnectPlaying&&!S._plStartTime){
+      const curIdx=S.playlist.currentIndex??0;
+      const anchorMs=Date.now()-(S._reconnectPlaying.elapsedMs||0);
+      let accumMs=0;
+      for(let i=0;i<curIdx;i++){
+        if(S.plData[i]?.endType==='manual') continue;
+        accumMs+=(_evDurSec(S.plData[i])||0)*1000;
+      }
+      S._plStartTime=new Date(anchorMs-accumMs);
+      S._reconnectPlaying=null;
+    }
     _recalcTimeline();
     renderPl();
     updateBigCounter();
@@ -2450,9 +2481,7 @@ sse.addEventListener('grafik',e=>{
       const tlEntry = S._timeline?.[curIdx];
       // Use the slot-assignment timestamp (from playlist-current) as anchor —
       // it fires before clip loading, so it accumulates no loading-time drift.
-      const anchorMs = (S._slotAssignIdx === curIdx && S._slotAssignMs)
-        ? S._slotAssignMs
-        : Date.now();
+      const anchorMs = Date.now();  // actual play start — _slotAssignMs fires before loading and causes ~10s left-offset
       if (tlEntry && S._plStartTime) {
         const drift = anchorMs - tlEntry.start.getTime();
         // Fully re-anchor on every event start instead of partial/dead-zone correction:
@@ -3973,22 +4002,18 @@ function calcTimeline(plData,startTime){
     if(e.startType==='fixtime'&&e.startTime){
       const fixMs=_todayFixMs(e.startTime);
       if(fixMs!==null){
+        const st=e._state||'pending';
+        const isDone=st==='done'||st==='skipped'||st==='playing';
         if(fixMs>t){
-          // Fixtime is in the future relative to accumulated t → normal snap
           t=fixMs;
-        } else {
-          // Accumulated t has overrun the fixtime.
-          // The PREVIOUS entry gets the overlap tagged.
-          // This event still anchors at its fixtime so subsequent events are correct.
+        } else if(!isDone){
+          // Pending fix event whose time has passed — snap back (overlap scenario).
           if(result.length>0){
             const prev=result[result.length-1];
             const ovl=t-fixMs;
             if(ovl>500) prev.overlapMs=Math.max(prev.overlapMs||0,ovl);
           }
-          t=fixMs;  // snap back — broadcast always starts fix-event at its wall-clock time
-          // Mark preceding pending events whose calculated start >= fixMs as willSkipByFix.
-          // Guard: only when the fix-time is genuinely in the future (>= timeline start).
-          // A past fix-time (e.g. 08:30 while it's already 14:00) must not mark events.
+          t=fixMs;
           if(fixMs>=startTime.getTime()){
             for(let j=result.length-1;j>=0;j--){
               const jr=result[j];
@@ -3999,9 +4024,9 @@ function calcTimeline(plData,startTime){
               jr.willSkipByFix=true;
             }
           }
-          const st=e._state||'pending';
-          if(st==='done'||st==='skipped') skippedByOverlap=true;
         }
+        // Done fix events where fixMs <= t: leave t at accumulated value.
+        // Snapping back corrupts _plStartTime drift-correction, cascading wrong times.
       }
     }
 
@@ -4149,6 +4174,7 @@ function _recalcTimeline() {
 // ── Spalten-Konfiguration ──────────────────────────────────────────────────
 const COL_DEFAULTS = { tc:true, status:true, dur:true, trans:true, speed:true, branding:false, audio:false, children:true, avail:false, segment:false, playmode:false, classif:false, title:true, file:true, starttype:false, endtype:false };
 let _cols = {...COL_DEFAULTS};
+let _plDoneKeep = 3; // how many done events to keep visible (-1 = all)
 
 // ── Virtual playlist scroller ─────────────────────────────────────────────
 let _renderOnePlRow = null;   // closure set by renderPl — captures tl/fps/C/gridCols
@@ -4160,6 +4186,14 @@ const VS_BUF = 35;            // rows buffered above/below viewport
 function loadCols() {
   try { const s=localStorage.getItem(_lsKey('pl_cols')); if(s) _cols={...COL_DEFAULTS,...JSON.parse(s)}; } catch{}
   for(const [k,v] of Object.entries(_cols)) { const el=document.getElementById(`col-${k}`); if(el) el.checked=v; }
+  try { const v=localStorage.getItem(_lsKey('pl_done_keep')); if(v!==null) _plDoneKeep=parseInt(v,10); } catch{}
+  const dkEl=document.getElementById('cfg-done-keep'); if(dkEl) dkEl.value=_plDoneKeep<0?'':String(_plDoneKeep);
+}
+function saveDoneKeep() {
+  const el=document.getElementById('cfg-done-keep');
+  _plDoneKeep=el.value===''?-1:Math.max(0,parseInt(el.value,10)||0);
+  try { localStorage.setItem(_lsKey('pl_done_keep'), String(_plDoneKeep)); } catch{}
+  renderPl();
 }
 function saveCols() {
   for(const k of Object.keys(_cols)) { const el=document.getElementById(`col-${k}`); if(el) _cols[k]=el.checked; }
@@ -4364,7 +4398,7 @@ function renderPl(){
     document.getElementById('pl-thead').innerHTML='';
     updateBigCounter();return;
   }
-  _recalcTimeline();
+  if(!S._timeline) _recalcTimeline();
   const tl=S._timeline;
   const fps=S.config?.fps||25;
   const C=_cols;
@@ -4373,6 +4407,13 @@ function renderPl(){
 
   const _plRows=[];
   {
+    // Count done/skipped events to determine how many oldest to suppress
+    let _totalDone=0;
+    if(_plDoneKeep>=0){
+      for(const _e of S.plData){const _st=_e._state||'pending';if(_st==='done'||_st==='skipped')_totalDone++;}
+    }
+    let _hideDoneCnt=_plDoneKeep>=0?Math.max(0,_totalDone-_plDoneKeep):0;
+    let _doneHiddenSoFar=0;
     let skip=-1;
     let inBlock=false;
     for(let i=0;i<S.plData.length;i++){
@@ -4380,6 +4421,8 @@ function renderPl(){
       skip=-1;
       // Gap-Dummy-Zeile: gapMs liegt auf tl[i-1] (dem event VOR dem fixtime-event)
       const e0=S.plData[i];
+      // Suppress oldest done/skipped events beyond _plDoneKeep
+      if(_doneHiddenSoFar<_hideDoneCnt){const _s0=e0._state||'pending';if(_s0==='done'||_s0==='skipped'){_doneHiddenSoFar++;continue;}}
       if(e0.startType==='fixtime'&&e0.startTime&&i>0){
         const gapMs=tl[i-1]?.gapMs||0;
         if(gapMs>500){
@@ -4908,6 +4951,7 @@ async function delBlock(startIdx, endIdx, ev) {
 // ── Selection & Drag ──────────────────────────────────────────────────────
 function selectPlItem(i,ev){
   if(ev.target.classList.contains('ib')||ev.target.classList.contains('pl-start-btn')) return;
+  if(ev.detail>=2){ openEventEditor(i,ev); return; }
   if(ev.ctrlKey||ev.metaKey){
     // Ctrl: toggle individual item
     if(_selectedSet.has(i)) _selectedSet.delete(i);
@@ -7111,7 +7155,19 @@ function emStartTypeChange(){
   const v=document.getElementById('em-starttype')?.value;
   const row=document.getElementById('em-starttime-row');
   if(row) row.style.display=v==='fixtime'?'block':'none';
-  if(v==='fixtime') emUpdateStartGap();
+  if(v==='fixtime'){
+    const inp=document.getElementById('em-starttime');
+    if(inp&&!inp.value.trim()){
+      const planned=S._timeline?.[S.editIdx]?.start;
+      if(planned){
+        const hh=String(planned.getHours()).padStart(2,'0');
+        const mm=String(planned.getMinutes()).padStart(2,'0');
+        const ss=String(planned.getSeconds()).padStart(2,'0');
+        inp.value=`${hh}:${mm}:${ss}`;
+      }
+    }
+    emUpdateStartGap();
+  }
 }
 function emEndTypeChange(){
   const v=document.getElementById('em-endtype')?.value;
@@ -7119,17 +7175,27 @@ function emEndTypeChange(){
   if(row) row.style.display=v==='fixtime'?'block':'none';
   if(v==='fixtime') emUpdateFixGap();
 }
-function _gapLabel(str){
+function _gapLabel(str,plannedMs){
   if(!str||!str.includes(':')) return '';
   const p=str.split(':').map(Number);const now=new Date();
   let t=new Date(now.getFullYear(),now.getMonth(),now.getDate(),p[0]||0,p[1]||0,p[2]||0,0);
   if(t<=now) t.setDate(t.getDate()+1);
   const s=Math.round((t-now)/1000);
-  if(s>3600) return `in ${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
-  if(s>60) return `in ${Math.floor(s/60)}m ${s%60}s`;
-  return `in ${s}s`;
+  let cd='';
+  if(s>3600) cd=`in ${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+  else if(s>60) cd=`in ${Math.floor(s/60)}m ${s%60}s`;
+  else cd=`in ${s}s`;
+  if(plannedMs==null) return cd;
+  const diff=Math.round((t.getTime()-plannedMs)/1000);
+  const abs=Math.abs(diff);
+  if(abs>1){
+    const h=Math.floor(abs/3600),m=Math.floor((abs%3600)/60),sc=abs%60;
+    const dur=h?`${h}h ${m}m`:m?`${m}m ${sc}s`:`${sc}s`;
+    cd+=diff>0?` | +${dur} gap`:` | −${dur} overlap`;
+  }
+  return cd;
 }
-function emUpdateStartGap(){const el=document.getElementById('em-starttime-gap');if(el) el.textContent=_gapLabel(document.getElementById('em-starttime')?.value);}
+function emUpdateStartGap(){const el=document.getElementById('em-starttime-gap');if(el) el.textContent=_gapLabel(document.getElementById('em-starttime')?.value,S._timeline?.[S.editIdx]?.start?.getTime());}
 function emUpdateFixGap(){const el=document.getElementById('em-fixtime-gap');if(el) el.textContent=_gapLabel(document.getElementById('em-fixtime')?.value);}
 
 function saveEvent(){
@@ -8098,7 +8164,7 @@ async function loadPlaylist(){
     _selectedIdx=null; _selectedSet.clear();
     _suppressPlSSECount++;
     await api('POST','/api/playlist/set',{events:S.plData});
-    renderPl();
+    _recalcTimeline();renderPl();
     closeModal('pl-files-modal');
     showToast(`📂 "${name}" geladen (${S.plData.length} Events)`);
   } else {
@@ -8131,7 +8197,7 @@ async function onLocalPlaylistFile(evt){
   _selectedIdx=null; _selectedSet.clear();
   _suppressPlSSECount++;
   await api('POST','/api/playlist/set',{events:S.plData});
-  renderPl();
+  _recalcTimeline();renderPl();
   closeModal('pl-files-modal');
   showToast(`📂 "${file.name}" geladen (${S.plData.length} Events)`);
 }
@@ -8209,7 +8275,7 @@ async function appendPlaylist(){
   if(!name){showToast('Select a playlist first');return;}
   if(!await _confirm(`"${name}" ans Ende anhängen?`,{ok:'Anhängen'})) return;
   const r=await api('POST','/api/playlists/append',{name});
-  if(r?.ok){S.plData=_sanitizeEventsXfade(r.events.map(e=>({...e,reconcileKey:genId()})));renderPl();showToast('Appended ✓');}
+  if(r?.ok){S.plData=_sanitizeEventsXfade(r.events.map(e=>({...e,reconcileKey:genId()})));_recalcTimeline();renderPl();showToast('Appended ✓');}
   else showToast('Error: '+(r?.error||'?'));
 }
 async function insertPlaylist(){
@@ -8220,7 +8286,7 @@ async function insertPlaylist(){
   const r=await api('POST','/api/playlists/load',{name});
   if(!r?.ok){showToast('Load failed');return;}
   const ins=await api('POST','/api/playlist/insert',{index:insertAt,events:r.events});
-  if(ins?.ok){S.plData=_sanitizeEventsXfade(ins.events.map(e=>({...e,reconcileKey:genId()})));renderPl();showToast('Inserted ✓');}
+  if(ins?.ok){S.plData=_sanitizeEventsXfade(ins.events.map(e=>({...e,reconcileKey:genId()})));_recalcTimeline();renderPl();showToast('Inserted ✓');}
   else showToast('Error: '+(ins?.error||'?'));
 }
 
@@ -9295,7 +9361,7 @@ function toggleTimeline() {
     // Playlist-Daten laden falls noch nicht vorhanden
     if (!S.plData?.length) {
       fetch('/api/playlist').then(r=>r.json()).then(pl=>{
-        if (pl?.length) { S.plData=pl; renderPl(); }
+        if (pl?.length) { S.plData=pl; _recalcTimeline(); renderPl(); }
         drawTimeline();
       }).catch(()=>drawTimeline());
     } else {
@@ -10862,7 +10928,7 @@ function prepUndo() {
   showToast('↩ Prep: Rückgängig');
 }
 
-const PREP_COL_DEFAULTS = { tc:true, status:false, dur:true, trans:true, speed:true, branding:false, audio:false, rate:true };
+const PREP_COL_DEFAULTS = { tc:true, status:false, dur:true, trans:true, speed:true, branding:false, audio:false, title:true, file:true, children:false };
 let _prepCols = {...PREP_COL_DEFAULTS};
 function loadPrepCols() {
   try { const s=localStorage.getItem(_lsKey('prep_cols')); if(s) _prepCols={...PREP_COL_DEFAULTS,...JSON.parse(s)}; } catch{}
@@ -10927,11 +10993,11 @@ function togglePrepMax() {
   const panel = document.getElementById('prep-panel');
   const main  = panel.previousElementSibling; // pl-main div
   panel.classList.toggle('maximized', _prepMaximized);
-  if (main) main.style.display = _prepMaximized ? 'none' : '';
+  if (main) main.style.display = _prepMaximized ? 'none' : 'flex';
   document.getElementById('btn-prep-max').textContent = _prepMaximized ? '⤡' : '⤢';
 }
 
-function _renderPrepItem(e, i) {
+function _renderPrepItem(e, i, tcOffset) {
   const isSel = _prepSel.has(i);
   const fps   = parseFps(S.config?.fps || 25);
   const C     = _prepCols;
@@ -10948,21 +11014,27 @@ function _renderPrepItem(e, i) {
     : _liveLabel ? `<span style="color:var(--yellow)">📡 ${_liveLabel}</span>`
     : _lsLabel   ? `<span style="color:var(--yellow)">📡 ${_lsLabel}</span>`
     : `${e.file||e.source||'—'}`;
-  const label = e.title
-    ? `<span style="font-weight:600;color:var(--accent)">${e.title}</span> <span style="font-size:9px;color:var(--dim)">${e.file||e.source||''}</span>`
-    : mainLabel;
 
-  const _pFix = e.startType==='fixtime'&&e.startTime;
+  // TC cell
+  let tcStr = '', tcCls = 'pl-tc', _tcPrefix = '';
+  if (e.startType === 'fixtime' && e.startTime) {
+    const _stp = e.startTime.split(':');
+    tcStr = `${(_stp[0]||'00').padStart(2,'0')}:${(_stp[1]||'00').padStart(2,'0')}:${(_stp[2]||'00').padStart(2,'0')}:${(_stp[3]||'00').padStart(2,'0')}`;
+    tcCls = 'pl-tc fx'; _tcPrefix = '<span style="font-size:8px;margin-right:2px">⏰</span>';
+  } else if (tcOffset != null) {
+    tcStr = ftFF(tcOffset, fps);
+  }
+
   const cells = [
     `<span class="pl-drag pl-cell" style="cursor:grab">⠿</span>`,
     `<span class="pl-cell" style="font-family:var(--mono);font-size:9px;text-align:right;padding-right:3px;color:var(--dim)">${i+1}</span>`,
-    // fix-badge entfernt
   ];
-  if(C.tc) cells.push(`<span class="pl-cell ${_pFix?'pl-tc fx':'pl-tc'}">${_pFix?'<span style="font-size:8px;margin-right:2px">⏰</span>':''}${_pFix?e.startTime:''}</span>`);
+  if(C.tc) cells.push(`<span class="pl-cell ${tcCls}">${_tcPrefix}${tcStr}</span>`);
   cells.push(`<span class="pl-cell" style="text-align:center;font-size:11px">${SRC_ICON[src]||_liveSourceIcon(src)||'?'}</span>`);
-  cells.push(`<div class="pl-cell-file"><div class="pl-file">${label}</div></div>`);
+  if(C.title) cells.push(`<div class="pl-cell" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:10px">${e.title?`<span style="font-weight:600;color:var(--accent)">${e.title}</span>`:'<span style="color:rgba(128,128,128,.3)">—</span>'}</div>`);
+  if(C.file||!C.title) cells.push(`<div class="pl-cell-file"><div class="pl-file">${mainLabel}</div></div>`);
   if(C.status)   cells.push(`<span class="pl-cell"></span>`);
-  if(C.audio)    cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono)">${e.audioConfig?.pgm||''}</span>`);
+  if(C.audio)    cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono)">${e.audioPreset||e.audioConfig?.preset||e.audioConfig?.pgm||''}</span>`);
   if(C.branding) cells.push(`<span class="pl-cell" style="text-align:center;font-size:9px">${e.branding?'🏷':''}</span>`);
   {const _tr=e.transition||'cut';const _tc=_tr==='cut'?'var(--dim)':'var(--accent2)';
   const _eb=e.endType==='fixtime'?'<span style="color:var(--yellow);font-size:8px"> 🔒</span>':e.endType==='manual'?'<span style="font-size:8px"> ⏸</span>':'';
@@ -10976,7 +11048,6 @@ function _renderPrepItem(e, i) {
   cells.push(`<span class="pl-cell"></span>`); // gap
   cells.push(`<span class="pl-cell"></span>`); // rem
   cells.push(`<span class="pl-cell"></span>`); // prog
-  // done-mark: entfernt
   cells.push(`<span class="pl-cell"></span>`); // start-btn placeholder
   cells.push(`<span class="pl-cell" style="display:flex;gap:1px;justify-content:flex-end">
     <button class="ib" style="font-size:10px" onclick="prepEditEvent(${i});event.stopPropagation()" title="Bearbeiten">✏</button>
@@ -11008,7 +11079,8 @@ function _renderPrepHeader() {
   const cells = [H(''), HR('#')]; // drag, num
   if(C.tc)       cells.push(H(t('col.tc')));
   cells.push(H('')); // src icon
-  cells.push(H(t('col.title')));
+  if(C.title) cells.push(H('Titel'));
+  if(C.file||!C.title) cells.push(H('Datei'));
   if(C.status)   cells.push(HC(t('col.status')));
   if(C.audio)    cells.push(H(t('col.audio')));
   if(C.branding) cells.push(HC('B'));
@@ -11030,9 +11102,16 @@ function renderPrepList() {
     stat.textContent = '0 Events';
     return;
   }
+  let _tcOff = 0;
+  const _tcOffsets = _prepData.map(e => {
+    const off = _tcOff;
+    const d = e.eom != null ? (fromTC(e.eom)||0) : (e.duration ? (fromTC(e.duration)||5) : 0);
+    _tcOff += d;
+    return off;
+  });
   _renderPrepHeader();
   body.innerHTML = `<div style="min-width:max-content">` +
-    _prepData.map((e, i) => _renderPrepItem(e, i)).join('') +
+    _prepData.map((e, i) => _renderPrepItem(e, i, _tcOffsets[i])).join('') +
     `</div>`;
   stat.textContent = `${_prepData.length} Events${_prepSel.size ? ` · ${_prepSel.size} ausgewählt` : ''}`;
 }

@@ -1696,7 +1696,9 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       if (retIdx >= 0) {
         newPl[retIdx] = { ...newPl[retIdx], som: savedReturnSom };
         playlist.set(newPl);
-        setTimeout(() => playlist.jump(retIdx).catch(() => {}), 50);
+        // jumpInterrupt: pre-cued direkt auf dem freien Slot während das letzte
+        // Asset-Event noch im Speicher ist → kein Idle-Frame, kein Audio-Gap.
+        playlist.jumpInterrupt(retIdx).catch(() => {});
       }
     }
     broadcast('asset-state', _assetStatePublic());
@@ -1850,12 +1852,17 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     if (!afd) return json(res, { ok: false, error: 'afd required' }, 400);
     const slotId = playlist._onAirSlot;
     if (!slotId || !players[slotId]?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
-    const ok = await playlist.swapOnAirVariant({ afd }).catch(e => { log(`onair-afd: ${e.message}`, 'warn', 'playlist'); return false; });
-    if (ok) {
-      log(`On-Air AFD → ${afd} (${playlist._onAirSlot})`, 'info', 'playlist');
-      broadcast('onair-afd', { afd, slotId: playlist._onAirSlot });
-    }
-    return json(res, { ok });
+    if (playlist._swapping) return json(res, { ok: false, error: 'swap in progress' }, 409);
+    // Fire-and-forget wie onair-preset — swapOnAirVariant dauert 3-4s und darf
+    // den Event-Loop nicht blockieren (sonst Server temporär unresponsive).
+    json(res, { ok: true });
+    playlist.swapOnAirVariant({ afd }).then(ok => {
+      if (ok) {
+        log(`On-Air AFD → ${afd} (${playlist._onAirSlot})`, 'info', 'playlist');
+        broadcast('onair-afd', { afd, slotId: playlist._onAirSlot });
+      }
+    }).catch(e => { log(`onair-afd: ${e.message}`, 'warn', 'playlist'); });
+    return;
   }
 
   if (meth === 'POST' && p === '/api/playlist/stop') {
