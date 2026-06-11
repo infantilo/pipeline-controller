@@ -302,12 +302,6 @@ async function _scanPlaylist(events) {
       _markReady(file, localPath); continue;
     }
 
-    // 4b) For local protocol: file found in a configured source dir — accessible as-is, no copy needed
-    if (_config.protocol === 'local') {
-      const srcFound = _findInSourceDirs(baseName);
-      if (srcFound) { _markReady(file, srcFound); continue; }
-    }
-
     // 5) Transfer already active or successfully completed
     const existing = _transfers.get(file);
     if (existing && (existing.state === 'queued' || existing.state === 'transferring' || existing.state === 'ready')) continue;

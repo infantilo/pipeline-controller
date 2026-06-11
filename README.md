@@ -13,6 +13,7 @@
 ## 📺 What is Pipeline Controller?
 
 Pipeline Controller is a complete **broadcast playout system** built on the open-source framework **GStreamer**. It enables professional on-air operations through a modern, fully browser-based web interface — designed for 24/7 channel-in-a-box operations.
+<img width="1916" height="882" alt="image" src="https://github.com/user-attachments/assets/f9bc5029-6728-4ee6-a862-adfd785fc9a1" />
 
 ### Features at a glance
 
@@ -20,7 +21,7 @@ Pipeline Controller is a complete **broadcast playout system** built on the open
 - 🎚️ **Master pipeline** with compositor, video switcher, and audio mixing
 - 🔊 **Flexible audio routing** with multiple groups, channel matrices, and 5.1 upmix
 - 📊 **EBU R128 loudness normalization** per audio group
-- ✨ **oGraf HTML5 graphics engine** (EBU standard) via Puppeteer/Chromium with 25+ built-in templates
+- ✨ **oGraf HTML5 graphics engine** (EBU standard) via Puppeteer/Chromium with templates
 - 📋 **Playlist engine** with transitions (cut, v-fade, cut-fade, fade-cut, X-fade) and event children
 - 🧩 **Asset Panel** for one-click commercial breaks with auto-return (interrupt / break / live modes)
 - ⏱️ **Counter Strip** showing all time-critical events of the current hour at a glance
@@ -319,6 +320,24 @@ Please file issues via [GitHub Issues](../../issues). For bug reports, please in
 The foundation (GStreamer, Node.js, Chromium, npm packages) is open source. The application-specific code is released under the terms defined in the LICENSE file.
 
 ---
+
+## Screenshots
+
+Playlist Event Editor:<br>
+<img width="649" height="744" alt="image" src="https://github.com/user-attachments/assets/4281aa6a-8391-435c-bfec-1dc6e6dc6220" />
+
+Player Section:<br>
+<img width="330" height="720" alt="image" src="https://github.com/user-attachments/assets/ea0bf14c-b56f-4ad9-845b-b07af7c0be50" />
+
+Ograf Editor:
+<img width="1580" height="410" alt="image" src="https://github.com/user-attachments/assets/67629939-7135-47d0-b4ff-e318ab029da4" />
+
+Manual Record:<br>
+<img width="598" height="435" alt="image" src="https://github.com/user-attachments/assets/89aad0e5-d080-4364-a050-5d13aac7ade6" />
+
+Assets:<br>
+<img width="313" height="459" alt="image" src="https://github.com/user-attachments/assets/3b94c769-3cca-42e2-af55-3487b8180506" />
+
 
 <p align="center">
   <strong>Pipeline Controller</strong><br>

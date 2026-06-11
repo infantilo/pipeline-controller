@@ -238,6 +238,12 @@ async function _processFile(filePath) {
           if (!ev.subtitle && prev.subtitle) {
             ev.subtitle = prev.subtitle;
           }
+
+          // Benutzerdefinierte Felder erhalten (nicht im Marina-Format vorhanden)
+          const USER_FIELDS = ['audioConfig', 'classification', 'segment', 'segmentName', 'somMode', 'chLabel', 'playMode'];
+          for (const f of USER_FIELDS) {
+            if (ev[f] === undefined && prev[f] !== undefined) ev[f] = prev[f];
+          }
         }
       }
     } catch (e) {

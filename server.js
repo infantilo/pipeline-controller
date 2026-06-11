@@ -1833,14 +1833,17 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const presetId = b.preset;
     if (!presetId) return json(res, { ok: false, error: 'preset required' }, 400);
     const slotId = playlist._onAirSlot;
-    if (!slotId || !players[slotId]?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
-    if (playlist._swapping) return json(res, { ok: false, error: 'swap in progress' }, 409);
-    // Respond immediately — swapOnAirVariant takes 3-4 s and must never block the event loop.
+    const player = players[slotId];
+    if (!slotId || !player?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
     json(res, { ok: true });
-    playlist.swapOnAirVariant({ audioPreset: presetId }).then(ok => {
+    // In-place audio-pipeline hot-swap: audio channel stays the same → no pre-cue disruption.
+    player.reloadAudioPreset(presetId).then(ok => {
       if (ok) {
-        log(`On-Air Audio-Preset → ${presetId} (${playlist._onAirSlot})`, 'info', 'playlist');
-        broadcast('onair-preset', { preset: presetId, slotId: playlist._onAirSlot });
+        log(`On-Air Audio-Preset → ${presetId} (${slotId})`, 'info', 'playlist');
+        broadcast('onair-preset', { preset: presetId, slotId });
+      } else {
+        log(`On-Air Audio-Preset: Wechsel fehlgeschlagen (${slotId})`, 'warn', 'playlist');
+        broadcast('onair-swap-failed', { type: 'preset', preset: presetId });
       }
     }).catch(e => { log(`onair-preset: ${e.message}`, 'warn', 'playlist'); });
     return;
@@ -1851,18 +1854,31 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const afd = b.afd;
     if (!afd) return json(res, { ok: false, error: 'afd required' }, 400);
     const slotId = playlist._onAirSlot;
-    if (!slotId || !players[slotId]?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
-    if (playlist._swapping) return json(res, { ok: false, error: 'swap in progress' }, 409);
-    // Fire-and-forget wie onair-preset — swapOnAirVariant dauert 3-4s und darf
-    // den Event-Loop nicht blockieren (sonst Server temporär unresponsive).
+    const player = players[slotId];
+    if (!slotId || !player?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
     json(res, { ok: true });
-    playlist.swapOnAirVariant({ afd }).then(ok => {
+    // In-place video-pipeline hot-swap: audio untouched, brief ~200ms video glitch acceptable.
+    player.reloadAfd(afd).then(ok => {
       if (ok) {
-        log(`On-Air AFD → ${afd} (${playlist._onAirSlot})`, 'info', 'playlist');
-        broadcast('onair-afd', { afd, slotId: playlist._onAirSlot });
+        log(`On-Air AFD → ${afd} (${slotId})`, 'info', 'playlist');
+        broadcast('onair-afd', { afd, slotId });
+      } else {
+        log(`On-Air AFD: Wechsel fehlgeschlagen (${slotId})`, 'warn', 'playlist');
+        broadcast('onair-swap-failed', { type: 'afd', afd });
       }
     }).catch(e => { log(`onair-afd: ${e.message}`, 'warn', 'playlist'); });
     return;
+  }
+  if (meth === 'POST' && p === '/api/playlist/prune-done') {
+    const sess = _requireAuth(req, res, ['editor']); if (sess === false) return;
+    const b = await parseBody(req);
+    const keep = b.keep != null ? Math.max(0, parseInt(b.keep) || 0) : 3;
+    const removed = playlist.pruneDone(keep);
+    if (removed > 0) {
+      broadcast('playlist', _enrichPlaylist(playlist.playlist));
+      _autoSavePlaylist();
+    }
+    return json(res, { ok: true, removed });
   }
 
   if (meth === 'POST' && p === '/api/playlist/stop') {

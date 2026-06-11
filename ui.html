@@ -122,6 +122,12 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 .preview-media{display:none;}
 #preview-strip.preview-open .preview-media{display:flex;flex:1;min-width:0;align-items:stretch;}
 
+/* Preview-Maximierung im PL-Panel */
+#preview-exp-slot{display:none;flex:1;overflow:hidden;flex-direction:column;background:#000;min-height:0;}
+#preview-exp-slot.active{display:flex;}
+#preview-exp-img{flex:1;min-height:0;width:100%;object-fit:contain;display:block;}
+#vu-meters-exp{flex-shrink:0;height:64px;display:flex;gap:3px;align-items:flex-end;padding:4px 6px;background:#111;overflow-x:auto;overflow-y:hidden;box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#333 #111;}
+
 /* Switcher */
 .sw-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:5px;}
 .sw-btn{background:var(--bg3);border:2px solid var(--border);border-radius:4px;padding:3px;cursor:pointer;text-align:center;transition:border-color .1s;}
@@ -399,12 +405,12 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <select id="cstrip-afd-sel" title="AFD/Format live ändern (synchroner Crossfade-Wechsel)"
         style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;font-size:8px;padding:1px 3px"
         onchange="_onAirAfdChange(this.value)">
-        <option value="auto">Standard (Pipeline-Einstellung)</option>
-        <option value="16:9">16:9 nativ</option>
-        <option value="4:3-pillarbox">4:3 Pillarbox → 16:9</option>
-        <option value="4:3-letterbox">16:9 Letterbox in 4:3 → 16:9</option>
-        <option value="14:9-letterbox">14:9 Letterbox → 16:9</option>
-        <option value="anamorphic">Anamorph 16:9 in 4:3</option>
+        <option value="auto" data-i18n="afd.auto">Standard (Pipeline-Einstellung)</option>
+        <option value="16:9" data-i18n="afd.169">16:9 nativ</option>
+        <option value="4:3-pillarbox" data-i18n="afd.43pillar">4:3 Pillarbox → 16:9</option>
+        <option value="4:3-letterbox" data-i18n="afd.43letter">16:9 Letterbox in 4:3 → 16:9</option>
+        <option value="14:9-letterbox" data-i18n="afd.149letter">14:9 Letterbox → 16:9</option>
+        <option value="anamorphic" data-i18n="afd.anamorphic">Anamorph 16:9 in 4:3</option>
       </select>
     </div>
   </div>
@@ -425,13 +431,13 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   </div>
   <!-- NÄCHSTE AKTION (next event or child) -->
   <div id="cs-cell-action" style="background:var(--bg3);padding:5px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-left:1px solid var(--border);cursor:pointer" onclick="if(_nextActionIdx>=0)scrollToPlItem(_nextActionIdx)" title="Klick: Nächste Aktion in Playlist anzeigen">
-    <div style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:1px">⏭ NÄCHSTE AKTION</div>
+    <div data-i18n="cstrip.nextAction" style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:1px">⏭ NÄCHSTE AKTION</div>
     <div id="cstrip-action-val" style="font-family:var(--mono);font-size:26px;font-weight:800;color:var(--accent);letter-spacing:.04em;line-height:1">—</div>
     <div id="cstrip-action-sub" style="font-size:8px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;text-align:center">—</div>
   </div>
   <!-- NÄCHSTES FEHLENDES EVENT -->
   <div id="cs-cell-miss" style="background:var(--bg3);padding:5px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-left:1px solid var(--border);cursor:pointer" onclick="if(_nextMissingIdx>=0)scrollToPlItem(_nextMissingIdx)" title="Klick: Fehlendes Event in Playlist anzeigen">
-    <div style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:1px">⚠ NÄCHSTES FEHLT</div>
+    <div data-i18n="cstrip.nextMiss" style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:1px">⚠ NÄCHSTES FEHLT</div>
     <div id="cstrip-miss-val" style="font-family:var(--mono);font-size:26px;font-weight:800;color:var(--red);letter-spacing:.04em;line-height:1">—</div>
     <div id="cstrip-miss-sub" style="font-size:8px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;text-align:center">—</div>
   </div>
@@ -454,6 +460,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     </div>
     <!-- VU-Meter — immer sichtbar, unabhängig vom Video-Preview -->
     <div id="vu-strip">
+      <button id="btn-preview-max-vu" onclick="togglePlPreviewMax(event)" title="Vorschau im Playlist-Bereich maximieren / minimieren" style="position:absolute;top:2px;left:2px;z-index:10;font-size:9px;padding:1px 5px;background:rgba(0,0,0,.7);color:var(--dim);border:1px solid var(--border);border-radius:2px;cursor:pointer;line-height:1.4">⤢</button>
       <div id="vu-meters" style="display:flex;gap:3px;align-items:flex-end;padding:4px 6px;background:#111;overflow-x:auto;overflow-y:hidden;width:100%;height:100%;box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#333 #111"></div>
     </div>
   </div>
@@ -551,7 +558,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <select id="grafik-tpl-sel" onchange="grafikTplChange()"
           style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;font-size:10px;padding:2px 4px;margin-bottom:4px">
           <option value="lowerThird">Lower Third</option>
-          <option value="clock">Uhr</option>
+          <option value="clock" data-i18n="ograf.tpl.clock">Uhr</option>
           <option value="fullscreen">Fullscreen</option>
           <option value="ticker">Ticker</option>
         </select>
@@ -587,7 +594,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
           <input type="text" id="hk-label" placeholder="Label" style="width:100%;margin-bottom:3px;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:2px 5px;font-size:11px;box-sizing:border-box">
           <select id="hk-template" style="width:100%;margin-bottom:3px;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:2px;font-size:10px;padding:2px 4px">
             <option value="lowerThird">Lower Third</option>
-            <option value="clock">Uhr</option>
+            <option value="clock" data-i18n="ograf.tpl.clock">Uhr</option>
             <option value="fullscreen">Fullscreen</option>
             <option value="ticker">Ticker</option>
           </select>
@@ -640,6 +647,11 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   <div id="grafik-exp-slot" style="display:none;flex:1;overflow-y:auto;padding:6px;flex-direction:column"></div>
   <!-- Hotkeys expanded slot — only visible when hotkeys is expanded to this panel -->
   <div id="hotkey-exp-slot" style="display:none;flex:1;overflow-y:auto;padding:6px;flex-direction:column"></div>
+  <!-- Preview/VU maximiert im PL-Panel -->
+  <div id="preview-exp-slot">
+    <img id="preview-exp-img" src="" alt="">
+    <div id="vu-meters-exp"></div>
+  </div>
   <!-- ── Controls Section ── -->
   <div class="sec-hdr" onclick="toggleSection('sec-pl-ctrl',this)" data-key="sec-pl-ctrl" style="border-radius:0;margin-bottom:0">
     <span class="sec-arrow">▼</span>
@@ -668,14 +680,14 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
             <label><input type="checkbox" id="col-branding"        onchange="saveCols()"> <span data-i18n="colcfg.branding">Branding</span></label>
             <label><input type="checkbox" id="col-audio"           onchange="saveCols()"> <span data-i18n="colcfg.audio">Audio</span></label>
             <label><input type="checkbox" id="col-children" checked onchange="saveCols()"> <span data-i18n="colcfg.children">Graphic Events</span></label>
-            <label><input type="checkbox" id="col-avail" onchange="saveCols();loadAvailability()"> <span>Verfügbarkeit</span></label>
-            <label><input type="checkbox" id="col-starttype" onchange="saveCols()"> <span>Start-Typ</span></label>
-            <label><input type="checkbox" id="col-endtype"   onchange="saveCols()"> <span>End-Typ</span></label>
-            <label><input type="checkbox" id="col-segment" onchange="saveCols()"> <span>Segment</span></label>
-            <label><input type="checkbox" id="col-playmode" onchange="saveCols()"> <span>Abspielmodus</span></label>
-            <label><input type="checkbox" id="col-classif" onchange="saveCols()"> <span>Klassifikation</span></label>
-            <label><input type="checkbox" id="col-title"   checked onchange="saveCols()"> <span>Titel</span></label>
-            <label><input type="checkbox" id="col-file"    checked onchange="saveCols()"> <span>Datei</span></label>
+            <label><input type="checkbox" id="col-avail" onchange="saveCols();loadAvailability()"> <span data-i18n="colcfg.avail">Verfügbarkeit</span></label>
+            <label><input type="checkbox" id="col-starttype" onchange="saveCols()"> <span data-i18n="colcfg.starttype">Start-Typ</span></label>
+            <label><input type="checkbox" id="col-endtype"   onchange="saveCols()"> <span data-i18n="colcfg.endtype">End-Typ</span></label>
+            <label><input type="checkbox" id="col-segment" onchange="saveCols()"> <span data-i18n="colcfg.segment">Segment</span></label>
+            <label><input type="checkbox" id="col-playmode" onchange="saveCols()"> <span data-i18n="colcfg.playmode">Abspielmodus</span></label>
+            <label><input type="checkbox" id="col-classif" onchange="saveCols()"> <span data-i18n="colcfg.classif">Klassifikation</span></label>
+            <label><input type="checkbox" id="col-title"   checked onchange="saveCols()"> <span data-i18n="colcfg.evtitle">Titel</span></label>
+            <label><input type="checkbox" id="col-file"    checked onchange="saveCols()"> <span data-i18n="colcfg.file">Datei</span></label>
           </div>
         </div>
         <button class="btn" id="btn-undo" onclick="plUndo()" disabled data-i18n="btn.undo">↩ Undo</button>
@@ -687,6 +699,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   <div class="sec-hdr" onclick="toggleSection('sec-pl-list',this)" data-key="sec-pl-list" style="border-radius:0;margin-bottom:0">
     <span class="sec-arrow">▼</span>
     <span class="sec-hdr-title" data-i18n="sec.playlist">Playlist</span>
+    <span style="flex:1"></span>
+    <button class="ib" id="btn-pl-preview-max" onclick="togglePlPreviewMax(event)" title="Vorschau im Playlist-Bereich maximieren" style="font-size:10px;padding:1px 5px;margin-right:4px">⛶</button>
   </div>
   <div class="sec-body" id="sec-pl-list" style="flex:1;overflow:hidden;display:flex;flex-direction:row;min-height:0">
   <!-- ── Linke Aktions-Sidebar ── -->
@@ -702,7 +716,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
   <div id="pl-search-row" style="display:flex;align-items:center;gap:3px;padding:2px 4px;flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border)">
     <span style="font-size:10px;color:var(--dim);flex-shrink:0">🔍</span>
-    <input type="text" id="pl-search-input" placeholder="Titel / Datei / Klassifikation…" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:10px;padding:2px 5px;min-width:0" oninput="plSearchUpdate(this.value)">
+    <input type="text" id="pl-search-input" placeholder="Titel / Datei / Klassifikation…" data-i18n-ph="pl.searchPh" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:10px;padding:2px 5px;min-width:0" oninput="plSearchUpdate(this.value)">
     <button class="ib" id="pl-search-mode" onclick="plSearchToggleMode()" title="Suchmodus umschalten" style="font-size:9px;padding:1px 5px;flex-shrink:0">🎯 Mark</button>
     <button class="ib" onclick="plSearchClear()" title="Suche löschen" style="font-size:9px;padding:1px 4px;flex-shrink:0">✕</button>
   </div>
@@ -724,7 +738,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <option value="30">30 min</option>
       <option value="60">1 h</option>
       <option value="120">2 h</option>
-      <option value="0">Alles</option>
+      <option value="0" data-i18n="tl.all">Alles</option>
     </select>
     <span style="font-size:8px;color:var(--dim);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" id="timeline-hint"></span>
   </div>
@@ -739,7 +753,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     </div>
     <div style="padding:4px 5px;border-bottom:1px solid var(--border);display:flex;gap:3px;flex-shrink:0">
       <select id="prep-sel" style="flex:1;min-width:0;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-size:10px" onchange="loadPrepList()">
-        <option value="">— Liste wählen —</option>
+        <option value="" data-i18n="prep.selectList">— Liste wählen —</option>
       </select>
       <button class="btn" onclick="refreshPrepSel()" title="Aktualisieren" style="font-size:11px;padding:2px 5px">↺</button>
     </div>
@@ -760,16 +774,23 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div style="position:relative">
         <button class="btn" style="font-size:11px;padding:2px 4px" onclick="togglePrepColCfg(event)" title="Spalten konfigurieren">⊞</button>
         <div class="col-cfg" id="prep-col-cfg">
-          <div style="font-size:9px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Spalten</div>
-          <label><input type="checkbox" id="pcol-tc"       onchange="savePrepCols()"> Timecode</label>
-          <label><input type="checkbox" id="pcol-status"   onchange="savePrepCols()"> Status</label>
-          <label><input type="checkbox" id="pcol-dur"      onchange="savePrepCols()"> Dauer</label>
-          <label><input type="checkbox" id="pcol-trans"    onchange="savePrepCols()"> Übergang Typ</label>
-          <label><input type="checkbox" id="pcol-speed"    onchange="savePrepCols()"> Übergang Speed</label>
-          <label><input type="checkbox" id="pcol-branding" onchange="savePrepCols()"> Branding</label>
-          <label><input type="checkbox" id="pcol-audio"    onchange="savePrepCols()"> Audio</label>
-          <label><input type="checkbox" id="pcol-title"   onchange="savePrepCols()"> Titel</label>
-          <label><input type="checkbox" id="pcol-file"    onchange="savePrepCols()"> Datei</label>
+          <div style="font-size:9px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px" data-i18n="colcfg.title">Spalten</div>
+          <label><input type="checkbox" id="pcol-tc"        onchange="savePrepCols()"> <span data-i18n="colcfg.tc">Timecode</span></label>
+          <label><input type="checkbox" id="pcol-starttype" onchange="savePrepCols()"> <span data-i18n="colcfg.starttype">Start-Typ</span></label>
+          <label><input type="checkbox" id="pcol-status"   onchange="savePrepCols()"> <span data-i18n="colcfg.status">Status</span></label>
+          <label><input type="checkbox" id="pcol-classif"  onchange="savePrepCols()"> <span data-i18n="colcfg.classif">Klassifikation</span></label>
+          <label><input type="checkbox" id="pcol-title"    onchange="savePrepCols()"> <span data-i18n="colcfg.evtitle">Titel</span></label>
+          <label><input type="checkbox" id="pcol-file"     onchange="savePrepCols()"> <span data-i18n="colcfg.file">Datei</span></label>
+          <label><input type="checkbox" id="pcol-audio"    onchange="savePrepCols()"> <span data-i18n="colcfg.audio">Audio</span></label>
+          <label><input type="checkbox" id="pcol-branding" onchange="savePrepCols()"> <span data-i18n="colcfg.branding">Branding</span></label>
+          <label><input type="checkbox" id="pcol-avail"    onchange="savePrepCols()"> <span data-i18n="colcfg.avail">Verfügbarkeit</span></label>
+          <label><input type="checkbox" id="pcol-dur"      onchange="savePrepCols()"> <span data-i18n="colcfg.dur">Dauer</span></label>
+          <label><input type="checkbox" id="pcol-endtype"  onchange="savePrepCols()"> <span data-i18n="colcfg.endtype">End-Typ</span></label>
+          <label><input type="checkbox" id="pcol-trans"    onchange="savePrepCols()"> <span data-i18n="colcfg.trans">Übergang Typ</span></label>
+          <label><input type="checkbox" id="pcol-speed"    onchange="savePrepCols()"> <span data-i18n="colcfg.speed">Übergang Speed</span></label>
+          <label><input type="checkbox" id="pcol-segment"  onchange="savePrepCols()"> <span data-i18n="colcfg.segment">Segment</span></label>
+          <label><input type="checkbox" id="pcol-playmode" onchange="savePrepCols()"> <span data-i18n="colcfg.playmode">Play-Mode</span></label>
+          <label><input type="checkbox" id="pcol-children" onchange="savePrepCols()"> <span data-i18n="colcfg.children">Children</span></label>
         </div>
       </div>
     </div>
@@ -840,9 +861,9 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <button class="btn" onclick="newEmptyPlaylist()" title="Leere neue Playlist anlegen">🗒 New</button>
     </div>
     <div class="sep" style="margin:10px 0 8px"></div>
-    <div style="font-size:8px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Lokal</div>
+    <div style="font-size:8px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px" data-i18n="plfiles.local">Lokal</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
-      <button class="btn" onclick="loadPlaylistLocal()" title="Playlist aus lokaler JSON-Datei laden">📂 Öffnen…</button>
+      <button class="btn" onclick="loadPlaylistLocal()" title="Playlist aus lokaler JSON-Datei laden" data-i18n="plfiles.open">📂 Öffnen…</button>
       <button class="btn" onclick="savePlaylistLocal()" title="Aktuelle Playlist als JSON herunterladen">💾 Download</button>
     </div>
     <input type="file" id="pl-local-file-input" accept=".json" style="display:none" onchange="onLocalPlaylistFile(event)">
@@ -871,7 +892,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     <button class="ib" onclick="toggleLib()">✕</button>
   </div>
   <div style="padding:3px 5px;background:var(--bg2);border-bottom:1px solid var(--border)">
-    <input type="text" id="lib-search" placeholder="Mediathek suchen…" oninput="renderLib()" style="width:100%;font-size:10px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 5px;box-sizing:border-box">
+    <input type="text" id="lib-search" placeholder="Mediathek suchen…" data-i18n-ph="lib.searchPh" oninput="renderLib()" style="width:100%;font-size:10px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 5px;box-sizing:border-box">
   </div>
   <div class="pb" id="lib-body" style="padding:5px;">
     <div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">Scanne…</div>
@@ -884,178 +905,178 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   <div class="modal-hd"><span id="em-title">Event</span><button class="ib" onclick="closeModal('event-modal')">✕</button></div>
   <!-- Event Editor Tabs -->
   <div style="display:flex;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg3)">
-    <button class="cfg-tab active" id="em-tab-content"  onclick="emTab('content')"  style="font-size:10px;padding:4px 10px">📄 Inhalt</button>
-    <button class="cfg-tab"        id="em-tab-timing"   onclick="emTab('timing')"   style="font-size:10px;padding:4px 10px">⏱ Timing</button>
-    <button class="cfg-tab"        id="em-tab-graphics" onclick="emTab('graphics')" style="font-size:10px;padding:4px 10px">🎬 Grafik/VO/Rec</button>
+    <button class="cfg-tab active" id="em-tab-content"  onclick="emTab('content')"  data-i18n="em.content"  style="font-size:10px;padding:4px 10px">📄 Inhalt</button>
+    <button class="cfg-tab"        id="em-tab-timing"   onclick="emTab('timing')"   data-i18n="em.timing"   style="font-size:10px;padding:4px 10px">⏱ Timing</button>
+    <button class="cfg-tab"        id="em-tab-graphics" onclick="emTab('graphics')" data-i18n="em.graphics" style="font-size:10px;padding:4px 10px">🎬 Grafik/VO/Rec</button>
   </div>
   <div class="modal-body" style="flex:1;overflow-y:auto;min-height:0">
   <!-- TAB: Inhalt -->
   <div id="em-panel-content">
-    <div class="fld"><label>Titel (optional)</label>
-      <input type="text" id="em-title-field" placeholder="Sendungstitel, Beschreibung…" style="font-size:12px">
+    <div class="fld"><label data-i18n="em.lbl.evTitle">Titel (optional)</label>
+      <input type="text" id="em-title-field" data-i18n-ph="em.ph.evTitle" placeholder="Sendungstitel, Beschreibung…" style="font-size:12px">
     </div>
     <div class="two-col">
-      <div class="fld"><label>Klassifikation</label>
+      <div class="fld"><label data-i18n="em.lbl.classif">Klassifikation</label>
         <select id="em-classification" style="font-size:11px">
-          <option value="">(keine)</option>
+          <option value="" data-i18n="em.classif.none">(keine)</option>
         </select>
       </div>
-      <div class="fld"><label>Subtitle-Datei <span style="font-size:9px;color:var(--dim)">(für Subtitle-Plugin)</span></label>
+      <div class="fld"><label data-i18n-label="em.lbl.subtitleFile">Subtitle-Datei <span style="font-size:9px;color:var(--dim)" data-i18n="em.hint.subtitlePlugin">(für Subtitle-Plugin)</span></label>
         <input type="text" id="em-subtitle-file" placeholder="subtitle.stl / *.srt" style="font-size:11px">
       </div>
     </div>
-    <div class="fld"><label>Quelle</label>
+    <div class="fld"><label data-i18n="em.lbl.source">Quelle</label>
       <select id="em-source" onchange="emSourceChange()">
-        <option value="player">🎬 Player (auto)</option>
-        <option value="smpte">📺 SMPTE Testbild</option>
-        <option value="black">⬛ Black</option>
-        <option value="image">🖼 Standbild (JPG/PNG)</option>
-        <option value="live">📡 Live (auto-Slot)</option>
+        <option value="player" data-i18n="em.src.player">🎬 Player (auto)</option>
+        <option value="smpte"       data-i18n="em.src.smpte">📺 SMPTE Testbild</option>
+        <option value="black" data-i18n="em.src.black">⬛ Black</option>
+        <option value="image"       data-i18n="em.src.image">🖼 Standbild (JPG/PNG)</option>
+        <option value="live" data-i18n="em.src.live">📡 Live (auto-Slot)</option>
         <optgroup label="──────────"></optgroup>
-        <option value="comment">💬 Kommentar</option>
-        <option value="block_start">▶⊞ Block Anfang</option>
-        <option value="block_end">⊟ Block Ende</option>
+        <option value="comment"     data-i18n="em.src.comment">💬 Kommentar</option>
+        <option value="block_start" data-i18n="em.src.blockStart">▶⊞ Block Anfang</option>
+        <option value="block_end"   data-i18n="em.src.blockEnd">⊟ Block Ende</option>
       </select>
     </div>
     <div id="em-player-fields">
-      <div class="fld"><label>Datei <span style="font-size:9px;color:var(--dim)">(ohne Extension möglich)</span></label>
+      <div class="fld"><label data-i18n-label="em.lbl.file">Datei <span style="font-size:9px;color:var(--dim)" data-i18n="em.hint.noExt">(ohne Extension möglich)</span></label>
         <div style="display:flex;gap:4px">
-          <input type="text" id="em-file" placeholder="datei oder datei.mxf" oninput="emValidateFile();emSomModeChange()" style="flex:1">
+          <input type="text" id="em-file" data-i18n-ph="em.ph.file" placeholder="datei oder datei.mxf" oninput="emValidateFile();emSomModeChange()" style="flex:1">
           <button class="btn" style="font-size:10px" onclick="openLibPickerFor(f=>{document.getElementById('em-file').value=f;emValidateFile();})">📚</button>
         </div>
         <div id="em-fileinfo" style="font-size:9px;color:#9ab;margin-top:3px;min-height:14px;">—</div>
       </div>
       <!-- SOM-Modus -->
       <div class="fld" style="margin-bottom:4px">
-        <label style="margin-bottom:4px">Abspiel-Modus</label>
+        <label style="margin-bottom:4px" data-i18n="em.lbl.playMode">Abspiel-Modus</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
-            <input type="radio" name="em-sommode" value="user" checked onchange="emSomModeChange()"> Manuell (SOM/EOM)
+            <input type="radio" name="em-sommode" value="user" checked onchange="emSomModeChange()"> <span data-i18n="em.mode.manual">Manuell (SOM/EOM)</span>
           </label>
           <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
-            <input type="radio" name="em-sommode" value="media" onchange="emSomModeChange()"> Vollständig (erstes–letztes Frame)
+            <input type="radio" name="em-sommode" value="media" onchange="emSomModeChange()"> <span data-i18n="em.mode.full">Vollständig (erstes–letztes Frame)</span>
           </label>
           <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
-            <input type="radio" name="em-sommode" value="segment" onchange="emSomModeChange()"> Segment
+            <input type="radio" name="em-sommode" value="segment" onchange="emSomModeChange()"> <span data-i18n="em.mode.segment">Segment</span>
           </label>
         </div>
       </div>
       <div id="em-segment-row" style="display:none" class="fld">
-        <label>Segment</label>
+        <label data-i18n="em.lbl.segment">Segment</label>
         <select id="em-segment-name" style="width:100%">
-          <option value="">(kein Segment ausgewählt)</option>
+          <option value="" data-i18n="em.seg.none">(kein Segment ausgewählt)</option>
         </select>
       </div>
       <div id="em-som-eom-row">
       <div class="two-col">
-        <div class="fld"><label>SOM (HH:MM:SS:FF)</label><input type="text" id="em-som" placeholder="00:00:00:00" style="font-family:var(--mono)"></div>
-        <div class="fld"><label>EOM (Dauer von SOM)</label><input type="text" id="em-eom" placeholder="—" style="font-family:var(--mono)"></div>
+        <div class="fld"><label data-i18n="em.lbl.som">SOM (HH:MM:SS:FF)</label><input type="text" id="em-som" placeholder="00:00:00:00" style="font-family:var(--mono)"></div>
+        <div class="fld"><label data-i18n="em.lbl.eom">EOM (Dauer von SOM)</label><input type="text" id="em-eom" placeholder="—" style="font-family:var(--mono)"></div>
       </div>
       </div>
       <div class="fld" style="margin-top:2px">
-        <label style="color:var(--dim)">Dauerfehler (pro Event)</label>
+        <label style="color:var(--dim)" data-i18n="em.lbl.durErr">Dauerfehler (pro Event)</label>
         <select id="em-duration-mismatch" style="width:100%;font-size:10px">
-          <option value="">(globaler Standard)</option>
-          <option value="warn">⚠ Warnung</option>
-          <option value="adapt">✏ Anpassen</option>
-          <option value="ignore">– Ignorieren</option>
+          <option value="" data-i18n="em.durErr.global">(globaler Standard)</option>
+          <option value="warn" data-i18n="em.durErr.warn">⚠ Warnung</option>
+          <option value="adapt" data-i18n="em.durErr.adapt">✏ Anpassen</option>
+          <option value="ignore" data-i18n="em.durErr.ignore">– Ignorieren</option>
         </select>
       </div>
       <div class="two-col">
-        <div class="fld"><label>Postroll</label><input type="text" id="em-postroll" placeholder="00:00:00:00" style="font-family:var(--mono)"></div>
-        <div class="fld"><label>Audio-Preset</label>
-          <select id="em-audio-preset" title="Routing-Preset für dieses Event" onchange="_showPresetDesc()">
-            <option value="">(Standard / Legacy)</option>
+        <div class="fld"><label data-i18n="em.lbl.postroll">Postroll</label><input type="text" id="em-postroll" placeholder="00:00:00:00" style="font-family:var(--mono)"></div>
+        <div class="fld"><label data-i18n="em.lbl.audioPreset">Audio-Preset</label>
+          <select id="em-audio-preset" data-i18n-title="em.title.audioPreset" title="Routing-Preset für dieses Event" onchange="_showPresetDesc()">
+            <option value="" data-i18n="em.ap.default">(Standard / Legacy)</option>
           </select>
         </div>
       </div>
       <div id="em-preset-desc" style="font-size:9px;color:var(--dim);margin:-4px 0 4px;padding:0 2px;min-height:12px;white-space:pre-wrap"></div>
-      <div class="fld"><label>AFD / Format</label>
+      <div class="fld"><label data-i18n="em.lbl.afd">AFD / Format</label>
         <select id="em-afd" style="font-size:10px" title="Seitenverhältnis-Behandlung für dieses Event">
-          <option value="auto">Standard (Pipeline-Einstellung)</option>
-          <option value="16:9">16:9 nativ — keine Sonderbehandlung</option>
-          <option value="4:3-pillarbox">4:3 Pillarbox → 16:9 aufzoomen (Seitenbalken entfernen)</option>
-          <option value="4:3-letterbox">16:9 Letterbox in 4:3 → aufzoomen (Ober-/Unterbalken entfernen)</option>
-          <option value="14:9-letterbox">14:9 Letterbox → 16:9 aufzoomen</option>
-          <option value="anamorphic">Anamorph 16:9 in 4:3 → entzerren</option>
+          <option value="auto"         data-i18n="afd.auto">Standard (Pipeline-Einstellung)</option>
+          <option value="16:9"         data-i18n="afd.169long">16:9 nativ — keine Sonderbehandlung</option>
+          <option value="4:3-pillarbox" data-i18n="afd.43pillarlong">4:3 Pillarbox → 16:9 aufzoomen (Seitenbalken entfernen)</option>
+          <option value="4:3-letterbox" data-i18n="afd.43letterlong">16:9 Letterbox in 4:3 → aufzoomen (Ober-/Unterbalken entfernen)</option>
+          <option value="14:9-letterbox" data-i18n="afd.149letterlong">14:9 Letterbox → 16:9 aufzoomen</option>
+          <option value="anamorphic"   data-i18n="afd.anamorphiclong">Anamorph 16:9 in 4:3 → entzerren</option>
         </select>
       </div>
     </div>
     <div id="em-static-fields" style="display:none">
-      <div class="fld"><label>Dauer (HH:MM:SS:FF)</label><input type="text" id="em-duration" value="00:00:05:00" style="font-family:var(--mono)"></div>
-      <div id="em-live-hint" style="display:none;font-size:9px;color:var(--yellow);padding:4px 0;line-height:1.5">📡 Live-Quelle — GStreamer-Quelle muss laufen (z.B. Decklink-Karte aktiv). Neustart der Pipeline erforderlich wenn Quelle geändert wurde.</div>
+      <div class="fld"><label data-i18n="em.lbl.duration">Dauer (HH:MM:SS:FF)</label><input type="text" id="em-duration" value="00:00:05:00" style="font-family:var(--mono)"></div>
+      <div id="em-live-hint" style="display:none;font-size:9px;color:var(--yellow);padding:4px 0;line-height:1.5" data-i18n="em.live.hint">📡 Live-Quelle — GStreamer-Quelle muss laufen (z.B. Decklink-Karte aktiv). Neustart der Pipeline erforderlich wenn Quelle geändert wurde.</div>
     </div>
     <!-- Live-Event: Upstream-Quelle für Broadcast-Controller-Routing -->
     <div id="em-live-fields" style="display:none">
       <datalist id="em-live-source-list"></datalist>
-      <div class="fld"><label>Upstream-Signal <span style="font-size:9px;color:var(--dim)">(wird vor On-Air an BC/NMOS gemeldet)</span></label>
-        <input type="text" id="em-live-source" list="em-live-source-list" placeholder="Signal-ID (z.B. FeedWien, CAM1, STUDIO_A)" style="font-family:var(--mono)">
+      <div class="fld"><label data-i18n-label="em.lbl.upstreamSig">Upstream-Signal <span style="font-size:9px;color:var(--dim)" data-i18n="em.hint.upstream">(wird vor On-Air an BC/NMOS gemeldet)</span></label>
+        <input type="text" id="em-live-source" list="em-live-source-list" data-i18n-ph="em.ph.upstreamSig" placeholder="Signal-ID (z.B. FeedWien, CAM1, STUDIO_A)" style="font-family:var(--mono)">
       </div>
-      <div class="fld"><label>Anzeige-Label <span style="font-size:9px;color:var(--dim)">(optional)</span></label>
-        <input type="text" id="em-live-source-label" placeholder="Feed Wien (Anzeigename)">
+      <div class="fld"><label data-i18n-label="em.lbl.displayLabel">Anzeige-Label <span style="font-size:9px;color:var(--dim)" data-i18n="em.hint.optional">(optional)</span></label>
+        <input type="text" id="em-live-source-label" data-i18n-ph="em.ph.displayLabel" placeholder="Feed Wien (Anzeigename)">
       </div>
-      <div class="fld"><label>Dauer (HH:MM:SS:FF)</label><input type="text" id="em-live-duration" value="00:00:05:00" style="font-family:var(--mono)"></div>
-      <div style="font-size:9px;color:var(--dim);line-height:1.5;padding:3px 0">
+      <div class="fld"><label data-i18n="em.lbl.duration">Dauer (HH:MM:SS:FF)</label><input type="text" id="em-live-duration" value="00:00:05:00" style="font-family:var(--mono)"></div>
+      <div style="font-size:9px;color:var(--dim);line-height:1.5;padding:3px 0" data-i18n="em.live.routing">
         Slot-Zuweisung (live1/live2) erfolgt automatisch alternierend.<br>
         Der Broadcast-Controller routet das Signal auf den idle Decklink-Eingang.
       </div>
     </div>
     <div id="em-image-fields" style="display:none">
-      <div class="fld"><label>Bild-Datei <span style="font-size:9px;color:var(--dim)">(aus channelbranding/ oder media/)</span></label>
+      <div class="fld"><label data-i18n-label="em.lbl.imagefile">Bild-Datei <span style="font-size:9px;color:var(--dim)" data-i18n="em.hint.branding">(aus channelbranding/ oder media/)</span></label>
         <div style="display:flex;gap:4px">
-          <input type="text" id="em-imagefile" placeholder="bild.jpg oder bild.png" style="flex:1">
+          <input type="text" id="em-imagefile" data-i18n-ph="em.ph.imagefile" placeholder="bild.jpg oder bild.png" style="flex:1">
           <button class="btn" style="font-size:10px" onclick="openImagePickerFor(f=>{document.getElementById('em-imagefile').value=f;})">📁</button>
         </div>
-        <div id="em-imageinfo" style="font-size:9px;color:var(--dim);margin-top:3px">— Aus channelbranding/ oder media/</div>
+        <div id="em-imageinfo" style="font-size:9px;color:var(--dim);margin-top:3px" data-i18n="em.imageinfo.hint">— Aus channelbranding/ oder media/</div>
       </div>
-      <div class="fld"><label>Dauer (HH:MM:SS:FF)</label><input type="text" id="em-image-duration" value="00:00:05:00" style="font-family:var(--mono)"></div>
+      <div class="fld"><label data-i18n="em.lbl.duration">Dauer (HH:MM:SS:FF)</label><input type="text" id="em-image-duration" value="00:00:05:00" style="font-family:var(--mono)"></div>
     </div>
   </div><!-- /em-panel-content -->
 
   <!-- TAB: Timing -->
   <div id="em-panel-timing" style="display:none">
     <div class="two-col" style="margin-top:6px" id="em-transition-row">
-      <div class="fld"><label>Übergang</label>
+      <div class="fld"><label data-i18n="em.lbl.transition">Übergang</label>
         <select id="em-transition">
-          <option value="cut">| Cut</option>
-          <option value="v-fade">.\/ V-Fade (Schwarzblende)</option>
-          <option value="fade-cut">\| Fade-Cut</option>
-          <option value="cut-fade">|/ Cut-Fade</option>
-          <option value="xfade">X X-Fade (Überblende)</option>
+          <option value="cut" data-i18n="em.trans.cut">| Cut</option>
+          <option value="v-fade" data-i18n="em.trans.vfade">.\/ V-Fade (Schwarzblende)</option>
+          <option value="fade-cut" data-i18n="em.trans.fadecut">\| Fade-Cut</option>
+          <option value="cut-fade" data-i18n="em.trans.cutfade">|/ Cut-Fade</option>
+          <option value="xfade" data-i18n="em.trans.xfade">X X-Fade (Überblende)</option>
         </select>
       </div>
-      <div class="fld"><label>Geschwindigkeit</label>
+      <div class="fld"><label data-i18n="em.lbl.speed">Geschwindigkeit</label>
         <select id="em-speed">
-          <option value="fast">Fast (500ms)</option>
-          <option value="medium">Medium (1000ms)</option>
-          <option value="slow">Slow (2000ms)</option>
+          <option value="fast" data-i18n="em.speed.fast">Fast (500ms)</option>
+          <option value="medium" data-i18n="em.speed.medium">Medium (1000ms)</option>
+          <option value="slow" data-i18n="em.speed.slow">Slow (2000ms)</option>
         </select>
       </div>
     </div>
     <div class="sep"></div>
     <div class="two-col" id="em-timing-row">
-      <div class="fld"><label>Start-Typ</label>
+      <div class="fld"><label data-i18n="em.lbl.startType">Start-Typ</label>
         <select id="em-starttype" onchange="emStartTypeChange()">
-          <option value="sequential">Sequential</option>
-          <option value="fixtime">⏰ Fix-Zeit</option>
+          <option value="sequential" data-i18n="em.timing.sequential">Sequential</option>
+          <option value="fixtime" data-i18n="em.timing.fixtime.start">⏰ Fix-Zeit</option>
         </select>
       </div>
-      <div class="fld"><label>End-Typ</label>
+      <div class="fld"><label data-i18n="em.lbl.endType">End-Typ</label>
         <select id="em-endtype" onchange="emEndTypeChange()">
-          <option value="sequential">Sequential</option>
-          <option value="manual">⏸ Manual Hold</option>
-          <option value="fixtime">🔒 Fix-Zeit</option>
+          <option value="sequential" data-i18n="em.timing.sequential">Sequential</option>
+          <option value="manual" data-i18n="em.timing.manual">⏸ Manual Hold</option>
+          <option value="fixtime" data-i18n="em.timing.fixtime.end">🔒 Fix-Zeit</option>
         </select>
       </div>
     </div>
     <div id="em-starttime-row" style="display:none">
-      <div class="fld"><label>Start-Zeit (HH:MM:SS<span style="color:var(--dim)">:FF</span>)</label>
+      <div class="fld"><label data-i18n-label="em.lbl.startTime">Start-Zeit (HH:MM:SS<span style="color:var(--dim)">:FF</span>)</label>
         <input type="text" id="em-starttime" placeholder="08:00:00" style="font-family:var(--mono)" oninput="emUpdateStartGap()">
         <div id="em-starttime-gap" style="font-size:9px;color:var(--yellow);margin-top:2px;"></div>
       </div>
     </div>
     <div id="em-fixtime-row" style="display:none">
-      <div class="fld"><label>End-Zeit (HH:MM:SS)</label>
+      <div class="fld"><label data-i18n="em.lbl.endTime">End-Zeit (HH:MM:SS)</label>
         <input type="text" id="em-fixtime" placeholder="08:30:00" style="font-family:var(--mono)" oninput="emUpdateFixGap()">
         <div id="em-fixtime-gap" style="font-size:9px;color:var(--yellow);margin-top:2px;"></div>
       </div>
@@ -1064,28 +1085,28 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
   <!-- TAB: Grafik/VO -->
   <div id="em-panel-graphics" style="display:none">
-    <div class="fld" style="margin-top:6px" id="em-branding-row"><label>Channel Branding</label>
-      <select id="em-branding"><option value="">(kein)</option></select>
+    <div class="fld" style="margin-top:6px" id="em-branding-row"><label data-i18n="em.lbl.branding">Channel Branding</label>
+      <select id="em-branding"><option value="" data-i18n="em.branding.none">(kein)</option></select>
     </div>
     <div class="sep"></div>
     <!-- ── Grafik / oGraf / Bild Children ──────────────────── -->
     <div id="em-children-section">
     <div id="em-children-btns" style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-      <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1">🎬 Child Events</span>
-      <button class="btn" style="font-size:10px" onclick="emAddGrafik()">＋ HTML</button>
-      <button class="btn" style="font-size:10px" onclick="emAddImage()">＋ Bild</button>
+      <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1" data-i18n="em.childEvents">🎬 Child Events</span>
+      <button class="btn" style="font-size:10px" onclick="emAddGrafik()" data-i18n="em.btn.addHTML">＋ HTML</button>
+      <button class="btn" style="font-size:10px" onclick="emAddImage()" data-i18n="em.btn.addImage">＋ Bild</button>
       <button class="btn" style="font-size:10px" onclick="emAddVoiceover()">🎙 VO</button>
       <button class="btn" style="font-size:10px" onclick="emAddRecord()">⏺ Rec</button>
     </div>
     <div id="em-grafik-list" style="font-size:10px"></div>
-    <div id="em-grafik-hint" style="font-size:9px;color:var(--dim);margin-top:3px">Child Events starten relativ zum Clip-Start. HTML = Puppeteer/Template, Bild = JPG/PNG/GIF direkt, 🎙 = Voiceover WAV/MP3, ⏺ = Sekundär-Aufzeichnung.</div>
+    <div id="em-grafik-hint" style="font-size:9px;color:var(--dim);margin-top:3px" data-i18n="em.child.hint">Child Events starten relativ zum Clip-Start. HTML = Puppeteer/Template, Bild = JPG/PNG/GIF direkt, 🎙 = Voiceover WAV/MP3, ⏺ = Sekundär-Aufzeichnung.</div>
     </div>
   </div><!-- /em-panel-graphics -->
 
   </div><!-- /modal-body -->
   <div class="modal-ft">
-    <button class="btn" onclick="closeModal('event-modal')">Abbrechen</button>
-    <button id="em-save-btn" class="btn btn-p" onclick="saveEvent()">Speichern</button>
+    <button class="btn" onclick="closeModal('event-modal')" data-i18n="btn.cancel">Abbrechen</button>
+    <button id="em-save-btn" class="btn btn-p" onclick="saveEvent()" data-i18n="btn.save">Speichern</button>
   </div>
 </div>
 </div>
@@ -1121,7 +1142,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     <button class="cfg-tab"        id="cfg-tab-audio"       onclick="cfgTab('audio')"       data-i18n="tab.audio"      >🔊 Audio</button>
     <button class="cfg-tab"        id="cfg-tab-video"       onclick="cfgTab('video')"       data-i18n="tab.video"      >🎥 Video</button>
     <button class="cfg-tab"        id="cfg-tab-player"      onclick="cfgTab('player')"      data-i18n="tab.player"     >🎬 Player</button>
-    <button class="cfg-tab"        id="cfg-tab-server"      onclick="cfgTab('server')"                                 >🖥 Server</button>
+    <button class="cfg-tab"        id="cfg-tab-server"      onclick="cfgTab('server')"       data-i18n="tab.server"     >🖥 Server</button>
     <button class="cfg-tab"        id="cfg-tab-voiceover"   onclick="cfgTab('voiceover')"   data-i18n="tab.voiceover"  >🎙 Voiceover</button>
     <button class="cfg-tab"        id="cfg-tab-playlist"    onclick="cfgTab('playlist')"    data-i18n="tab.playlist"   >📋 Playlist</button>
     <button class="cfg-tab"        id="cfg-tab-paths"       onclick="cfgTab('paths')"       data-i18n="tab.paths"      >📁 Pfade</button>
@@ -1129,24 +1150,24 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     <button class="cfg-tab"        id="cfg-tab-debug"       onclick="cfgTab('debug')"       data-i18n="tab.debug"      >🐛 Debug</button>
     <button class="cfg-tab"        id="cfg-tab-users"       onclick="cfgTab('users')"       data-i18n="tab.users"      >👥 Users</button>
     <button class="cfg-tab"        id="cfg-tab-live"        onclick="cfgTab('live')"        data-i18n="tab.live"       >📡 Live</button>
-    <button class="cfg-tab"        id="cfg-tab-shortcuts"   onclick="cfgTab('shortcuts')"                              >⌨ Shortcuts</button>
-    <button class="cfg-tab"        id="cfg-tab-classif"     onclick="cfgTab('classif')"                                >🏷 Klassifikation</button>
+    <button class="cfg-tab"        id="cfg-tab-shortcuts"   onclick="cfgTab('shortcuts')"   data-i18n="tab.shortcuts"  >⌨ Shortcuts</button>
+    <button class="cfg-tab"        id="cfg-tab-classif"     onclick="cfgTab('classif')"     data-i18n="tab.classif"    >🏷 Klassifikation</button>
   </div>
 
   <div class="modal-body" style="flex:1;overflow-y:auto">
 
     <!-- ── TAB: IDLE ─────────────────────────────────────────────── -->
     <div id="cfg-panel-idle">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Idle-Modus (wenn keine Playlist läuft)</div>
-      <div class="fld"><label>Idle-Quelle</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.idle.heading">Idle-Modus (wenn keine Playlist läuft)</div>
+      <div class="fld"><label data-i18n="cfg.idle.source">Idle-Quelle</label>
         <select id="cfg-idle-source" onchange="cfgIdleSourceChange()">
-          <option value="smpte">📺 SMPTE Testbild</option>
+          <option value="smpte" data-i18n="em.src.smpte">📺 SMPTE Testbild</option>
           <option value="black">⬛ Black</option>
-          <option value="image">🖼 Standbild (JPG/PNG)</option>
+          <option value="image" data-i18n="em.src.image">🖼 Standbild (JPG/PNG)</option>
         </select>
       </div>
       <div id="cfg-idle-image-row" style="display:none">
-        <div class="fld"><label>Idle Standbild</label>
+        <div class="fld"><label data-i18n="cfg.idle.stillImage">Idle Standbild</label>
           <div style="display:flex;gap:4px;align-items:center">
             <input type="text" id="cfg-idle-image" placeholder="bild.jpg" style="flex:1;font-size:11px" readonly>
             <button class="btn" style="font-size:10px" onclick="openImagePickerFor(f=>{document.getElementById('cfg-idle-image').value=f;})">📁</button>
@@ -1155,7 +1176,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         </div>
       </div>
       <div style="margin-top:10px">
-        <button class="btn btn-p" style="font-size:10px" onclick="saveIdleSource()">💾 Idle speichern</button>
+        <button class="btn btn-p" style="font-size:10px" onclick="saveIdleSource()" data-i18n="cfg.idle.save">💾 Idle speichern</button>
         <span style="font-size:9px;color:var(--yellow);margin-left:8px">⚠ Neustart möglich wenn Playlist nicht läuft</span>
       </div>
     </div>
@@ -1170,17 +1191,17 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
       <!-- Audio-Gruppen -->
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-        <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1">Output-Gruppen</span>
-        <button class="btn" style="font-size:10px" onclick="cfgAddGroup()">＋ Gruppe</button>
+        <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1" data-i18n="cfg.audio.groups">Output-Gruppen</span>
+        <button class="btn" style="font-size:10px" onclick="cfgAddGroup()" data-i18n="cfg.audio.addGroup">＋ Gruppe</button>
       </div>
       <div id="cfg-groups-list" style="margin-bottom:12px"></div>
-      <button class="btn" style="font-size:10px;margin-bottom:14px" onclick="cfgSaveGroups()">💾 Audio speichern</button>
+      <button class="btn" style="font-size:10px;margin-bottom:14px" onclick="cfgSaveGroups()" data-i18n="cfg.audio.save">💾 Audio speichern</button>
 
       <div class="sep"></div>
 
       <!-- EBU R128 Loudness Normalization -->
       <div style="display:flex;align-items:center;gap:6px;margin:10px 0 6px">
-        <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1">EBU R128 Lautstärke-Normalisierung</span>
+        <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1" data-i18n="cfg.audio.r128">EBU R128 Lautstärke-Normalisierung</span>
       </div>
       <div id="cfg-r128-list" style="margin-bottom:12px"></div>
 
@@ -1188,34 +1209,34 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
       <!-- Audio-Presets -->
       <div style="display:flex;align-items:center;gap:6px;margin:10px 0 6px">
-        <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1">Routing-Presets</span>
-        <button class="btn" style="font-size:10px" onclick="cfgNewPreset()">＋ Preset</button>
+        <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1" data-i18n="cfg.audio.presets">Routing-Presets</span>
+        <button class="btn" style="font-size:10px" onclick="cfgNewPreset()" data-i18n="cfg.audio.addPreset">＋ Preset</button>
       </div>
       <div id="cfg-presets-list" style="margin-bottom:8px"></div>
 
       <div class="sep"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px">Audio-Output</div>
-      <div class="fld"><label>Standard Audio-Sink</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.audio.output">Audio-Output</div>
+      <div class="fld"><label data-i18n="cfg.audio.sink">Standard Audio-Sink</label>
         <select id="cfg-audio-sink">
           <option value="pulsesink">PulseAudio (pulsesink)</option>
           <option value="alsasink">ALSA (alsasink)</option>
-          <option value="fakesink">Fake (kein Audio)</option>
+          <option value="fakesink" data-i18n="cfg.audio.fakesink">Fake (kein Audio)</option>
           <option value="autoaudiosink">Auto</option>
         </select>
       </div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:6px">Gilt als Fallback für Gruppen ohne eigene Sink-Auswahl.</div>
-      <button class="btn btn-p" style="font-size:10px" onclick="saveAudioSink()">💾 Audio-Sink speichern &amp; Neustart</button>
+      <button class="btn btn-p" style="font-size:10px" onclick="saveAudioSink()" data-i18n="cfg.audio.saveSink">💾 Audio-Sink speichern &amp; Neustart</button>
 
       <div class="sep"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px">⏱ Clock-Quelle</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.audio.clock">⏱ Clock-Quelle</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
         Steuert die GStreamer-Pipeline-Clock. <b>Neustart der Pipeline erforderlich.</b><br>
         Aktuell: <code id="cfg-clock-current" style="font-family:var(--mono);background:var(--bg3);padding:1px 4px;border-radius:2px">—</code>
       </div>
-      <div class="fld"><label>Provider</label>
+      <div class="fld"><label data-i18n="cfg.audio.clockProvider">Provider</label>
         <select id="cfg-clock-provider" onchange="_cfgClockProviderChange()">
-          <option value="audiotestsrc">audiotestsrc — pulsesink Clock (Standard, stabil)</option>
-          <option value="system">system — GstSystemClock (Monotone Systemzeit)</option>
+          <option value="audiotestsrc" data-i18n="cfg.audio.clock.pulse">audiotestsrc — pulsesink Clock (Standard, stabil)</option>
+          <option value="system" data-i18n="cfg.audio.clock.system">system — GstSystemClock (Monotone Systemzeit)</option>
           <option value="ptp-decklink">ptp-decklink — DeckLink PTP Hardware-Clock</option>
           <option value="ptp-generic">ptp-generic — Linux PTP via NIC (phc2sys)</option>
         </select>
@@ -1234,22 +1255,22 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <label>DeckLink Device Nr.</label>
         <input type="number" id="cfg-clock-decklink-dev" value="0" min="0" max="7" style="font-family:var(--mono);width:80px">
       </div>
-      <button class="btn btn-p" style="font-size:10px;margin-top:4px" onclick="cfgSaveClock()">💾 Clock speichern</button>
+      <button class="btn btn-p" style="font-size:10px;margin-top:4px" onclick="cfgSaveClock()" data-i18n="cfg.audio.saveClock">💾 Clock speichern</button>
     </div>
 
     <!-- ── TAB: VIDEO ─────────────────────────────────────────────── -->
     <div id="cfg-panel-video" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Video-Output</div>
-      <div class="fld"><label>Video-Sink</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.video.output">Video-Output</div>
+      <div class="fld"><label data-i18n="cfg.video.sink">Video-Sink</label>
         <select id="cfg-video-sink">
           <option value="autovideosink">Auto (detect)</option>
-          <option value="fakesink">Fake (kein Fenster)</option>
+          <option value="fakesink" data-i18n="cfg.video.fakewin">Fake (kein Fenster)</option>
           <option value="ximagesink">X11 (Crostini)</option>
           <option value="waylandsink">Wayland</option>
           <option value="xvimagesink">XV (Hardware)</option>
         </select>
       </div>
-      <div class="fld"><label>Auflösung / Framerate</label>
+      <div class="fld"><label data-i18n="cfg.video.resolution">Auflösung / Framerate</label>
         <select id="cfg-format">
           <option value="1920x1080@25">1080p25 — 1920×1080 @ 25fps</option>
           <option value="1920x1080@50">1080p50 — 1920×1080 @ 50fps</option>
@@ -1262,17 +1283,17 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       </div>
 
       <div class="sep" style="margin:12px 0 10px"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Format-Konvertierung</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.video.conversion">Format-Konvertierung</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
         Wird angewendet wenn ein Clip nicht das Pipeline-Format hat (z.B. 4:3, SD, 29.97fps, interlaced).
         Änderungen erfordern Master-Neustart.
       </div>
 
-      <div class="fld"><label>Skalierungsmodus</label>
+      <div class="fld"><label data-i18n="cfg.video.scaleMode">Skalierungsmodus</label>
         <select id="cfg-scale-mode">
-          <option value="fit">Fit — Letterbox / Pillarbox (schwarze Balken)</option>
-          <option value="crop">Crop — Bildmitte zuschneiden (kein Letterbox)</option>
-          <option value="stretch">Stretch — Verzerren auf Zielformat</option>
+          <option value="fit" data-i18n="cfg.video.scale.fit">Fit — Letterbox / Pillarbox (schwarze Balken)</option>
+          <option value="crop" data-i18n="cfg.video.scale.crop">Crop — Bildmitte zuschneiden (kein Letterbox)</option>
+          <option value="stretch" data-i18n="cfg.video.scale.stretch">Stretch — Verzerren auf Zielformat</option>
         </select>
       </div>
       <div style="font-size:9px;color:var(--dim);margin:2px 0 8px 164px;line-height:1.4">
@@ -1281,37 +1302,37 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <b>Stretch:</b> Vollbild ohne Balken, Seitenverhältnis ignoriert.
       </div>
 
-      <div class="fld"><label>Skalierungsqualität</label>
+      <div class="fld"><label data-i18n="cfg.video.scaleQuality">Skalierungsqualität</label>
         <select id="cfg-scale-method">
-          <option value="1">Bilinear (Standard, gute Qualität)</option>
-          <option value="0">Nearest Neighbor (schnellste, Blöcke)</option>
-          <option value="3">Cubic (weich, leicht unscharf)</option>
-          <option value="5">Lanczos (höchste Qualität, CPU-intensiv)</option>
+          <option value="1" data-i18n="cfg.video.scale.bilinear">Bilinear (Standard, gute Qualität)</option>
+          <option value="0" data-i18n="cfg.video.scale.nearest">Nearest Neighbor (schnellste, Blöcke)</option>
+          <option value="3" data-i18n="cfg.video.scale.cubic">Cubic (weich, leicht unscharf)</option>
+          <option value="5" data-i18n="cfg.video.scale.lanczos">Lanczos (höchste Qualität, CPU-intensiv)</option>
         </select>
       </div>
 
       <div class="fld"><label>Deinterlace</label>
         <select id="cfg-deinterlace-mode">
-          <option value="auto">Auto (erkennt interlaced automatisch)</option>
-          <option value="always">Immer (force-deinterlace)</option>
-          <option value="never">Nie (kein Deinterlacing)</option>
+          <option value="auto" data-i18n="cfg.video.deint.auto">Auto (erkennt interlaced automatisch)</option>
+          <option value="always" data-i18n="cfg.video.deint.always">Immer (force-deinterlace)</option>
+          <option value="never" data-i18n="cfg.video.deint.never">Nie (kein Deinterlacing)</option>
         </select>
       </div>
 
-      <button class="btn btn-p" style="margin-top:12px" onclick="saveVideoSettings()">💾 Video speichern &amp; Neustart</button>
+      <button class="btn btn-p" style="margin-top:12px" onclick="saveVideoSettings()" data-i18n="cfg.video.save">💾 Video speichern &amp; Neustart</button>
     </div>
 
     <!-- ── TAB: PLAYER ─────────────────────────────────────────────── -->
     <div id="cfg-panel-player" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Video Mixer</div>
-      <div class="fld"><label>Freeze/Still Slots (0–9)</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.player.mixer">Video Mixer</div>
+      <div class="fld"><label data-i18n="cfg.player.freezeSlots">Freeze/Still Slots (0–9)</label>
         <input type="number" id="cfg-still-slots" min="0" max="9" value="2" style="width:60px">
         <div style="font-size:9px;color:var(--dim);margin-top:3px">Anzahl der Freeze-Buttons im Video Mixer Panel.</div>
       </div>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Anzahl Media-Player</div>
-      <div class="fld"><label>Media-Player (1–8)</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.player.numPlayers">Anzahl Media-Player</div>
+      <div class="fld"><label data-i18n="cfg.player.numPlayersLbl">Media-Player (1–8)</label>
         <select id="cfg-num-players">
           <option value="1">1 Player</option>
           <option value="2" selected>2 Player (Standard)</option>
@@ -1326,8 +1347,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       </div>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Voiceover-Player</div>
-      <div class="fld"><label>VO-Player-Slots (1–4)</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.player.voPlayer">Voiceover-Player</div>
+      <div class="fld"><label data-i18n="cfg.player.voSlots">VO-Player-Slots (1–4)</label>
         <select id="cfg-num-vo-slots">
           <option value="1">1 VO-Player</option>
           <option value="2" selected>2 VO-Player (Standard)</option>
@@ -1338,15 +1359,15 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       </div>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Backup-Player</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px" data-i18n="cfg.player.backup">Backup-Player</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">Bei Datei-Fehler oder Wiedergabe-Fehler übernimmt der Backup-Player automatisch. Nur verfügbar wenn mehr als 2 Player konfiguriert sind.</div>
-      <div class="fld"><label>Backup-Player</label>
+      <div class="fld"><label data-i18n="cfg.player.backup">Backup-Player</label>
         <select id="cfg-backup-slot" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;width:100%">
-          <option value="">(kein Backup-Player)</option>
+          <option value="" data-i18n="cfg.player.noBackup">(kein Backup-Player)</option>
         </select>
       </div>
 
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 6px">Backup-Medienpfade</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 6px" data-i18n="cfg.player.backupPaths">Backup-Medienpfade</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:6px">Pfade, in denen nach Backup-Dateien gesucht wird (in dieser Reihenfolge).</div>
       <div id="backup-dirs-list" style="display:flex;flex-direction:column;gap:3px;margin-bottom:6px"></div>
       <div style="display:flex;gap:3px;margin-bottom:4px">
@@ -1354,45 +1375,45 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <button class="btn" onclick="addBackupDir()">＋</button>
       </div>
 
-      <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="savePlayerSettings()">💾 Player speichern</button>
+      <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="savePlayerSettings()" data-i18n="cfg.player.save">💾 Player speichern</button>
     </div>
 
     <!-- ── TAB: SERVER ─────────────────────────────────────────────── -->
     <div id="cfg-panel-server" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Clients</div>
-      <div class="fld"><label>Max. gleichzeitige Clients (0 = unbegrenzt)</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.server.clients">Clients</div>
+      <div class="fld"><label data-i18n="cfg.server.maxClients">Max. gleichzeitige Clients (0 = unbegrenzt)</label>
         <input type="number" id="cfg-max-clients" min="0" max="50" value="0" style="width:70px;font-family:var(--mono)">
         <div style="font-size:9px;color:var(--dim);margin-top:3px">Verhindert Überlastung bei vielen Browser-Verbindungen gleichzeitig. 0 = kein Limit.</div>
       </div>
 
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px">A/V-Sync (Lip-Sync)</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px" data-i18n="cfg.server.avsync">A/V-Sync (Lip-Sync)</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px">
         Delay-Korrektur für Lip-Sync-Ausgleich. Positiver Wert = Signal erscheint später.
         Video-Delay: kompensiert wenn Audio zu früh kommt. Audio-Delay (pro Gruppe): kompensiert wenn Video zu früh kommt.
       </div>
-      <div class="fld"><label>Video-Delay (ms)</label>
+      <div class="fld"><label data-i18n="cfg.server.videoDelay">Video-Delay (ms)</label>
         <input type="number" id="cfg-video-delay" min="-500" max="2000" step="1" value="0" style="width:80px;font-family:var(--mono)">
       </div>
       <div id="cfg-audio-delays"></div>
       <div style="display:flex;gap:6px;margin-top:8px">
-        <button class="btn btn-s" onclick="avSyncMeasure()" title="Automatisch messen (SMPTE-Testsignal)">&#9654; Messen</button>
-        <button class="btn btn-s" onclick="avSyncApply()" title="Gemessenen Wert automatisch anwenden">&#10003; Auto-Apply</button>
+        <button class="btn btn-s" onclick="avSyncMeasure()" title="Automatisch messen (SMPTE-Testsignal)" data-i18n="cfg.server.measure">&#9654; Messen</button>
+        <button class="btn btn-s" onclick="avSyncApply()" title="Gemessenen Wert automatisch anwenden" data-i18n="cfg.server.autoApply">&#10003; Auto-Apply</button>
         <button class="btn btn-s" style="color:var(--red)" onclick="avSyncReset()">Reset (0)</button>
       </div>
       <div id="cfg-avsync-result" style="font-size:10px;color:var(--dim);margin-top:6px;white-space:pre-wrap"></div>
 
-      <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="saveServerSettings()">&#128190; Server speichern</button>
+      <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="saveServerSettings()" data-i18n="cfg.server.save">&#128190; Server speichern</button>
     </div>
 
     <!-- ── TAB: VOICEOVER ─────────────────────────────────────────────── -->
     <div id="cfg-panel-voiceover" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Fade</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.vo.fade">Fade</div>
       <div class="two-col">
-        <div class="fld"><label>Fade-in (ms)</label>
+        <div class="fld"><label data-i18n="cfg.vo.fadeIn">Fade-in (ms)</label>
           <input type="number" id="cfg-vo-fadein" min="0" max="10000" step="50" value="500"
             oninput="saveVoiceoverConfig()" style="font-family:var(--mono)">
         </div>
-        <div class="fld"><label>Fade-out (ms)</label>
+        <div class="fld"><label data-i18n="cfg.vo.fadeOut">Fade-out (ms)</label>
           <input type="number" id="cfg-vo-fadeout" min="0" max="10000" step="50" value="1000"
             oninput="saveVoiceoverConfig()" style="font-family:var(--mono)">
         </div>
@@ -1400,8 +1421,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
       <div class="sep" style="margin:12px 0 10px"></div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
-        <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1">Presets</div>
-        <button class="btn" style="font-size:9px" onclick="voAddPreset()">＋ Preset</button>
+        <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1" data-i18n="cfg.audio.presets">Presets</div>
+        <button class="btn" style="font-size:9px" onclick="voAddPreset()" data-i18n="cfg.audio.addPreset">＋ Preset</button>
       </div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.4">
         <b>voGain</b>: Lautstärke des Voiceovers (0–1). <b>pgmGain</b>: Programm-Ducking (0=stumm, 1=normal).
@@ -1411,15 +1432,15 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
     <!-- ── TAB: PLAYLIST ─────────────────────────────────────────────── -->
     <div id="cfg-panel-playlist" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Gap-Verwaltung</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px" data-i18n="cfg.pl.gap">Gap-Verwaltung</div>
 
-      <div class="fld"><label>Gap-Quelle</label>
+      <div class="fld"><label data-i18n="cfg.pl.gapSource">Gap-Quelle</label>
         <select id="pl-gap-source" onchange="setGapSource(this.value)"
           style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;width:100%">
-          <option value="black">⬛ Schwarz</option>
+          <option value="black" data-i18n="cfg.pl.gap.black">⬛ Schwarz</option>
           <option value="smpte">📺 SMPTE</option>
-          <option value="idle">🖼 Idle-Bild</option>
-          <option value="clip">🎬 Clip (loopend)</option>
+          <option value="idle" data-i18n="cfg.pl.gap.idle">🖼 Idle-Bild</option>
+          <option value="clip" data-i18n="cfg.pl.gap.clip">🎬 Clip (loopend)</option>
         </select>
       </div>
       <div id="gap-clip-row" style="display:none;margin-top:4px">
@@ -1433,22 +1454,22 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;margin-top:6px">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px">
           <input type="checkbox" id="cfg-auto-gap" onchange="setAutoGap(this.checked)" style="accent-color:var(--green)">
-          Dynamisches Gap-Handling
+          <span data-i18n="cfg.pl.autoGap">Dynamisches Gap-Handling</span>
         </label>
       </div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:10px">Wenn aktiviert: Lücken vor Fix-Events werden automatisch mit der Gap-Quelle überbrückt. Gap Fill erscheint dann nicht mehr in Playlist Control.</div>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">⚠ Fehlende Events</div>
-      <div class="fld"><label>Verhalten bei fehlender Datei</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.pl.missing">⚠ Fehlende Events</div>
+      <div class="fld"><label data-i18n="cfg.pl.missingBehavior">Verhalten bei fehlender Datei</label>
         <select id="cfg-missing-behavior" style="font-size:11px;width:100%" onchange="saveMissingBehavior()">
-          <option value="skip">Überspringen (0s, Folge-Startzeiten unverändert)</option>
-          <option value="idle">Idle-Quelle spielen (Dauer bleibt erhalten)</option>
+          <option value="skip" data-i18n="cfg.pl.missing.skip">Überspringen (0s, Folge-Startzeiten unverändert)</option>
+          <option value="idle" data-i18n="cfg.pl.missing.idle">Idle-Quelle spielen (Dauer bleibt erhalten)</option>
         </select>
       </div>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Übergangszeiten</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.pl.transitions">Übergangszeiten</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px">Dauer der Überblend-Effekte in Millisekunden.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
         <div class="fld"><label>Fast (ms)</label>
@@ -1461,43 +1482,43 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
           <input type="number" id="cfg-tr-slow" value="2000" min="100" max="30000" style="font-family:var(--mono)">
         </div>
       </div>
-      <button class="btn btn-p" style="font-size:10px" onclick="saveTransitionSpeeds()">💾 Übergangszeiten speichern</button>
+      <button class="btn btn-p" style="font-size:10px" onclick="saveTransitionSpeeds()" data-i18n="cfg.pl.saveTransitions">💾 Übergangszeiten speichern</button>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Neues Event – Vorgaben</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.pl.defaults">Neues Event – Vorgaben</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px">Werte, mit denen ein neu erstelltes Event vorbelegt wird.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-        <div class="fld"><label>Wiedergabemodus</label>
+        <div class="fld"><label data-i18n="cfg.pl.def.playMode">Wiedergabemodus</label>
           <select id="cfg-def-sommode" onchange="saveDefaultEventSettings()">
-            <option value="user">Manuell (SOM/EOM)</option>
-            <option value="media">Vollständig (erstes–letztes Frame)</option>
-            <option value="segment">Segment</option>
+            <option value="user" data-i18n="em.mode.manual">Manuell (SOM/EOM)</option>
+            <option value="media" data-i18n="em.mode.full">Vollständig (erstes–letztes Frame)</option>
+            <option value="segment" data-i18n="em.mode.segment">Segment</option>
           </select>
         </div>
-        <div class="fld"><label>Ende</label>
+        <div class="fld"><label data-i18n="cfg.pl.def.endType">Ende</label>
           <select id="cfg-def-endtype" onchange="saveDefaultEventSettings()">
-            <option value="sequential">Sequential</option>
-            <option value="manual">⏸ Manual Hold</option>
-            <option value="fixtime">🔒 Fix-Zeit</option>
+            <option value="sequential" data-i18n="em.timing.sequential">Sequential</option>
+            <option value="manual" data-i18n="em.timing.manual">⏸ Manual Hold</option>
+            <option value="fixtime" data-i18n="em.timing.fixtime.end">🔒 Fix-Zeit</option>
           </select>
         </div>
-        <div class="fld"><label>Übergang</label>
+        <div class="fld"><label data-i18n="em.lbl.transition">Übergang</label>
           <select id="cfg-def-transition" onchange="saveDefaultEventSettings()">
-            <option value="cut">| Cut</option>
-            <option value="v-fade">.\/ V-Fade (Schwarzblende)</option>
-            <option value="fade-cut">\| Fade-Cut</option>
-            <option value="cut-fade">|/ Cut-Fade</option>
-            <option value="xfade">X X-Fade (Überblende)</option>
+            <option value="cut" data-i18n="em.trans.cut">| Cut</option>
+            <option value="v-fade" data-i18n="em.trans.vfade">.\/ V-Fade (Schwarzblende)</option>
+            <option value="fade-cut" data-i18n="em.trans.fadecut">\| Fade-Cut</option>
+            <option value="cut-fade" data-i18n="em.trans.cutfade">|/ Cut-Fade</option>
+            <option value="xfade" data-i18n="em.trans.xfade">X X-Fade (Überblende)</option>
           </select>
         </div>
-        <div class="fld"><label>Geschwindigkeit</label>
+        <div class="fld"><label data-i18n="em.lbl.speed">Geschwindigkeit</label>
           <select id="cfg-def-speed" onchange="saveDefaultEventSettings()">
             <option value="fast">Fast</option>
             <option value="medium">Medium</option>
             <option value="slow">Slow</option>
           </select>
         </div>
-        <div class="fld" style="grid-column:1/-1"><label>Channelbranding</label>
+        <div class="fld" style="grid-column:1/-1"><label data-i18n="cfg.pl.def.branding">Channelbranding</label>
           <select id="cfg-def-branding" onchange="saveDefaultEventSettings()">
             <option value="">(kein)</option>
           </select>
@@ -1505,8 +1526,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       </div>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Anzeige</div>
-      <div class="fld"><label>Abgespielte Events (Done)</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px" data-i18n="cfg.pl.display">Anzeige</div>
+      <div class="fld"><label data-i18n="cfg.pl.doneKeep">Abgespielte Events (Done)</label>
         <div style="display:flex;align-items:center;gap:6px">
           <input type="number" id="cfg-done-keep" min="0" value="3" style="font-family:var(--mono);width:70px" oninput="saveDoneKeep()" placeholder="∞">
           <span style="font-size:9px;color:var(--dim)">in Liste behalten (leer = alle)</span>
@@ -1528,14 +1549,14 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div style="font-size:9px;color:var(--dim);margin-top:6px">Auto-save: current playlist is saved to <code style="background:var(--bg3);padding:1px 3px;border-radius:2px">playlists/_current.json</code> on every change and restored on server start.</div>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Vorbereitungsliste</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.pl.prep">Vorbereitungsliste</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
         Verhalten beim Kopieren von Events zwischen Sendeliste und Vorbereitungsliste.
       </div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px">
           <input type="checkbox" id="cfg-prep-keep-reconcile" style="accent-color:var(--accent)" onchange="savePrepSettings()">
-          Reconcile Key beibehalten
+          <span data-i18n="cfg.pl.reconcile">Reconcile Key beibehalten</span>
         </label>
       </div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:4px;line-height:1.4">
@@ -1545,11 +1566,11 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       </div>
 
       <div class="sep" style="margin:14px 0"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Media-Analyse</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.pl.mediaAnalysis">Media-Analyse</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
         Standard-Starttimecode wenn kein Timecode in der Mediendatei eingebettet ist (z.B. bei MP4-Dateien).
       </div>
-      <div class="fld"><label>Default Starttimecode</label>
+      <div class="fld"><label data-i18n="cfg.pl.defaultTC">Default Starttimecode</label>
         <input type="text" id="cfg-default-tc" placeholder="00:00:00:00" maxlength="11"
                style="font-family:var(--mono);width:120px" oninput="saveValidationSettings()">
       </div>
@@ -1557,62 +1578,62 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
     <!-- ── TAB: PFADE & AS-RUN ──────────────────────────────────────── -->
     <div id="cfg-panel-paths" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Verzeichnisse</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px" data-i18n="cfg.paths.heading">Verzeichnisse</div>
       <div style="font-size:9px;color:var(--yellow);background:rgba(255,200,0,.07);border:1px solid rgba(255,200,0,.2);border-radius:3px;padding:5px 7px;margin-bottom:10px;line-height:1.5">
         ⚠ Pfad-Änderungen werden in settings.json gespeichert und wirken nach dem nächsten <b>Server-Neustart</b>.
       </div>
-      <div class="fld"><label>Media-Verzeichnis (Videos)</label>
+      <div class="fld"><label data-i18n="cfg.paths.media">Media-Verzeichnis (Videos)</label>
         <input type="text" id="cfg-media-dir" placeholder="/home/user/media" style="font-family:var(--mono);font-size:11px">
       </div>
-      <div class="fld"><label>Playlisten-Verzeichnis</label>
+      <div class="fld"><label data-i18n="cfg.paths.playlists">Playlisten-Verzeichnis</label>
         <input type="text" id="cfg-playlists-dir" placeholder="/home/user/playlists" style="font-family:var(--mono);font-size:11px">
       </div>
-      <div class="fld"><label>oGraf Templates-Verzeichnis</label>
+      <div class="fld"><label data-i18n="cfg.paths.grafik">oGraf Templates-Verzeichnis</label>
         <input type="text" id="cfg-grafik-dir" placeholder="/home/user/templates/grafik" style="font-family:var(--mono);font-size:11px">
       </div>
-      <button class="btn btn-p" style="font-size:10px;margin-top:4px" onclick="savePaths()">💾 Pfade speichern</button>
+      <button class="btn btn-p" style="font-size:10px;margin-top:4px" onclick="savePaths()" data-i18n="cfg.paths.save">💾 Pfade speichern</button>
       <span style="font-size:9px;color:var(--yellow);margin-left:8px">⚠ wirkt nach Server-Neustart</span>
 
       <div class="sep"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px">As-Run Log</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.paths.asrun">As-Run Log</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
         Wenn aktiviert: Playlist- und Grafik-Events werden im ORF Marina Text AsRun Format (fixe Spaltenbreiten) protokolliert.
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px">
           <input type="checkbox" id="cfg-asrun-enabled" style="accent-color:var(--green)" onchange="saveAsRun()">
-          As-Run-Log aktivieren
+          <span data-i18n="cfg.paths.asrunEnable">As-Run-Log aktivieren</span>
         </label>
       </div>
-      <div class="fld"><label>As-Run-Verzeichnis</label>
+      <div class="fld"><label data-i18n="cfg.paths.asrunDir">As-Run-Verzeichnis</label>
         <input type="text" id="cfg-asrun-dir" placeholder="/home/user/asrun" style="font-family:var(--mono);font-size:11px" oninput="saveAsRun()">
       </div>
-      <div class="fld"><label>Kanal-Name (für As-Run Header)</label>
+      <div class="fld"><label data-i18n="cfg.paths.channelName">Kanal-Name (für As-Run Header)</label>
         <input type="text" id="cfg-channel-name" placeholder="ORF_PRV1" style="font-family:var(--mono);font-size:11px" oninput="saveAsRun()">
       </div>
 
       <div class="sep"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px">User Activity Log</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.paths.userlog">User Activity Log</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
         Protokolliert alle Benutzeraktionen (Playlist, Grafik) in eine Datei im JSON-Lines-Format.
       </div>
-      <div class="fld"><label>User Log Datei (JSON-Lines)</label>
+      <div class="fld"><label data-i18n="cfg.paths.userlogFile">User Log Datei (JSON-Lines)</label>
         <input type="text" id="cfg-userlog-path" placeholder="/home/user/logs/userlog.jsonl" style="font-family:var(--mono);font-size:11px" oninput="saveAsRun()">
       </div>
 
       <div class="sep"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px">⏺ Aufzeichnung</div>
-      <div class="fld"><label>Aufzeichnungs-Verzeichnis</label>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.paths.record">⏺ Aufzeichnung</div>
+      <div class="fld"><label data-i18n="cfg.paths.recDir">Aufzeichnungs-Verzeichnis</label>
         <input type="text" id="cfg-rec-dir" placeholder="/recordings" style="font-family:var(--mono);font-size:11px">
       </div>
-      <div class="fld"><label>Audio-Gruppe(n)</label>
+      <div class="fld"><label data-i18n="cfg.paths.recAudio">Audio-Gruppe(n)</label>
         <div id="cfg-rec-audiogroups-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:2px"></div>
       </div>
       <div class="fld" style="flex-direction:row;align-items:center;gap:6px">
         <input type="checkbox" id="cfg-rec-in-library" style="margin:0;accent-color:var(--accent)">
-        <label style="margin:0;cursor:pointer" for="cfg-rec-in-library">Im Media-Browser anzeigen</label>
+        <label style="margin:0;cursor:pointer" for="cfg-rec-in-library" data-i18n="cfg.paths.recInLib">Im Media-Browser anzeigen</label>
       </div>
-      <button class="btn btn-p" style="font-size:10px;margin-top:6px" onclick="saveRecordSettings()">💾 Aufzeichnung speichern</button>
+      <button class="btn btn-p" style="font-size:10px;margin-top:6px" onclick="saveRecordSettings()" data-i18n="cfg.paths.recSave">💾 Aufzeichnung speichern</button>
 
     </div>
 
@@ -1642,17 +1663,17 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       </div>
 
       <div class="sep"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px">Panel-Hintergrundfarben</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.design.panelBg">Panel-Hintergrundfarben</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-bottom:10px">
         <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
           <input type="color" id="cpick-pl-bg" style="width:28px;height:22px;border:1px solid var(--border);background:transparent;cursor:pointer;border-radius:3px;padding:1px"
             oninput="_previewColor('pl-bg',this.value)" value="#141414">
-          <span style="flex:1">📋 Playlist Hintergrund</span>
+          <span style="flex:1" data-i18n="cfg.design.plBg">📋 Playlist Hintergrund</span>
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
           <input type="color" id="cpick-prep-bg" style="width:28px;height:22px;border:1px solid var(--border);background:transparent;cursor:pointer;border-radius:3px;padding:1px"
             oninput="_previewColor('prep-bg',this.value)" value="#141414">
-          <span style="flex:1">🗂 Vorbereitung Hintergrund</span>
+          <span style="flex:1" data-i18n="cfg.design.prepBg">🗂 Vorbereitung Hintergrund</span>
         </label>
       </div>
       <div class="sep"></div>
@@ -1664,19 +1685,19 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div id="cfg-color-rows-event" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-bottom:14px"></div>
 
       <div style="display:flex;gap:6px;margin-top:4px">
-        <button class="btn btn-p" style="font-size:10px" onclick="saveDarstellung()">💾 Design speichern</button>
+        <button class="btn btn-p" style="font-size:10px" onclick="saveDarstellung()" data-i18n="cfg.design.save">💾 Design speichern</button>
         <button class="btn" style="font-size:10px" onclick="resetColorPickers()" data-i18n="btn.resetColors">↺ Farben zurücksetzen</button>
       </div>
 
       <div class="sep"></div>
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px">Countdown-Anzeige</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.design.countdown">Countdown-Anzeige</div>
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-fix" style="accent-color:var(--accent)" onchange="saveCsConfig()"> ⏰ FIX-START</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-cur" style="accent-color:var(--accent)" onchange="saveCsConfig()"> ▶ Laufend (Restzeit)</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-gap" style="accent-color:var(--accent)" onchange="saveCsConfig()"> ⇥ Nächster (Gap/Overlap)</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-live" style="accent-color:var(--accent)" onchange="saveCsConfig()"> 📺 Nächstes Live/SMPTE</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-action" style="accent-color:var(--accent)" onchange="saveCsConfig()"> ⏭ Nächste Aktion (Event/Child)</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-miss" style="accent-color:var(--accent)" onchange="saveCsConfig()"> ⚠ Nächstes fehlendes Event</label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-fix" style="accent-color:var(--accent)" onchange="saveCsConfig()"> <span data-i18n="cstrip.fixStart">⏰ FIX-START</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-cur" style="accent-color:var(--accent)" onchange="saveCsConfig()"> <span data-i18n="cfg.design.cs.running">▶ Laufend (Restzeit)</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-gap" style="accent-color:var(--accent)" onchange="saveCsConfig()"> <span data-i18n="cfg.design.cs.next">⇥ Nächster (Gap/Overlap)</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-live" style="accent-color:var(--accent)" onchange="saveCsConfig()"> <span data-i18n="cfg.design.cs.live">📺 Nächstes Live/SMPTE</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-action" style="accent-color:var(--accent)" onchange="saveCsConfig()"> <span data-i18n="cstrip.nextAction">⏭ Nächste Aktion (Event/Child)</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="cfg-cs-miss" style="accent-color:var(--accent)" onchange="saveCsConfig()"> <span data-i18n="cstrip.nextMiss">⚠ Nächstes fehlendes Event</span></label>
       </div>
     </div>
 
@@ -1776,7 +1797,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
     <!-- ── TAB: LIVE-QUELLEN ──────────────────────────────────────────── -->
     <div id="cfg-panel-live" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Live-Quellen (GStreamer Eingänge)</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.live.heading">Live-Quellen (GStreamer Eingänge)</div>
       <div style="font-size:9px;color:var(--dim);line-height:1.5;margin-bottom:8px">
         Jede Live-Quelle wird als eigener isel-Pad in der Master-Pipeline eingebunden.<br>
         <b style="color:var(--yellow)">Neustart der Pipeline nach Änderungen erforderlich.</b><br>
@@ -1784,30 +1805,30 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         oder für Inter-Process: <code style="font-family:var(--mono)">intervideosrc channel=meinkanal timeout=2000000000 do-timestamp=true</code>
       </div>
       <div id="live-src-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px"></div>
-      <button class="btn btn-g" style="font-size:10px" onclick="liveAddRow()">＋ Live-Quelle hinzufügen</button>
+      <button class="btn btn-g" style="font-size:10px" onclick="liveAddRow()" data-i18n="cfg.live.addSource">＋ Live-Quelle hinzufügen</button>
       <div class="sep"></div>
       <div style="display:flex;gap:6px;justify-content:flex-end">
-        <button class="btn btn-p" style="font-size:10px" onclick="liveSave()">💾 Speichern &amp; Neustart</button>
+        <button class="btn btn-p" style="font-size:10px" onclick="liveSave()" data-i18n="cfg.live.save">💾 Speichern &amp; Neustart</button>
       </div>
     </div>
 
     <!-- ── TAB: SHORTCUTS ─────────────────────────────────────────── -->
     <div id="cfg-panel-shortcuts" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">⌨ Tastaturkürzel</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.shortcuts.heading">⌨ Tastaturkürzel</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:10px;line-height:1.5">
         Tastaturkürzel für Hauptfunktionen. Format: <code style="font-family:var(--mono);background:var(--bg3);padding:1px 3px">Space</code>, <code style="font-family:var(--mono);background:var(--bg3);padding:1px 3px">F1</code>, <code style="font-family:var(--mono);background:var(--bg3);padding:1px 3px">ctrl+n</code>, etc.<br>
         Leer = kein Kürzel. StreamDeck: Tasten können über HTTP-Makros auf die API verweisen.
       </div>
       <div id="cfg-shortcuts-list" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:12px"></div>
       <div style="display:flex;gap:4px">
-        <button class="btn btn-p" style="font-size:10px" onclick="cfgSaveShortcuts()">💾 Speichern</button>
-        <button class="btn" style="font-size:10px" onclick="cfgResetShortcuts()">↺ Zurücksetzen</button>
+        <button class="btn btn-p" style="font-size:10px" onclick="cfgSaveShortcuts()" data-i18n="btn.save">💾 Speichern</button>
+        <button class="btn" style="font-size:10px" onclick="cfgResetShortcuts()" data-i18n="cfg.shortcuts.reset">↺ Zurücksetzen</button>
       </div>
     </div>
 
     <!-- ── TAB: KLASSIFIKATION ───────────────────────────────────────── -->
     <div id="cfg-panel-classif" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">🏷 Event-Klassifikationen</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.classif.heading">🏷 Event-Klassifikationen</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:10px;line-height:1.5">Kategorien für Playlist-Events. Farbe und Icon werden als Badge in der Playlist angezeigt.</div>
       <div id="cfg-classif-list" style="margin-bottom:10px"></div>
       <div style="display:flex;gap:4px;margin-bottom:10px">
@@ -2183,6 +2204,7 @@ const S={
   recordStatus: {},
 };
 let _plClipboard=null,_dragIdx=null,_selectedIdx=null,_selectedSet=new Set();
+let _kbFocus='playlist'; // 'playlist' | 'prep'
 let _suppressPlSSECount=0;  // Zähler: wie viele SSE-'playlist'-Events noch unterdrückt werden
 
 // ── TC Helpers ────────────────────────────────────────────────────────────
@@ -2671,6 +2693,14 @@ sse.addEventListener('grafik',e=>{
     if (curEv) curEv.afd = d.afd;
     const sel = document.getElementById('cstrip-afd-sel');
     if (sel && sel.value !== d.afd) sel.value = d.afd;
+  });
+  sse.addEventListener('onair-swap-failed', e => {
+    const d = JSON.parse(e.data);
+    showToast(`⚠ On-Air-Wechsel fehlgeschlagen — siehe Log`);
+    // Selektoren auf aktuellen Stand zurücksetzen
+    const curEv = S.plData[S.playlist?.currentIndex ?? -1];
+    if(d.type==='preset'){const sel=document.getElementById('cstrip-preset-sel');if(sel&&curEv){sel.value=curEv.audioPreset||curEv.audioConfig?.preset||'';}}
+    if(d.type==='afd'){const sel=document.getElementById('cstrip-afd-sel');if(sel&&curEv){sel.value=curEv.afd||'auto';}}
   });
   sse.addEventListener('log',e=>appendLog(JSON.parse(e.data)));
   sse.addEventListener('branding',e=>{
@@ -4193,6 +4223,7 @@ function saveDoneKeep() {
   const el=document.getElementById('cfg-done-keep');
   _plDoneKeep=el.value===''?-1:Math.max(0,parseInt(el.value,10)||0);
   try { localStorage.setItem(_lsKey('pl_done_keep'), String(_plDoneKeep)); } catch{}
+  if(_plDoneKeep>=0) api('POST','/api/playlist/prune-done',{keep:_plDoneKeep}).catch(()=>{});
   renderPl();
 }
 function saveCols() {
@@ -4416,6 +4447,7 @@ function renderPl(){
     let _doneHiddenSoFar=0;
     let skip=-1;
     let inBlock=false;
+    let _visRowNum=0; // Sichtbare Zeilennummer (1-basiert, nur sichtbare Events)
     for(let i=0;i<S.plData.length;i++){
       if(skip>=0&&i<=skip){continue;}
       skip=-1;
@@ -4440,17 +4472,18 @@ function renderPl(){
         }
       }
       const e=S.plData[i];
+      _visRowNum++;
       if(e.source==='block_start'){
         const endIdx=_findBlockEnd(i);
         const collapsed=_collapsedBlocks.has(e.id);
-        _plRows.push({type:'block_start',i,endIdx,collapsed});
+        _plRows.push({type:'block_start',i,endIdx,collapsed,rowNum:_visRowNum});
         if(collapsed){skip=endIdx;}
         else{inBlock=true;}
       } else if(e.source==='block_end'){
         inBlock=false;
-        _plRows.push({type:'block_end',i});
+        _plRows.push({type:'block_end',i,rowNum:_visRowNum});
       } else {
-        _plRows.push({type:'normal',i,inBlock});
+        _plRows.push({type:'normal',i,inBlock,rowNum:_visRowNum});
       }
     }
   }
@@ -4578,7 +4611,7 @@ function renderPl(){
         draggable="true" ondragstart="plDragStart(${i},event)" ondragover="plDragOver(${i},event)"
         ondragleave="plDragLeave(event)" ondrop="plDrop(${i},event)"
         style="display:flex;align-items:center;gap:6px;padding:3px 8px">
-        <span class="pl-num" style="min-width:20px">${i+1}</span>
+        <span class="pl-num" style="min-width:20px">${row.rowNum}</span>
         <span class="pl-comment-icon">💬</span>
         <span class="pl-comment-text" style="flex:1">${e.title||e.comment||'(Kommentar)'}</span>
         <span style="flex:1"></span>
@@ -4732,7 +4765,7 @@ function renderPl(){
         ? `<span style="color:var(--red);font-size:9px">⊘</span>`
         : isIdleFallback
           ? `<span style="color:var(--yellow)">⚠</span>`
-          : `<span class="pl-num">${i+1}</span>`;
+          : `<span class="pl-num">${row.rowNum}</span>`;
 
     const cells = [
       `<span class="pl-drag pl-cell">⠿</span>`,
@@ -5027,20 +5060,58 @@ document.addEventListener('keydown',async ev=>{
     }
   }
 
-  // Prep-Panel Shortcuts (wenn Prep offen und Selektion darin)
+  // Prep-Panel Shortcuts — routing basiert auf Fokus (_kbFocus)
   const prepOpen = document.getElementById('prep-panel')?.style.display === 'flex';
-  if(prepOpen && _prepSel.size > 0){
+  const inPrep = prepOpen && _kbFocus === 'prep';
+  if(inPrep){
     if(ev.key==='z'&&ev.ctrlKey&&!ev.shiftKey){ ev.preventDefault(); prepUndo(); return; }
-    if((ev.key==='Delete'||ev.key==='Backspace')&&!ev.ctrlKey){
+    if((ev.key==='y'&&ev.ctrlKey)||(ev.key==='z'&&ev.ctrlKey&&ev.shiftKey)){ ev.preventDefault(); prepRedo(); return; }
+    if(ev.key==='c'&&ev.ctrlKey&&_prepSel.size>0){
       ev.preventDefault();
-      const indices=[..._prepSel].sort((a,b)=>b-a);
-      if(!await _confirm(`${indices.length} Event${indices.length>1?'s':''} löschen?`,{ok:'Löschen',danger:true})) return;
-      pushPrepUndo();
-      for(const i of indices) _prepData.splice(i,1);
-      _prepSel.clear();
-      renderPrepList(); _prepPersist();
+      const idxs=[..._prepSel].sort((a,b)=>a-b);
+      _plClipboard=idxs.length===1?JSON.parse(JSON.stringify(_prepData[idxs[0]])):idxs.map(k=>JSON.parse(JSON.stringify(_prepData[k])));
+      if(!Array.isArray(_plClipboard)){delete _plClipboard.id;delete _plClipboard.reconcileKey;}
+      else _plClipboard.forEach(c=>{delete c.id;delete c.reconcileKey;});
+      showToast(idxs.length>1?t('toast.multiCopied',{n:idxs.length}):t('toast.copied'));
       return;
     }
+    if(ev.key==='x'&&ev.ctrlKey&&_prepSel.size>0){
+      ev.preventDefault();
+      const idxs=[..._prepSel].sort((a,b)=>a-b);
+      _plClipboard=idxs.length===1?JSON.parse(JSON.stringify(_prepData[idxs[0]])):idxs.map(k=>JSON.parse(JSON.stringify(_prepData[k])));
+      if(!Array.isArray(_plClipboard)){delete _plClipboard.id;delete _plClipboard.reconcileKey;}
+      else _plClipboard.forEach(c=>{delete c.id;delete c.reconcileKey;});
+      pushPrepUndo();
+      [...idxs].reverse().forEach(k=>_prepData.splice(k,1));
+      _prepSel.clear(); renderPrepList(); _prepPersist();
+      showToast(idxs.length>1?`${idxs.length} Events ausgeschnitten`:'Event ausgeschnitten');
+      return;
+    }
+    if(ev.key==='v'&&ev.ctrlKey&&_plClipboard){
+      ev.preventDefault();
+      pushPrepUndo();
+      const items=Array.isArray(_plClipboard)?_plClipboard:[_plClipboard];
+      const at=_prepSel.size?Math.max(..._prepSel)+1:_prepData.length;
+      const ins=items.map(ev2=>({...JSON.parse(JSON.stringify(ev2)),id:genId(),reconcileKey:genId(),_state:undefined}));
+      _prepData.splice(at,0,...ins);
+      _prepSel.clear();
+      ins.forEach((_,k)=>_prepSel.add(at+k));
+      renderPrepList(); _prepPersist();
+      showToast(`${ins.length} Event${ins.length>1?'s':''} in Prepliste eingefügt`);
+      return;
+    }
+    if((ev.key==='Delete'||ev.key==='Backspace')&&!ev.ctrlKey){
+      if(_prepSel.size>0){
+        ev.preventDefault();
+        const indices=[..._prepSel].sort((a,b)=>b-a);
+        if(!await _confirm(`${indices.length} Event${indices.length>1?'s':''} löschen?`,{ok:'Löschen',danger:true})) return;
+        pushPrepUndo();
+        for(const i of indices) _prepData.splice(i,1);
+        _prepSel.clear(); renderPrepList(); _prepPersist();
+      }
+      return; // wenn Prep fokussiert: kein Durchfall zur Playlist-Liste
+    }
+    return; // alle anderen Shortcuts: kein Durchfall zur Playlist wenn Prep fokussiert
   }
   if(ev.key==='z'&&ev.ctrlKey&&!ev.shiftKey){ev.preventDefault();plUndo();return;}
   if((ev.key==='y'&&ev.ctrlKey)||(ev.key==='z'&&ev.ctrlKey&&ev.shiftKey)){ev.preventDefault();plRedo();return;}
@@ -5058,6 +5129,34 @@ document.addEventListener('keydown',async ev=>{
     } else {
       _plClipboard=indices.map(idx=>{const c=JSON.parse(JSON.stringify(S.plData[idx]));delete c.id;delete c.reconcileKey;return c;});
       showToast(t('toast.multiCopied',{n:indices.length}));
+    }
+    return;
+  }
+  if(ev.key==='x'&&ev.ctrlKey&&(_selectedSet.size>0||_selectedIdx!=null)){
+    const indices=_selectedSet.size?[..._selectedSet].sort((a,b)=>a-b):[_selectedIdx];
+    if(indices.length===1){
+      const selEv=S.plData[indices[0]];
+      if(selEv.source==='block_start'&&_collapsedBlocks.has(selEv.id)){
+        const endIdx=_findBlockEnd(indices[0]);
+        _plClipboard=S.plData.slice(indices[0],endIdx+1).map(e=>{const c=JSON.parse(JSON.stringify(e));delete c.id;delete c.reconcileKey;return c;});
+        showToast(t('toast.blockCopied',{n:_plClipboard.length}));
+        return; // Block: nur kopieren, kein Löschen
+      }
+      _plClipboard=JSON.parse(JSON.stringify(selEv));delete _plClipboard.id;
+    } else {
+      _plClipboard=indices.map(idx2=>{const c=JSON.parse(JSON.stringify(S.plData[idx2]));delete c.id;delete c.reconcileKey;return c;});
+    }
+    const curIdx=S.playlist.currentIndex;
+    const safeToDelete=S.playlist.running?indices.filter(idx2=>idx2!==curIdx):indices;
+    if(safeToDelete.length<indices.length) showToast('⚠ On-Air-Event kann nicht ausgeschnitten werden');
+    if(safeToDelete.length){
+      pushUndo();
+      safeToDelete.sort((a,b)=>b-a).forEach(idx2=>S.plData.splice(idx2,1));
+      _selectedSet.clear();_selectedIdx=null;
+      _recalcTimeline();renderPl();_suppressPlSSECount++;api('POST','/api/playlist/set',{events:S.plData});
+      showToast(indices.length>1?`${indices.length} Events ausgeschnitten`:'Event ausgeschnitten');
+    } else {
+      showToast(t('toast.copied'));
     }
     return;
   }
@@ -8394,6 +8493,48 @@ function _applyPreviewStrip() {
   // VU rendering continues in background but is not displayed.
   strip.classList.toggle('vu-hidden', !previewActive);
 }
+
+let _plPreviewMax = false;
+let _previewExpPollTimer = null;
+
+function _previewExpConnect(img) {
+  _previewExpDisconnect(img);
+  const token = _auth?.token;
+  function _next() {
+    if (!_plPreviewMax) return;
+    img.src = '/preview/frame.jpg' + (token ? `?t=${Date.now()}&token=${encodeURIComponent(token)}` : `?t=${Date.now()}`);
+  }
+  img.onload  = () => { if (_plPreviewMax) _previewExpPollTimer = setTimeout(_next, 80); };
+  img.onerror = () => { if (_plPreviewMax) _previewExpPollTimer = setTimeout(_next, 500); };
+  _next();
+}
+function _previewExpDisconnect(img) {
+  if (_previewExpPollTimer) { clearTimeout(_previewExpPollTimer); _previewExpPollTimer = null; }
+  img.onload = null; img.onerror = null; img.src = '';
+}
+
+function togglePlPreviewMax(ev) {
+  if (ev) ev.stopPropagation();
+  _plPreviewMax = !_plPreviewMax;
+  const slot   = document.getElementById('preview-exp-slot');
+  const list   = document.getElementById('sec-pl-list');
+  const btn    = document.getElementById('btn-pl-preview-max');
+  const btnVu  = document.getElementById('btn-preview-max-vu');
+  const img    = document.getElementById('preview-exp-img');
+  slot.classList.toggle('active', _plPreviewMax);
+  if (list) list.style.display = _plPreviewMax ? 'none' : '';
+  const activeColor = 'var(--accent)';
+  if (btn)   { btn.style.borderColor = _plPreviewMax ? activeColor : ''; btn.textContent = _plPreviewMax ? '⊠' : '⛶'; }
+  if (btnVu) { btnVu.style.color = _plPreviewMax ? activeColor : 'var(--dim)'; btnVu.textContent = _plPreviewMax ? '⊠' : '⤢'; }
+  if (_plPreviewMax) {
+    _previewExpConnect(img);
+    // activate server preview if not already on
+    if (!previewActive) apiFetch('/api/preview/active', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({active:true})}).catch(()=>{});
+  } else {
+    _previewExpDisconnect(img);
+    document.getElementById('vu-meters-exp').innerHTML = '';
+  }
+}
 function _vuHasData() {
   // true wenn mindestens ein VU-Slot aktive Meter hat
   return document.querySelector('#vu-meters [data-vu-slot]') !== null;
@@ -8505,6 +8646,13 @@ const I18N = {
     'colcfg.dur':'Dauer','colcfg.trans':'Übergang Typ','colcfg.speed':'Übergang Speed',
     'colcfg.branding':'Branding','colcfg.audio':'Audio',
     'colcfg.rate':'Rate','colcfg.children':'Grafik Events',
+    'colcfg.avail':'Verfügbarkeit','colcfg.starttype':'Start-Typ','colcfg.endtype':'End-Typ',
+    'colcfg.segment':'Segment','colcfg.playmode':'Abspielmodus',
+    'colcfg.classif':'Klassifikation','colcfg.evtitle':'Titel','colcfg.file':'Datei',
+    // Undo/Redo buttons
+    'btn.undo':'↩ Undo','btn.redo':'↪ Redo',
+    // Search placeholder
+    'pl.searchPh':'Titel / Datei / Klassifikation…',
     // Grid header
     'col.tc':'TC','col.title':'Titel / Datei','col.status':'Status','col.rate':'Rate',
     'col.audio':'Audio','col.dur':'Dauer','col.gap':'Gap','col.rem':'Rest',
@@ -8543,6 +8691,180 @@ const I18N = {
     'pl.empty':'Keine Events — ＋ Event oder Mediathek öffnen',
     // Live devices
     'btn.discoverDevices':'🔍 Live-Quellen suchen',
+    // Counter strip
+    'cstrip.nextAction':'⏭ NÄCHSTE AKTION','cstrip.nextMiss':'⚠ NÄCHSTES FEHLT',
+    // AFD options
+    'afd.auto':'Standard (Pipeline-Einstellung)',
+    'afd.169':'16:9 nativ','afd.169long':'16:9 nativ — keine Sonderbehandlung',
+    'afd.43pillar':'4:3 Pillarbox → 16:9','afd.43pillarlong':'4:3 Pillarbox → 16:9 aufzoomen (Seitenbalken entfernen)',
+    'afd.43letter':'16:9 Letterbox in 4:3 → 16:9','afd.43letterlong':'16:9 Letterbox in 4:3 → aufzoomen (Ober-/Unterbalken entfernen)',
+    'afd.149letter':'14:9 Letterbox → 16:9','afd.149letterlong':'14:9 Letterbox → 16:9 aufzoomen',
+    'afd.anamorphic':'Anamorph 16:9 in 4:3','afd.anamorphiclong':'Anamorph 16:9 in 4:3 → entzerren',
+    // oGraf template
+    'ograf.tpl.clock':'Uhr',
+    // Timeline
+    'tl.all':'Alles',
+    // Prep
+    'prep.selectList':'— Liste wählen —',
+    // Settings tabs
+    'tab.server':'🖥 Server','tab.shortcuts':'⌨ Shortcuts','tab.classif':'🏷 Klassifikation',
+    // Event editor tabs
+    'em.content':'📄 Inhalt','em.timing':'⏱ Timing','em.graphics':'🎬 Grafik/VO/Rec',
+    // Event editor — source options
+    'em.src.player':'🎬 Player (auto)','em.src.smpte':'📺 SMPTE Testbild','em.src.black':'⬛ Black',
+    'em.src.image':'🖼 Standbild (JPG/PNG)','em.src.live':'📡 Live (auto-Slot)',
+    'em.src.comment':'💬 Kommentar','em.src.blockStart':'▶⊞ Block Anfang','em.src.blockEnd':'⊟ Block Ende',
+    // Event editor — content tab labels
+    'em.lbl.evTitle':'Titel (optional)','em.lbl.classif':'Klassifikation',
+    'em.lbl.subtitleFile':'Subtitle-Datei','em.hint.subtitlePlugin':'(für Subtitle-Plugin)',
+    'em.lbl.source':'Quelle','em.lbl.file':'Datei','em.hint.noExt':'(ohne Extension möglich)',
+    'em.lbl.playMode':'Abspiel-Modus',
+    'em.mode.manual':'Manuell (SOM/EOM)','em.mode.full':'Vollständig (erstes–letztes Frame)','em.mode.segment':'Segment',
+    'em.lbl.segment':'Segment','em.seg.none':'(kein Segment ausgewählt)',
+    'em.lbl.som':'SOM (HH:MM:SS:FF)','em.lbl.eom':'EOM (Dauer von SOM)',
+    'em.lbl.durErr':'Dauerfehler (pro Event)',
+    'em.durErr.global':'(globaler Standard)','em.durErr.warn':'⚠ Warnung','em.durErr.adapt':'✏ Anpassen','em.durErr.ignore':'– Ignorieren',
+    'em.lbl.postroll':'Postroll','em.lbl.audioPreset':'Audio-Preset',
+    'em.title.audioPreset':'Routing-Preset für dieses Event',
+    'em.ap.default':'(Standard / Legacy)','em.lbl.afd':'AFD / Format',
+    'em.lbl.duration':'Dauer (HH:MM:SS:FF)',
+    'em.classif.none':'(keine)',
+    // Event editor — live/image fields
+    'em.lbl.imagefile':'Bild-Datei','em.hint.branding':'(aus channelbranding/ oder media/)',
+    'em.imageinfo.hint':'— Aus channelbranding/ oder media/',
+    'em.lbl.upstreamSig':'Upstream-Signal','em.hint.upstream':'(wird vor On-Air an BC/NMOS gemeldet)',
+    'em.lbl.displayLabel':'Anzeige-Label','em.hint.optional':'(optional)',
+    'em.live.hint':'📡 Live-Quelle — GStreamer-Quelle muss laufen (z.B. Decklink-Karte aktiv). Neustart der Pipeline erforderlich wenn Quelle geändert wurde.',
+    'em.live.routing':'Slot-Zuweisung (live1/live2) erfolgt automatisch alternierend.\nDer Broadcast-Controller routet das Signal auf den idle Decklink-Eingang.',
+    // Event editor — placeholders
+    'em.ph.evTitle':'Sendungstitel, Beschreibung…','em.ph.file':'datei oder datei.mxf',
+    'em.ph.upstreamSig':'Signal-ID (z.B. FeedWien, CAM1, STUDIO_A)',
+    'em.ph.displayLabel':'Feed Wien (Anzeigename)','em.ph.imagefile':'bild.jpg oder bild.png',
+    // Event editor — timing tab
+    'em.lbl.transition':'Übergang','em.lbl.speed':'Geschwindigkeit',
+    'em.trans.cut':'| Cut','em.trans.vfade':'.\/ V-Fade (Schwarzblende)',
+    'em.trans.fadecut':'\\| Fade-Cut','em.trans.cutfade':'|/ Cut-Fade','em.trans.xfade':'X X-Fade (Überblende)',
+    'em.speed.fast':'Fast (500ms)','em.speed.medium':'Medium (1000ms)','em.speed.slow':'Slow (2000ms)',
+    'em.lbl.startType':'Start-Typ','em.lbl.endType':'End-Typ',
+    'em.timing.sequential':'Sequential','em.timing.fixtime.start':'⏰ Fix-Zeit',
+    'em.timing.manual':'⏸ Manual Hold','em.timing.fixtime.end':'🔒 Fix-Zeit',
+    'em.lbl.startTime':'Start-Zeit (HH:MM:SS','em.lbl.endTime':'End-Zeit (HH:MM:SS)',
+    // Event editor — graphics tab
+    'em.lbl.branding':'Channel Branding','em.branding.none':'(kein)',
+    'em.childEvents':'🎬 Child Events','em.btn.addHTML':'＋ HTML','em.btn.addImage':'＋ Bild',
+    'em.child.hint':'Child Events starten relativ zum Clip-Start. HTML = Puppeteer/Template, Bild = JPG/PNG/GIF direkt, 🎙 = Voiceover WAV/MP3, ⏺ = Sekundär-Aufzeichnung.',
+    // Voiceover panel
+    'cfg.vo.fade':'Fade','cfg.vo.fadeIn':'Fade-in (ms)','cfg.vo.fadeOut':'Fade-out (ms)',
+    // Idle panel
+    'cfg.idle.heading':'Idle-Modus (wenn keine Playlist läuft)',
+    'cfg.idle.source':'Idle-Quelle','cfg.idle.stillImage':'Idle Standbild',
+    'cfg.idle.save':'💾 Idle speichern',
+    // Audio panel
+    'cfg.audio.groups':'Output-Gruppen','cfg.audio.addGroup':'＋ Gruppe',
+    'cfg.audio.save':'💾 Audio speichern',
+    'cfg.audio.r128':'EBU R128 Lautstärke-Normalisierung',
+    'cfg.audio.presets':'Routing-Presets','cfg.audio.addPreset':'＋ Preset',
+    'cfg.audio.output':'Audio-Output','cfg.audio.sink':'Standard Audio-Sink',
+    'cfg.audio.fakesink':'Fake (kein Audio)',
+    'cfg.audio.saveSink':'💾 Audio-Sink speichern & Neustart',
+    'cfg.audio.saveClock':'💾 Clock speichern',
+    'cfg.audio.clock':'⏱ Clock-Quelle','cfg.audio.clockProvider':'Provider',
+    'cfg.audio.clock.pulse':'audiotestsrc — pulsesink Clock (Standard, stabil)',
+    'cfg.audio.clock.system':'system — GstSystemClock (Monotone Systemzeit)',
+    // Video panel
+    'cfg.video.output':'Video-Output','cfg.video.sink':'Video-Sink',
+    'cfg.video.fakewin':'Fake (kein Fenster)',
+    'cfg.video.resolution':'Auflösung / Framerate',
+    'cfg.video.conversion':'Format-Konvertierung',
+    'cfg.video.scaleMode':'Skalierungsmodus',
+    'cfg.video.scale.fit':'Fit — Letterbox / Pillarbox (schwarze Balken)',
+    'cfg.video.scale.crop':'Crop — Bildmitte zuschneiden (kein Letterbox)',
+    'cfg.video.scale.stretch':'Stretch — Verzerren auf Zielformat',
+    'cfg.video.scaleQuality':'Skalierungsqualität',
+    'cfg.video.scale.bilinear':'Bilinear (Standard, gute Qualität)',
+    'cfg.video.scale.nearest':'Nearest Neighbor (schnellste, Blöcke)',
+    'cfg.video.scale.cubic':'Cubic (weich, leicht unscharf)',
+    'cfg.video.scale.lanczos':'Lanczos (höchste Qualität, CPU-intensiv)',
+    'cfg.video.deint.auto':'Auto (erkennt interlaced automatisch)',
+    'cfg.video.deint.always':'Immer (force-deinterlace)',
+    'cfg.video.deint.never':'Nie (kein Deinterlacing)',
+    'cfg.video.save':'💾 Video speichern & Neustart',
+    // Player panel
+    'cfg.player.mixer':'Video Mixer','cfg.player.freezeSlots':'Freeze/Still Slots (0–9)',
+    'cfg.player.numPlayers':'Anzahl Media-Player',
+    'cfg.player.numPlayersLbl':'Media-Player (1–8)',
+    'cfg.player.voPlayer':'Voiceover-Player','cfg.player.voSlots':'VO-Player-Slots (1–4)',
+    'cfg.player.backup':'Backup-Player',
+    'cfg.player.noBackup':'(kein Backup-Player)',
+    'cfg.player.backupPaths':'Backup-Medienpfade',
+    'cfg.player.save':'💾 Player speichern',
+    // Server panel
+    'cfg.server.clients':'Clients',
+    'cfg.server.maxClients':'Max. gleichzeitige Clients (0 = unbegrenzt)',
+    'cfg.server.avsync':'A/V-Sync (Lip-Sync)',
+    'cfg.server.videoDelay':'Video-Delay (ms)',
+    'cfg.server.measure':'▶ Messen','cfg.server.autoApply':'✓ Auto-Apply',
+    'cfg.server.save':'💾 Server speichern',
+    // Paths panel
+    'cfg.paths.heading':'Verzeichnisse',
+    'cfg.paths.media':'Media-Verzeichnis (Videos)',
+    'cfg.paths.playlists':'Playlisten-Verzeichnis',
+    'cfg.paths.grafik':'oGraf Templates-Verzeichnis',
+    'cfg.paths.save':'💾 Pfade speichern',
+    'cfg.paths.asrun':'As-Run Log',
+    'cfg.paths.asrunEnable':'As-Run-Log aktivieren',
+    'cfg.paths.asrunDir':'As-Run-Verzeichnis',
+    'cfg.paths.channelName':'Kanal-Name (für As-Run Header)',
+    'cfg.paths.userlog':'User Activity Log',
+    'cfg.paths.userlogFile':'User Log Datei (JSON-Lines)',
+    'cfg.paths.record':'⏺ Aufzeichnung',
+    'cfg.paths.recDir':'Aufzeichnungs-Verzeichnis',
+    'cfg.paths.recAudio':'Audio-Gruppe(n)',
+    'cfg.paths.recInLib':'Im Media-Browser anzeigen',
+    'cfg.paths.recSave':'💾 Aufzeichnung speichern',
+    // Playlist panel
+    'cfg.pl.gap':'Gap-Verwaltung','cfg.pl.gapSource':'Gap-Quelle',
+    'cfg.pl.gap.black':'⬛ Schwarz','cfg.pl.gap.idle':'🖼 Idle-Bild','cfg.pl.gap.clip':'🎬 Clip (loopend)',
+    'cfg.pl.missing':'⚠ Fehlende Events',
+    'cfg.pl.missingBehavior':'Verhalten bei fehlender Datei',
+    'cfg.pl.missing.skip':'Überspringen (0s, Folge-Startzeiten unverändert)',
+    'cfg.pl.missing.idle':'Idle-Quelle spielen (Dauer bleibt erhalten)',
+    'cfg.pl.transitions':'Übergangszeiten',
+    'cfg.pl.defaults':'Neues Event – Vorgaben',
+    'cfg.pl.def.playMode':'Wiedergabemodus','cfg.pl.def.endType':'Ende',
+    'cfg.pl.def.branding':'Channelbranding',
+    'cfg.pl.display':'Anzeige','cfg.pl.doneKeep':'Abgespielte Events (Done)',
+    'cfg.pl.prep':'Vorbereitungsliste',
+    'cfg.pl.reconcile':'Reconcile Key beibehalten',
+    'cfg.pl.mediaAnalysis':'Media-Analyse','cfg.pl.defaultTC':'Default Starttimecode',
+    'cfg.pl.saveTransitions':'💾 Übergangszeiten speichern',
+    // Design panel
+    'cfg.design.panelBg':'Panel-Hintergrundfarben',
+    'cfg.design.plBg':'📋 Playlist Hintergrund',
+    'cfg.design.prepBg':'🗂 Vorbereitung Hintergrund',
+    'cfg.design.save':'💾 Design speichern',
+    'cfg.design.countdown':'Countdown-Anzeige',
+    'cfg.design.cs.running':'▶ Laufend (Restzeit)',
+    'cfg.design.cs.next':'⇥ Nächster (Gap/Overlap)',
+    'cfg.design.cs.live':'📺 Nächstes Live/SMPTE',
+    // Live panel
+    'cfg.live.heading':'Live-Quellen (GStreamer Eingänge)',
+    'cfg.live.addSource':'＋ Live-Quelle hinzufügen',
+    'cfg.live.save':'💾 Speichern & Neustart',
+    // Shortcuts panel
+    'cfg.shortcuts.heading':'⌨ Tastaturkürzel',
+    'cfg.shortcuts.reset':'↺ Zurücksetzen',
+    // Classification panel
+    'cfg.classif.heading':'🏷 Event-Klassifikationen',
+    // Library drawer
+    'lib.searchPh':'Mediathek suchen…',
+    // Playlist files modal
+    'plfiles.local':'Lokal',
+    'plfiles.open':'📂 Öffnen…',
+    // Playlist auto-gap toggle
+    'cfg.pl.autoGap':'Dynamisches Gap-Handling',
+    // Generic on/off
+    'cfg.on':'AN','cfg.off':'AUS',
   },
   en: {
     // Toolbar
@@ -8573,6 +8895,13 @@ const I18N = {
     'colcfg.dur':'Duration','colcfg.trans':'Transition Type','colcfg.speed':'Transition Speed',
     'colcfg.branding':'Branding','colcfg.audio':'Audio',
     'colcfg.rate':'Rate','colcfg.children':'Graphic Events',
+    'colcfg.avail':'Availability','colcfg.starttype':'Start Type','colcfg.endtype':'End Type',
+    'colcfg.segment':'Segment','colcfg.playmode':'Play Mode',
+    'colcfg.classif':'Classification','colcfg.evtitle':'Title','colcfg.file':'File',
+    // Undo/Redo buttons
+    'btn.undo':'↩ Undo','btn.redo':'↪ Redo',
+    // Search placeholder
+    'pl.searchPh':'Title / File / Classification…',
     // Grid header
     'col.tc':'TC','col.title':'Title / File','col.status':'Status','col.rate':'Rate',
     'col.audio':'Audio','col.dur':'Duration','col.gap':'Gap','col.rem':'Rem.',
@@ -8611,6 +8940,182 @@ const I18N = {
     'pl.empty':'No events — ＋ Event or open Media Library',
     // Live devices
     'btn.discoverDevices':'🔍 Discover Live Sources',
+    // Counter strip
+    'cstrip.nextAction':'⏭ NEXT ACTION','cstrip.nextMiss':'⚠ NEXT MISSING',
+    // AFD options
+    'afd.auto':'Default (pipeline setting)',
+    'afd.169':'16:9 native','afd.169long':'16:9 native — no conversion',
+    'afd.43pillar':'4:3 Pillarbox → 16:9','afd.43pillarlong':'4:3 Pillarbox → zoom to 16:9 (remove side bars)',
+    'afd.43letter':'16:9 Letterbox in 4:3 → 16:9','afd.43letterlong':'16:9 Letterbox in 4:3 → zoom (remove bars)',
+    'afd.149letter':'14:9 Letterbox → 16:9','afd.149letterlong':'14:9 Letterbox → zoom to 16:9',
+    'afd.anamorphic':'Anamorphic 16:9 in 4:3','afd.anamorphiclong':'Anamorphic 16:9 in 4:3 → de-squeeze',
+    // oGraf template
+    'ograf.tpl.clock':'Clock',
+    // Timeline
+    'tl.all':'All',
+    // Prep
+    'prep.selectList':'— Select list —',
+    // Settings tabs
+    'tab.server':'🖥 Server','tab.shortcuts':'⌨ Shortcuts','tab.classif':'🏷 Classification',
+    // Event editor tabs
+    'em.content':'📄 Content','em.timing':'⏱ Timing','em.graphics':'🎬 Graphics/VO/Rec',
+    // Event editor — source options
+    'em.src.player':'🎬 Player (auto)','em.src.smpte':'📺 SMPTE Test Signal','em.src.black':'⬛ Black',
+    'em.src.image':'🖼 Still Image (JPG/PNG)','em.src.live':'📡 Live (auto-slot)',
+    'em.src.comment':'💬 Comment','em.src.blockStart':'▶⊞ Block Start','em.src.blockEnd':'⊟ Block End',
+    // Event editor — content tab labels
+    'em.lbl.evTitle':'Title (optional)','em.lbl.classif':'Classification',
+    'em.lbl.subtitleFile':'Subtitle File','em.hint.subtitlePlugin':'(for subtitle plugin)',
+    'em.lbl.source':'Source','em.lbl.file':'File','em.hint.noExt':'(extension optional)',
+    'em.lbl.playMode':'Play Mode',
+    'em.mode.manual':'Manual (SOM/EOM)','em.mode.full':'Full (first–last frame)','em.mode.segment':'Segment',
+    'em.lbl.segment':'Segment','em.seg.none':'(no segment selected)',
+    'em.lbl.som':'SOM (HH:MM:SS:FF)','em.lbl.eom':'EOM (duration from SOM)',
+    'em.lbl.durErr':'Duration mismatch (per event)',
+    'em.durErr.global':'(global default)','em.durErr.warn':'⚠ Warning','em.durErr.adapt':'✏ Adapt','em.durErr.ignore':'– Ignore',
+    'em.lbl.postroll':'Postroll','em.lbl.audioPreset':'Audio Preset',
+    'em.title.audioPreset':'Routing preset for this event',
+    'em.ap.default':'(Default / Legacy)','em.lbl.afd':'AFD / Format',
+    'em.lbl.duration':'Duration (HH:MM:SS:FF)',
+    'em.classif.none':'(none)',
+    // Event editor — live/image fields
+    'em.lbl.imagefile':'Image File','em.hint.branding':'(from channelbranding/ or media/)',
+    'em.imageinfo.hint':'— From channelbranding/ or media/',
+    'em.lbl.upstreamSig':'Upstream Signal','em.hint.upstream':'(reported to BC/NMOS before on-air)',
+    'em.lbl.displayLabel':'Display Label','em.hint.optional':'(optional)',
+    'em.live.hint':'📡 Live source — GStreamer source must be running (e.g. Decklink card active). Pipeline restart required if source changed.',
+    'em.live.routing':'Slot assignment (live1/live2) is automatic alternating.\nBroadcast controller routes signal to the idle Decklink input.',
+    // Event editor — placeholders
+    'em.ph.evTitle':'Programme title, description…','em.ph.file':'file or file.mxf',
+    'em.ph.upstreamSig':'Signal-ID (e.g. FeedWien, CAM1, STUDIO_A)',
+    'em.ph.displayLabel':'Feed Wien (display name)','em.ph.imagefile':'image.jpg or image.png',
+    // Event editor — timing tab
+    'em.lbl.transition':'Transition','em.lbl.speed':'Speed',
+    'em.trans.cut':'| Cut','em.trans.vfade':'.\/ V-Fade (Black)',
+    'em.trans.fadecut':'\\| Fade-Cut','em.trans.cutfade':'|/ Cut-Fade','em.trans.xfade':'X X-Fade (Cross-Fade)',
+    'em.speed.fast':'Fast (500ms)','em.speed.medium':'Medium (1000ms)','em.speed.slow':'Slow (2000ms)',
+    'em.lbl.startType':'Start Type','em.lbl.endType':'End Type',
+    'em.timing.sequential':'Sequential','em.timing.fixtime.start':'⏰ Fix Time',
+    'em.timing.manual':'⏸ Manual Hold','em.timing.fixtime.end':'🔒 Fix Time',
+    'em.lbl.startTime':'Start Time (HH:MM:SS','em.lbl.endTime':'End Time (HH:MM:SS)',
+    // Event editor — graphics tab
+    'em.lbl.branding':'Channel Branding','em.branding.none':'(none)',
+    'em.childEvents':'🎬 Child Events','em.btn.addHTML':'＋ HTML','em.btn.addImage':'＋ Image',
+    'em.child.hint':'Child events start relative to clip start. HTML = Puppeteer/Template, Image = JPG/PNG/GIF, 🎙 = Voiceover WAV/MP3, ⏺ = Secondary recording.',
+    // Idle panel
+    'cfg.idle.heading':'Idle Mode (when no playlist is running)',
+    'cfg.idle.source':'Idle Source','cfg.idle.stillImage':'Idle Still Image',
+    'cfg.idle.save':'💾 Save Idle',
+    // Audio panel
+    'cfg.audio.groups':'Output Groups','cfg.audio.addGroup':'＋ Group',
+    'cfg.audio.save':'💾 Save Audio',
+    'cfg.audio.r128':'EBU R128 Loudness Normalisation',
+    'cfg.audio.presets':'Routing Presets','cfg.audio.addPreset':'＋ Preset',
+    'cfg.audio.output':'Audio Output','cfg.audio.sink':'Default Audio Sink',
+    'cfg.audio.fakesink':'Fake (no audio)',
+    'cfg.audio.saveSink':'💾 Save Audio Sink & Restart',
+    'cfg.audio.clock':'⏱ Clock Source','cfg.audio.clockProvider':'Provider',
+    'cfg.audio.clock.pulse':'audiotestsrc — pulsesink Clock (default, stable)',
+    'cfg.audio.clock.system':'system — GstSystemClock (monotonic system time)',
+    // Video panel
+    'cfg.video.output':'Video Output','cfg.video.sink':'Video Sink',
+    'cfg.video.fakewin':'Fake (no window)',
+    'cfg.video.resolution':'Resolution / Framerate',
+    'cfg.video.conversion':'Format Conversion',
+    'cfg.video.scaleMode':'Scaling Mode',
+    'cfg.video.scale.fit':'Fit — Letterbox / Pillarbox (black bars)',
+    'cfg.video.scale.crop':'Crop — centre crop (no letterbox)',
+    'cfg.video.scale.stretch':'Stretch — distort to target format',
+    'cfg.video.scaleQuality':'Scaling Quality',
+    'cfg.video.scale.bilinear':'Bilinear (default, good quality)',
+    'cfg.video.scale.nearest':'Nearest Neighbor (fastest, blocky)',
+    'cfg.video.scale.cubic':'Cubic (soft, slightly blurred)',
+    'cfg.video.scale.lanczos':'Lanczos (highest quality, CPU-intensive)',
+    'cfg.video.deint.auto':'Auto (detects interlaced automatically)',
+    'cfg.video.deint.always':'Always (force-deinterlace)',
+    'cfg.video.deint.never':'Never (no deinterlacing)',
+    'cfg.video.save':'💾 Save Video & Restart',
+    // Player panel
+    'cfg.player.mixer':'Video Mixer','cfg.player.freezeSlots':'Freeze/Still Slots (0–9)',
+    'cfg.player.numPlayers':'Number of Media Players',
+    'cfg.player.numPlayersLbl':'Media Players (1–8)',
+    'cfg.player.voPlayer':'Voiceover Player','cfg.player.voSlots':'VO Player Slots (1–4)',
+    'cfg.player.backup':'Backup Player',
+    'cfg.player.noBackup':'(no backup player)',
+    'cfg.player.backupPaths':'Backup Media Paths',
+    'cfg.player.save':'💾 Save Player',
+    // Server panel
+    'cfg.server.clients':'Clients',
+    'cfg.server.maxClients':'Max. concurrent clients (0 = unlimited)',
+    'cfg.server.avsync':'A/V Sync (Lip Sync)',
+    'cfg.server.videoDelay':'Video Delay (ms)',
+    'cfg.server.measure':'▶ Measure','cfg.server.autoApply':'✓ Auto-Apply',
+    'cfg.server.save':'💾 Save Server',
+    // Paths panel
+    'cfg.paths.heading':'Directories',
+    'cfg.paths.media':'Media Directory (Videos)',
+    'cfg.paths.playlists':'Playlists Directory',
+    'cfg.paths.grafik':'oGraf Templates Directory',
+    'cfg.paths.save':'💾 Save Paths',
+    'cfg.paths.asrun':'As-Run Log',
+    'cfg.paths.asrunEnable':'Enable As-Run Log',
+    'cfg.paths.asrunDir':'As-Run Directory',
+    'cfg.paths.channelName':'Channel Name (for As-Run header)',
+    // Playlist panel
+    'cfg.pl.gap':'Gap Management','cfg.pl.gapSource':'Gap Source',
+    'cfg.pl.gap.black':'⬛ Black','cfg.pl.gap.idle':'🖼 Idle Image','cfg.pl.gap.clip':'🎬 Clip (looping)',
+    'cfg.pl.missing':'⚠ Missing Events',
+    'cfg.pl.missingBehavior':'Behaviour when file is missing',
+    'cfg.pl.missing.skip':'Skip (0s, subsequent start times unchanged)',
+    'cfg.pl.missing.idle':'Play idle source (duration preserved)',
+    'cfg.pl.transitions':'Transition Durations',
+    'cfg.pl.defaults':'New Event — Defaults',
+    'cfg.pl.def.playMode':'Play Mode','cfg.pl.def.endType':'End Type',
+    'cfg.pl.def.branding':'Channel Branding',
+    'cfg.pl.display':'Display','cfg.pl.doneKeep':'Played Events (Done)',
+    'cfg.pl.prep':'Prep List',
+    'cfg.pl.reconcile':'Keep Reconcile Key',
+    'cfg.pl.mediaAnalysis':'Media Analysis','cfg.pl.defaultTC':'Default Start Timecode',
+    'cfg.pl.saveTransitions':'💾 Save Transition Durations',
+    // Voiceover panel
+    'cfg.vo.fade':'Fade','cfg.vo.fadeIn':'Fade-in (ms)','cfg.vo.fadeOut':'Fade-out (ms)',
+    // Audio clock
+    'cfg.audio.saveClock':'💾 Save Clock',
+    // Paths — recording / userlog
+    'cfg.paths.userlog':'User Activity Log',
+    'cfg.paths.userlogFile':'User Log File (JSON-Lines)',
+    'cfg.paths.record':'⏺ Recording',
+    'cfg.paths.recDir':'Recording Directory',
+    'cfg.paths.recAudio':'Audio Group(s)',
+    'cfg.paths.recInLib':'Show in Media Browser',
+    'cfg.paths.recSave':'💾 Save Recording',
+    // Design panel
+    'cfg.design.panelBg':'Panel Background Colours',
+    'cfg.design.plBg':'📋 Playlist Background',
+    'cfg.design.prepBg':'🗂 Prep Background',
+    'cfg.design.save':'💾 Save Design',
+    'cfg.design.countdown':'Countdown Display',
+    'cfg.design.cs.running':'▶ On Air (remaining)',
+    'cfg.design.cs.next':'⇥ Next (Gap/Overlap)',
+    'cfg.design.cs.live':'📺 Next Live/SMPTE',
+    // Live panel
+    'cfg.live.heading':'Live Sources (GStreamer Inputs)',
+    'cfg.live.addSource':'＋ Add Live Source',
+    'cfg.live.save':'💾 Save & Restart',
+    // Shortcuts panel
+    'cfg.shortcuts.heading':'⌨ Keyboard Shortcuts',
+    'cfg.shortcuts.reset':'↺ Reset',
+    // Classification panel
+    'cfg.classif.heading':'🏷 Event Classifications',
+    // Library drawer
+    'lib.searchPh':'Search media library…',
+    // Playlist files modal
+    'plfiles.local':'Local',
+    'plfiles.open':'📂 Open…',
+    // Playlist auto-gap toggle
+    'cfg.pl.autoGap':'Dynamic Gap Handling',
+    // Generic on/off
+    'cfg.on':'ON','cfg.off':'OFF',
   },
 };
 
@@ -8628,6 +9133,15 @@ function applyI18n() {
     if (!el.dataset.i18nDe) el.dataset.i18nDe = el.textContent.trim();
     const val = I18N[_lang]?.[key];
     el.textContent = val ?? el.dataset.i18nDe;
+  });
+  // data-i18n-label: translate only the first text node (preserves child elements like <span> hints)
+  document.querySelectorAll('[data-i18n-label]').forEach(el => {
+    const key = el.dataset.i18nLabel;
+    const node = Array.from(el.childNodes).find(n => n.nodeType === 3 && n.textContent.trim());
+    if (!node) return;
+    if (!el.dataset.i18nLabelDe) el.dataset.i18nLabelDe = node.textContent.trim();
+    const val = I18N[_lang]?.[key];
+    node.textContent = (val ?? el.dataset.i18nLabelDe) + ' ';
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => {
     const key = el.dataset.i18nTitle;
@@ -8917,7 +9431,7 @@ async function setAutoGap(enabled) {
   await api('POST', '/api/settings', { autoGap: enabled });
   if (S.config) S.config.autoGap = enabled;
   updateGapFillBtn();
-  showToast(`Dynamisches Gap-Handling: ${enabled ? 'AN' : 'AUS'}`);
+  showToast(`${t('cfg.pl.autoGap')}: ${enabled ? t('cfg.on') : t('cfg.off')}`);
 }
 
 function setShowFrames(enabled) {
@@ -9919,6 +10433,12 @@ function _renderVU() {
     });
   }
 
+  // Mirror VU to expanded preview slot when visible
+  const expVu = document.getElementById('vu-meters-exp');
+  if (expVu && expVu.offsetParent !== null) {
+    expVu.innerHTML = container.innerHTML;
+  }
+
 }
 
 // ── Counter strip collapsible ─────────────────────────────────────────────
@@ -10367,7 +10887,19 @@ function _renderPluginTab(id) {
   if (tab)  tab.innerHTML = `${_pluginStateIcon(p)} ${p.name}`;
   if (_pluginTab === id) {
     const panel = document.getElementById(`plugin-panel-${id}`);
-    if (panel) _renderPluginPanel(p, panel);
+    if (!panel) return;
+    // Only update status section to avoid destroying config form DOM (e.g. open browse widgets)
+    const statusEl = panel.querySelector('.plugin-status-section');
+    if (statusEl) {
+      statusEl.innerHTML = _renderPluginStatusSection(p);
+      // Update the state badge in the header without touching the config form
+      const s = p.status || {};
+      const stCls = s.state === 'running' ? 'b-g' : s.state === 'error' ? 'b-r' : s.state === 'warning' ? 'b-y' : 'b-o';
+      const badge = panel.querySelector(`#plugin-state-badge-${p.id}`);
+      if (badge) { badge.className = `badge ${stCls}`; badge.textContent = s.state || '—'; }
+    } else {
+      _renderPluginPanel(p, panel);
+    }
   }
 }
 
@@ -10433,10 +10965,21 @@ function _showPluginInfo(id) {
     </div>`);
 }
 
+function _renderPluginStatusSection(p) {
+  const s = p.status || {};
+  let html = '';
+  if (s.error) {
+    html += `<div style="background:rgba(240,80,80,.1);border:1px solid var(--red);border-radius:3px;padding:5px 8px;margin-bottom:8px;font-size:10px;color:var(--red)">${s.error}</div>`;
+  }
+  if (p.hasStatus && s.data) {
+    html += _renderPluginStatusData(p.id, s.data);
+  }
+  return html;
+}
+
 function _renderPluginPanel(p, panel) {
   const s     = p.status || {};
   const stCls = s.state === 'running' ? 'b-g' : s.state === 'error' ? 'b-r' : s.state === 'warning' ? 'b-y' : 'b-o';
-
   const infoBtn = _pluginInfoHtml[p.id]
     ? `<button type="button" class="ib" style="font-size:11px;padding:1px 5px" title="Hilfe / Info" onclick="_showPluginInfo('${p.id}')">ⓘ</button>`
     : '';
@@ -10447,22 +10990,14 @@ function _renderPluginPanel(p, panel) {
         <div style="font-size:10px;color:var(--dim)">${p.description || ''}</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-        <span class="badge ${stCls}">${s.state || '—'}</span>
+        <span class="badge ${stCls}" id="plugin-state-badge-${p.id}">${s.state || '—'}</span>
         <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px">
           <input type="checkbox" id="plugin-enabled-${p.id}" ${p.enabled ? 'checked' : ''} onchange="pluginSetEnabled('${p.id}',this.checked)">
           Aktiv
         </label>
       </div>
-    </div>`;
-
-  if (s.error) {
-    html += `<div style="background:rgba(240,80,80,.1);border:1px solid var(--red);border-radius:3px;padding:5px 8px;margin-bottom:8px;font-size:10px;color:var(--red)">${s.error}</div>`;
-  }
-
-  // Status-Daten (plugin-spezifisch)
-  if (p.hasStatus && s.data) {
-    html += _renderPluginStatusData(p.id, s.data);
-  }
+    </div>
+    <div class="plugin-status-section">${_renderPluginStatusSection(p)}</div>`;
 
   // Konfigurationsformular
   if (p.schema?.length) {
@@ -10908,17 +11443,20 @@ let _prepSel      = new Set();// Ausgewählte Indizes
 let _prepEditMode = false;    // Event-Editor im Prep-Kontext
 let _prepEditIdx  = -1;       // Bearbeiteter Index in _prepData (-1 = neu)
 
-// ── Prep Undo ─────────────────────────────────────────────────────────────────
+// ── Prep Undo/Redo ────────────────────────────────────────────────────────────
 const _prepUndoStack = [];
+const _prepRedoStack = [];
 const _PREP_UNDO_MAX = 40;
 function pushPrepUndo() {
   _prepUndoStack.push(JSON.stringify(_prepData));
   if (_prepUndoStack.length > _PREP_UNDO_MAX) _prepUndoStack.shift();
+  _prepRedoStack.length = 0; // neue Aktion löscht Redo-Stack
   const btn = document.getElementById('btn-prep-undo');
   if (btn) btn.disabled = false;
 }
 function prepUndo() {
   if (!_prepUndoStack.length) return;
+  _prepRedoStack.push(JSON.stringify(_prepData));
   _prepData = JSON.parse(_prepUndoStack.pop());
   _prepSel.clear();
   const btn = document.getElementById('btn-prep-undo');
@@ -10927,8 +11465,19 @@ function prepUndo() {
   _prepPersist();
   showToast('↩ Prep: Rückgängig');
 }
+function prepRedo() {
+  if (!_prepRedoStack.length) return;
+  _prepUndoStack.push(JSON.stringify(_prepData));
+  _prepData = JSON.parse(_prepRedoStack.pop());
+  _prepSel.clear();
+  const btn = document.getElementById('btn-prep-undo');
+  if (btn) btn.disabled = false;
+  renderPrepList();
+  _prepPersist();
+  showToast('↪ Prep: Wiederholen');
+}
 
-const PREP_COL_DEFAULTS = { tc:true, status:false, dur:true, trans:true, speed:true, branding:false, audio:false, title:true, file:true, children:false };
+const PREP_COL_DEFAULTS = { tc:true, status:false, dur:true, trans:true, speed:true, branding:false, audio:false, title:true, file:true, children:false, starttype:false, endtype:false, classif:false, avail:false, segment:false, playmode:false };
 let _prepCols = {...PREP_COL_DEFAULTS};
 function loadPrepCols() {
   try { const s=localStorage.getItem(_lsKey('prep_cols')); if(s) _prepCols={...PREP_COL_DEFAULTS,...JSON.parse(s)}; } catch{}
@@ -10948,6 +11497,8 @@ function togglePrepColCfg(ev) {
   p.classList.toggle('open');
 }
 document.addEventListener('click', ()=>document.getElementById('prep-col-cfg')?.classList.remove('open'));
+document.getElementById('prep-body')?.addEventListener('mousedown', ()=>{ _kbFocus='prep'; });
+document.getElementById('pl-body')?.addEventListener('mousedown', ()=>{ _kbFocus='playlist'; });
 
 function togglePrep() {
   const panel = document.getElementById('prep-panel');
@@ -10958,7 +11509,8 @@ function togglePrep() {
   panel.style.display = open ? 'flex' : 'none';
   btn.style.borderColor = open ? 'var(--accent)' : '';
   btn.style.color       = open ? 'var(--accent)' : '';
-  if (open) refreshPrepSel();
+  if (open) { _kbFocus = 'prep'; refreshPrepSel(); }
+  else       { _kbFocus = 'playlist'; }
 }
 
 async function refreshPrepSel() {
@@ -11030,21 +11582,27 @@ function _renderPrepItem(e, i, tcOffset) {
     `<span class="pl-cell" style="font-family:var(--mono);font-size:9px;text-align:right;padding-right:3px;color:var(--dim)">${i+1}</span>`,
   ];
   if(C.tc) cells.push(`<span class="pl-cell ${tcCls}">${_tcPrefix}${tcStr}</span>`);
+  if(C.starttype){const _st=e.startType||'sequential';const _stIcon=_st==='fixtime'?'⏰':_st==='manual'?'⏸':'→';const _stCol=_st==='fixtime'?'var(--yellow)':_st==='manual'?'var(--accent)':'rgba(128,128,128,.35)';cells.push(`<span class="pl-cell" style="text-align:center;font-size:10px;color:${_stCol}" title="Start: ${_st}">${_stIcon}</span>`);}
   cells.push(`<span class="pl-cell" style="text-align:center;font-size:11px">${SRC_ICON[src]||_liveSourceIcon(src)||'?'}</span>`);
+  if(C.classif) cells.push(`<span class="pl-cell" style="overflow:hidden;padding:0 2px;font-size:8px;color:var(--dim)" title="${e.classification||''}">${e.classification||''}</span>`);
   if(C.title) cells.push(`<div class="pl-cell" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:10px">${e.title?`<span style="font-weight:600;color:var(--accent)">${e.title}</span>`:'<span style="color:rgba(128,128,128,.3)">—</span>'}</div>`);
   if(C.file||!C.title) cells.push(`<div class="pl-cell-file"><div class="pl-file">${mainLabel}</div></div>`);
   if(C.status)   cells.push(`<span class="pl-cell"></span>`);
   if(C.audio)    cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono)">${e.audioPreset||e.audioConfig?.preset||e.audioConfig?.pgm||''}</span>`);
   if(C.branding) cells.push(`<span class="pl-cell" style="text-align:center;font-size:9px">${e.branding?'🏷':''}</span>`);
+  if(C.avail)    cells.push(_availHtml(e.file));
   {const _tr=e.transition||'cut';const _tc=_tr==='cut'?'var(--dim)':'var(--accent2)';
   const _eb=e.endType==='fixtime'?'<span style="color:var(--yellow);font-size:8px"> 🔒</span>':e.endType==='manual'?'<span style="font-size:8px"> ⏸</span>':'';
   const _sp=e.transitionSpeed||'fast';const _sa={fast:'F',medium:'M',slow:'S'}[_sp]||'F';
   if(C.dur) cells.push(`<span class="pl-cell pl-dur">${durStr}${_eb}</span>`);
+  if(C.endtype){const _et=e.endType||'sequential';const _etIcon=_et==='manual'?'⏸':_et==='fixtime'?'🔒':'→';const _etCol=_et==='manual'?'var(--accent)':_et==='fixtime'?'var(--yellow)':'rgba(128,128,128,.35)';cells.push(`<span class="pl-cell" style="text-align:center;font-size:10px;color:${_etCol}" title="End: ${_et}">${_etIcon}</span>`);}
   if(C.trans && C.speed){
     const _comb=_tr==='cut'?`<span style="color:var(--dim);font-family:var(--mono);font-size:9px">│</span>`:`<span style="color:${_tc};font-family:var(--mono);font-size:9px;font-weight:600">${TRANS_ICON[_tr]||'⇢'}<span style="font-size:8px;opacity:.8">${_sa}</span></span>`;
     cells.push(`<span class="pl-cell" style="text-align:center" title="${_tr} ${_sp}">${_comb}</span>`);
   } else if(C.trans) cells.push(`<span class="pl-cell" style="text-align:center;font-family:var(--mono);color:${_tc};font-size:10px">${TRANS_ICON[_tr]||'│'}</span>`);
   else if(C.speed) cells.push(`<span class="pl-cell" style="text-align:center;font-size:8px;color:var(--dim);font-family:var(--mono)">${_tr!=='cut'?_sa:''}</span>`);}
+  if(C.segment){const seg=e.segmentName||'';cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${seg}">${seg}</span>`);}
+  if(C.playmode){const mode=e.somMode||'user';const modeLabel=mode==='media'?'full':mode==='segment'?'seg':'manual'===e.endType?'hold':'';cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono);text-align:center" title="${mode}">${modeLabel}</span>`);}
   cells.push(`<span class="pl-cell"></span>`); // gap
   cells.push(`<span class="pl-cell"></span>`); // rem
   cells.push(`<span class="pl-cell"></span>`); // prog
@@ -11054,6 +11612,8 @@ function _renderPrepItem(e, i, tcOffset) {
     <button class="ib" style="font-size:10px;color:var(--red)" onclick="prepDeleteEvent(${i});event.stopPropagation()" title="Löschen">✕</button>
     <button class="ib" style="font-size:10px;color:var(--accent)" onclick="prepInsertOne(${i});event.stopPropagation()" title="In Sendeliste einfügen">⌃</button>
   </span>`);
+  let childrenHtml='';
+  if(C.children) childrenHtml=_buildChildrenHtml(e,fps,false);
 
   const cls = `pl-item${isSel?' sel':''}${noFile?' err':''}`;
   return `<div class="${cls}" data-pi="${i}" draggable="true"
@@ -11065,6 +11625,7 @@ function _renderPrepItem(e, i, tcOffset) {
     ondblclick="prepEditEvent(${i})"
     style="display:grid;grid-template-columns:${gridCols};align-items:center;padding:3px 6px 3px 3px;min-width:max-content;">
     ${cells.join('')}
+    ${childrenHtml?`<div style="grid-column:1/-1;margin-top:2px">${childrenHtml}</div>`:''}
   </div>`;
 }
 
@@ -11077,17 +11638,23 @@ function _renderPrepHeader() {
   const HC = s => `<span class="pl-th" style="text-align:center">${s}</span>`;
   const HR = s => `<span class="pl-th" style="text-align:right">${s}</span>`;
   const cells = [H(''), HR('#')]; // drag, num
-  if(C.tc)       cells.push(H(t('col.tc')));
+  if(C.tc)        cells.push(H(t('col.tc')));
+  if(C.starttype) cells.push(HC('S'));
   cells.push(H('')); // src icon
-  if(C.title) cells.push(H('Titel'));
+  if(C.classif)  cells.push(H('Klasse'));
+  if(C.title)    cells.push(H('Titel'));
   if(C.file||!C.title) cells.push(H('Datei'));
   if(C.status)   cells.push(HC(t('col.status')));
   if(C.audio)    cells.push(H(t('col.audio')));
   if(C.branding) cells.push(HC('B'));
+  if(C.avail)    cells.push(HC('MB'));
   if(C.dur)      cells.push(HR(t('col.dur')));
+  if(C.endtype)  cells.push(HC('E'));
   if(C.trans && C.speed) cells.push(HC('Trans'));
   else if(C.trans)       cells.push(HC('Tr'));
   else if(C.speed)       cells.push(HC('Sp'));
+  if(C.segment)  cells.push(H('Seg'));
+  if(C.playmode) cells.push(HC('Mode'));
   cells.push(H(''), H(''), H(''), H('')); // gap, rem, prog, start
   cells.push(HR('✏'));
   th.innerHTML = `<div style="display:grid;grid-template-columns:${gridCols};align-items:center;padding:0 4px;min-width:max-content">${cells.join('')}</div>`;
