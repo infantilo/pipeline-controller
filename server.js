@@ -21,6 +21,7 @@ process.env.GST_GL_API = 'none';
 const http           = require('http');
 const fs             = require('fs');
 const path           = require('path');
+const { spawn }      = require('child_process');
 const MasterPipeline = require('./lib/MasterPipeline');
 const PlayerPipeline = require('./lib/PlayerPipeline');
 const PlaylistEngine = require('./lib/PlaylistEngine');
@@ -166,6 +167,24 @@ function resolveIdleImage(nameOrPath) {
   ];
   return candidates.find(p => fs.existsSync(p)) || null;
 }
+
+// ── NVDEC Hardware-Decode: Rank-Promotion muss VOR require('gst-kit') erfolgen ──
+// gst_init() liest GST_PLUGIN_FEATURE_RANK beim Laden des nativen Addons.
+// Ranks: PRIMARY=256, PRIMARY+1=257; 512 > alle libav-Decodern → NVDEC bevorzugt.
+// Kein NVDEC-Fehler bei nicht vorhandenen Elementen: execFileSync wirft, IIFE fängt.
+(function applyNvdecRankEarly() {
+  if (_settings.gpuDecode === false) return;
+  const { execFileSync } = require('child_process');
+  try {
+    execFileSync('gst-inspect-1.0', ['nvdec'], { stdio: 'ignore', timeout: 3000 });
+    const ranks = 'nvdec:512,nvh264dec:512,nvmpeg2videodec:512,nvh265dec:512,nvvp8dec:512,nvvp9dec:512';
+    process.env.GST_PLUGIN_FEATURE_RANK = process.env.GST_PLUGIN_FEATURE_RANK
+      ? `${process.env.GST_PLUGIN_FEATURE_RANK},${ranks}`
+      : ranks;
+    PlayerPipeline._nvdecAvailable = true;
+    console.log('[server] NVDEC Hardware-Decode aktiviert (GST_PLUGIN_FEATURE_RANK gesetzt)');
+  } catch { /* nvdec nicht verfügbar — Software-Decode bleibt aktiv */ }
+})();
 
 // ── AudioGroupConfig ───────────────────────────────────────────────────────────
 const AudioGroupConfig = require('./lib/AudioGroupConfig');
@@ -518,34 +537,41 @@ function _onPlayingCheckAsset(d) {
 function _buildUriLiveSrc(uri, latencyMs = 200) {
   if (!uri) return null;
   if (/^rtsp:\/\//i.test(uri)) {
-    return `rtspsrc location="${uri}" latency=${latencyMs} ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert`;
+    // decodebin handles any codec (H.264, H.265, MPEG-2, etc.)
+    return `rtspsrc location="${uri}" latency=${latencyMs} ! decodebin ! videoconvert`;
+  }
+  if (/^rtsps:\/\//i.test(uri)) {
+    return `rtspsrc location="${uri}" latency=${latencyMs} tls-validation-flags=0 ! decodebin ! videoconvert`;
   }
   if (/^srt:\/\//i.test(uri)) {
-    return `srtsrc uri="${uri}" ! tsdemux ! h264parse ! avdec_h264 ! videoconvert`;
+    return `srtsrc uri="${uri}" ! decodebin ! videoconvert`;
   }
   if (/^udp:\/\//i.test(uri)) {
-    const m = uri.match(/^udp:\/\/([^:]+):(\d+)/i);
+    const m = uri.match(/^udp:\/\/([^:/?]+):(\d+)/i);
     const host = m?.[1] || '0.0.0.0', port = m?.[2] || '1234';
-    return `udpsrc address="${host}" port=${port} ! tsdemux ! h264parse ! avdec_h264 ! videoconvert`;
+    return `udpsrc address="${host}" port=${port} ! tsdemux ! decodebin ! videoconvert`;
   }
-  // Allgemein (HTTP-HLS, Datei, etc.)
-  return `uridecodebin uri="${uri}" ! videoconvert`;
+  // HTTP-HLS, generic URI
+  return `uridecodebin uri="${uri}" name=dec dec. ! videoconvert`;
 }
 
 function _buildUriLiveAudioSrc(uri, latencyMs = 200) {
   if (!uri) return null;
   if (/^rtsp:\/\//i.test(uri)) {
-    return `rtspsrc location="${uri}" latency=${latencyMs} ! rtppcmadepay ! alawdec ! audioconvert ! audioresample`;
+    return `rtspsrc location="${uri}" latency=${latencyMs} ! decodebin ! audioconvert ! audioresample`;
+  }
+  if (/^rtsps:\/\//i.test(uri)) {
+    return `rtspsrc location="${uri}" latency=${latencyMs} tls-validation-flags=0 ! decodebin ! audioconvert ! audioresample`;
   }
   if (/^srt:\/\//i.test(uri)) {
-    return `srtsrc uri="${uri}" ! tsdemux ! aacparse ! avdec_aac ! audioconvert`;
+    return `srtsrc uri="${uri}" ! decodebin ! audioconvert ! audioresample`;
   }
   if (/^udp:\/\//i.test(uri)) {
-    const m = uri.match(/^udp:\/\/([^:]+):(\d+)/i);
+    const m = uri.match(/^udp:\/\/([^:/?]+):(\d+)/i);
     const host = m?.[1] || '0.0.0.0', port = m?.[2] || '1234';
-    return `udpsrc address="${host}" port=${port} ! tsdemux ! aacparse ! avdec_aac ! audioconvert`;
+    return `udpsrc address="${host}" port=${port} ! tsdemux ! decodebin ! audioconvert ! audioresample`;
   }
-  return `uridecodebin uri="${uri}" ! audioconvert ! audioresample`;
+  return `uridecodebin uri="${uri}" name=dec dec. ! audioconvert ! audioresample`;
 }
 
 // ── Pipeline-Latenz-Messung ────────────────────────────────────────────────────
@@ -736,6 +762,10 @@ const masterOpts = {
   // A/V-Sync Delay-Korrektur (runtime-änderbar via /api/pipeline/av-sync)
   videoDelayMs:     _settings.videoDelayMs  ?? 0,
   audioDelayMs:     _settings.audioDelayMs  || {},
+  // GPU-Compositor: true=force glvideomixer, false=force software, unset=auto-detect
+  gpuCompositor:    _settings.gpuCompositor ?? undefined,
+  // GPU-Decode: false=force software; true/unset=auto (NVDEC wenn verfügbar)
+  gpuDecode:        _settings.gpuDecode     ?? undefined,
 };
 
 // ── VoiceoverEngine ───────────────────────────────────────────────────────────
@@ -851,6 +881,12 @@ setInterval(() => {
 }, 500);
 master.on('switched', d => {
   broadcast('switched', d);
+  // Stop feeder when switching AWAY from a live pad (no-op for embedded sources)
+  if (d.prevPad != null && d.prevPad >= master.padLiveBase) {
+    const liveIdx = d.prevPad - master.padLiveBase;
+    const ls = (_settings.liveSources || [])[liveIdx];
+    if (ls?.id) master.stopLiveFeeder(ls.id).catch(() => {});
+  }
   // If master switched AWAY from padImagePl, any active still is no longer visible.
   // Clear active state so UI buttons reflect reality.
   if (d.pad !== master.padImagePl) {
@@ -862,6 +898,12 @@ master.on('switched', d => {
   }
 });
 master.on('error',    msg => log(msg, 'error', 'master'));
+// Embedded Decklink live sources in the master pipeline emit signal events
+master.on('decklink-signal', d => {
+  _dlSignalStatus[d.slot] = { ok: d.ok, ts: Date.now(), structure: d.structure };
+  broadcast('decklink-signal', _dlSignalStatus);
+  if (!d.ok) log(`DeckLink signal loss (master embedded) slot ${d.slot}: ${d.structure}`, 'warn', 'system');
+});
 
 const players = Object.fromEntries([
   ..._slotIds.map(id => [id, new PlayerPipeline(id, masterOpts)]),
@@ -962,6 +1004,46 @@ if (RECORD_IN_LIBRARY) library.addExtraDir(recordEngine._recordDir, 'rec');
 recordEngine.on('started', d => { broadcast('record-started', d); _arOnRecord('start', d); library.lock(d.outputPath); });
 recordEngine.on('stopped', d => { broadcast('record-stopped', d); _arOnRecord('stop', d); });
 recordEngine.on('remuxed', d => { library.unlock(d.outputPath); if (RECORD_IN_LIBRARY && d.ok) library.scan(); });
+
+// ── Test-RTSP-Server ─────────────────────────────────────────────────────────
+let _rtspTestProc = null;
+let _rtspTestUrl  = null;
+const _RTSP_SCRIPT = path.join(__dirname, 'lib', 'test_rtsp_server.py');
+
+function _rtspTestStart(opts = {}) {
+  if (_rtspTestProc) return { ok: false, error: 'already running', url: _rtspTestUrl };
+  const port    = String(opts.port    || 8554);
+  const mpath   = String(opts.path    || '/test');
+  const pattern = String(opts.pattern || 'smpte');
+  const w       = String(opts.width   || 1920);
+  const h       = String(opts.height  || 1080);
+  const fps     = String(opts.fps     || FPS);
+  const proc = spawn('python3', [_RTSP_SCRIPT, port, mpath, pattern, w, h, fps], { stdio: ['ignore','pipe','pipe'] });
+  proc.stdout.once('data', chunk => {
+    const line = chunk.toString().trim();
+    const m = line.match(/RTSP_URL:(.+)/);
+    if (m) { _rtspTestUrl = m[1].trim(); broadcast('rtsp-test-started', { url: _rtspTestUrl }); }
+  });
+  proc.on('exit', (code, sig) => {
+    _rtspTestProc = null; _rtspTestUrl = null;
+    log(`Test-RTSP-Server gestoppt (${sig||code})`, 'info', 'rtsp');
+    broadcast('rtsp-test-stopped', {});
+  });
+  proc.stderr.on('data', d => { const t=d.toString().trim(); if(t) log(`rtsp: ${t}`, 'debug', 'rtsp'); });
+  _rtspTestProc = proc;
+  log(`Test-RTSP-Server gestartet: rtsp://127.0.0.1:${port}${mpath}`, 'info', 'rtsp');
+  return { ok: true, url: `rtsp://127.0.0.1:${port}${mpath}` };
+}
+
+function _rtspTestStop() {
+  if (!_rtspTestProc) return { ok: false, error: 'not running' };
+  _rtspTestProc.kill('SIGTERM');
+  return { ok: true };
+}
+
+if (_settings.testRtsp?.enabled) {
+  setTimeout(() => _rtspTestStart(_settings.testRtsp), 1000);
+}
 
 const playlist = new PlaylistEngine(master, players, transitionEngine, {
   mediaDir:         MEDIA_DIR,
@@ -1080,9 +1162,20 @@ playlist.on('playing',      d  => {
 playlist.on('cut',          d  => broadcast('cut', d));
 playlist.on('ready-to-cut', d  => broadcast('ready-to-cut', d));
 playlist.on('ended',        () => { _currentPlaying = null; log('Playlist fertig', 'info', 'playlist'); broadcast('playlist-ended', {}); _arFlushPlay(Date.now(), 'Completed'); });
-playlist.on('stopped',      () => { _currentPlaying = null; broadcast('playlist-ended', {}); broadcast('state', getState()); });
+playlist.on('stopped',      () => {
+  _currentPlaying = null;
+  broadcast('playlist-ended', {});
+  broadcast('state', getState());
+  master?.stopAllLiveFeeders?.().catch(() => {});
+});
 playlist.on('manual-hold',  d  => { broadcast('manual-hold', d); broadcast('state', getState()); });
-playlist.on('live-precue',    d  => { broadcast('live-precue', d); pluginHost.dispatch('live:precue', d); });
+playlist.on('live-precue',    d  => {
+  broadcast('live-precue', d);
+  pluginHost.dispatch('live:precue', d);
+  // Start feeder pipeline for live source on pre-cue (no-op for embedded hardware sources)
+  const ls = (_settings.liveSources || []).find(l => l.id === d.liveSlot);
+  if (ls) master?.startLiveFeeder?.(ls).catch(e => log(`Feeder: ${e.message}`, 'warn', 'playlist'));
+});
 playlist.on('backup-active',  d  => { broadcast('backup-active', d); log(`⚠ FAILOVER: ${d.fromSlot||'(file)'} → ${d.toSlot||'backup-path'} (${d.event?.file||'?'})`, 'warn', 'playlist'); });
 playlist.on('backup-unavailable', d => { broadcast('backup-unavailable', d); log(`⚠ Backup nicht verfügbar: ${d.fromSlot}`, 'warn', 'playlist'); });
 playlist.on('grafik',       d  => {
@@ -1762,6 +1855,27 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     return json(res, { ok: true });
   }
 
+  // ── Test-RTSP-Server-API ───────────────────────────────────────────────────
+  if (meth === 'GET' && p === '/api/rtsp-test/status')
+    return json(res, { running: !!_rtspTestProc, url: _rtspTestUrl });
+  if (meth === 'POST' && p === '/api/rtsp-test/start') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    const b = await parseBody(req);
+    if (_settings.testRtsp == null) _settings.testRtsp = {};
+    if (b.port    != null) _settings.testRtsp.port    = parseInt(b.port) || 8554;
+    if (b.path    != null) _settings.testRtsp.path    = b.path || '/test';
+    if (b.pattern != null) _settings.testRtsp.pattern = b.pattern || 'smpte';
+    if (b.enabled != null) _settings.testRtsp.enabled = !!b.enabled;
+    saveSettings(_settings);
+    return json(res, _rtspTestStart(_settings.testRtsp));
+  }
+  if (meth === 'POST' && p === '/api/rtsp-test/stop') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    if (_settings.testRtsp) _settings.testRtsp.enabled = false;
+    saveSettings(_settings);
+    return json(res, _rtspTestStop());
+  }
+
   // ── Plugin-API ─────────────────────────────────────────────────────────────
   if (meth === 'GET'  && p === '/api/plugins')
     return json(res, pluginHost.getAll());
@@ -1832,21 +1946,18 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const b = await parseBody(req);
     const presetId = b.preset;
     if (!presetId) return json(res, { ok: false, error: 'preset required' }, 400);
+
+    const ok = await playlist.changeOnAirPreset(
+      presetId,
+      (b.audioConfig && typeof b.audioConfig === 'object') ? b.audioConfig : undefined,
+    ).catch(() => false);
+
+    if (!ok) return json(res, { ok: false, error: 'Preset-Wechsel fehlgeschlagen oder kein Player on-air' }, 409);
+
     const slotId = playlist._onAirSlot;
-    const player = players[slotId];
-    if (!slotId || !player?.playing) return json(res, { ok: false, error: 'kein Player on-air' }, 400);
-    json(res, { ok: true });
-    // In-place audio-pipeline hot-swap: audio channel stays the same → no pre-cue disruption.
-    player.reloadAudioPreset(presetId).then(ok => {
-      if (ok) {
-        log(`On-Air Audio-Preset → ${presetId} (${slotId})`, 'info', 'playlist');
-        broadcast('onair-preset', { preset: presetId, slotId });
-      } else {
-        log(`On-Air Audio-Preset: Wechsel fehlgeschlagen (${slotId})`, 'warn', 'playlist');
-        broadcast('onair-swap-failed', { type: 'preset', preset: presetId });
-      }
-    }).catch(e => { log(`onair-preset: ${e.message}`, 'warn', 'playlist'); });
-    return;
+    log(`On-Air Audio-Preset → ${presetId} (${slotId})`, 'info', 'playlist');
+    broadcast('onair-preset', { preset: presetId, slotId });
+    return json(res, { ok: true });
   }
   if (meth === 'POST' && p === '/api/playlist/onair-afd') {
     const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
@@ -2333,8 +2444,36 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   // Devices
   if (meth === 'GET' && p === '/api/devices') {
     const { execSync } = require('child_process'); const devices = [];
+
+    // V4L2
     try { execSync('ls /dev/video* 2>/dev/null',{timeout:2000}).toString().trim().split('\n').filter(Boolean)
       .forEach((dev,i) => devices.push({ id:`v4l2-${i}`, type:'v4l2', path:dev, name:dev, gstSrc:`v4l2src device=${dev}` })); } catch {}
+
+    // DeckLink (Blackmagic) — uncompressed hardware sources, no decodebin required
+    try {
+      const dlRaw = execSync('gst-device-monitor-1.0 Video/Source 2>/dev/null', { timeout: 5000 }).toString();
+      let devNum = 0;
+      for (const block of dlRaw.split(/(?=Device found:)/)) {
+        const nameMatch = block.match(/name\s*:\s*(.+)/);
+        const name = nameMatch?.[1]?.trim() || '';
+        if (!/decklink|blackmagic/i.test(name)) continue;
+        // Prefer explicit device-number from properties, else use enumeration order
+        const numMatch = block.match(/device[.\-](?:number|path)\s*[=:]\s*(\d+)/i);
+        const dn = numMatch ? parseInt(numMatch[1]) : devNum;
+        // Detect audio channel count from device caps if listed
+        const chMatch = block.match(/channels\s*=\s*\(int\)\s*(\d+)/);
+        const audioCh = chMatch ? Math.min(16, parseInt(chMatch[1])) : 8;
+        devices.push({
+          id: `decklink-${dn}`, type: 'decklink', deviceNumber: dn, name,
+          gstSrc:      `decklinkvideosrc device-number=${dn}`,
+          gstAudioSrc: `decklinkaudiosrc device-number=${dn} channels=${audioCh}`,
+          audioChannels: audioCh,
+          keepAlive: true,
+        });
+        devNum++;
+      }
+    } catch {}
+
     return json(res, devices);
   }
 
@@ -2555,6 +2694,11 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
         ls.hasAudio = ls.hasAudio !== false;
       }
       if (!ls.gstSrc) return json(res, { error: `Quelle "${ls.id}": gstSrc oder uri erforderlich` }, 400);
+      // Migrate old audioSources format + normalize keepAlive
+      if (!ls.audioSources && ls.gstAudioSrc) {
+        ls.audioSources = [{ label: 'Audio', gstSrc: ls.gstAudioSrc, channels: ls.audioChannels || 2 }];
+      }
+      if (ls.keepAlive === undefined) ls.keepAlive = !ls.uri;
     }
     _settings.liveSources = b.liveSources;
     saveSettings(_settings);
@@ -2805,7 +2949,7 @@ function getState() {
     slots:    { onAir: playlist._onAirSlot, idle: playlist._idleSlot },
     playlist: { running: playlist._running, paused: playlist._paused, currentIndex: playlist.currentIndex, length: playlist.playlist.length },
     playing:  _currentPlaying ? { ..._currentPlaying, elapsedMs: Date.now() - _currentPlaying.startMs } : null,
-    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{} },
+    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null },
     avSync:   master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs??0, audioMs: _settings.audioDelayMs||{} },
     grafik:   { active: activeGrafiks },
   };

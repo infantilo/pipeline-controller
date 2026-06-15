@@ -162,6 +162,9 @@ if [[ "${DO_SYS_DEPS,,}" != "n" ]]; then
     gstreamer1.0-alsa \
     gstreamer1.0-gl \
     ffmpeg \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+    libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 \
     && ok "System-Abhängigkeiten installiert." \
     || warn "apt-get fehlgeschlagen — manche Pakete fehlen möglicherweise."
 else
@@ -344,6 +347,8 @@ npm install --omit=dev 2>&1 | tail -5
 ok "npm-Abhängigkeiten installiert."
 
 # ── Puppeteer: Chromium herunterladen ─────────────────────────────────────────
+# Puppeteer liegt in ${INSTALL_DIR}/node_modules/puppeteer (npm install oben).
+# Chromium wird nach ~/.cache/puppeteer/ heruntergeladen (User-Home, nicht root).
 log "Puppeteer: Chromium installieren (oGraf HTML5-Grafikengine) …"
 PUPPETEER_OK=false
 if [[ -f "${INSTALL_DIR}/node_modules/puppeteer/install.mjs" ]]; then
@@ -353,10 +358,19 @@ if [[ "${PUPPETEER_OK}" != "true" ]]; then
   (cd "${INSTALL_DIR}" && npx --yes puppeteer browsers install chrome) \
     && PUPPETEER_OK=true || true
 fi
+# Verifikation: prüft ob Chromium-Binary tatsächlich im Cache liegt
 if [[ "${PUPPETEER_OK}" == "true" ]]; then
-  ok "Chromium bereit."
-else
-  warn "Chromium-Download fehlgeschlagen."
+  CHROME_BIN="$(node -e "try{const p=require('${INSTALL_DIR}/node_modules/puppeteer');console.log(p.executablePath())}catch(e){}" 2>/dev/null || true)"
+  if [[ -x "${CHROME_BIN}" ]]; then
+    ok "Chromium bereit: ${CHROME_BIN}"
+  else
+    warn "Puppeteer-Download abgeschlossen, aber Chromium-Binary nicht ausführbar: ${CHROME_BIN:-unbekannt}"
+    log "Prüfe: node -e \"require('puppeteer').executablePath()\" in ${INSTALL_DIR}"
+    PUPPETEER_OK=false
+  fi
+fi
+if [[ "${PUPPETEER_OK}" != "true" ]]; then
+  warn "Chromium-Download fehlgeschlagen. oGraf-Grafiken werden nicht funktionieren."
   log "Manuell: cd ${INSTALL_DIR} && npx puppeteer browsers install chrome"
 fi
 

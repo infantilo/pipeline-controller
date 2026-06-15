@@ -1805,10 +1805,39 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         oder für Inter-Process: <code style="font-family:var(--mono)">intervideosrc channel=meinkanal timeout=2000000000 do-timestamp=true</code>
       </div>
       <div id="live-src-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px"></div>
-      <button class="btn btn-g" style="font-size:10px" onclick="liveAddRow()" data-i18n="cfg.live.addSource">＋ Live-Quelle hinzufügen</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+        <button class="btn btn-g" style="font-size:10px" onclick="liveAddRow()" data-i18n="cfg.live.addSource">＋ Live-Quelle hinzufügen</button>
+        <button class="btn" style="font-size:10px" onclick="liveDiscoverDecklink()" title="DeckLink-Geräte per gst-device-monitor suchen und als Einträge hinzufügen">🔍 DeckLink autodiscover</button>
+      </div>
       <div class="sep"></div>
       <div style="display:flex;gap:6px;justify-content:flex-end">
         <button class="btn btn-p" style="font-size:10px" onclick="liveSave()" data-i18n="cfg.live.save">💾 Speichern &amp; Neustart</button>
+      </div>
+      <div class="sep"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">🎬 Test-RTSP-Server</div>
+      <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
+        Lokaler GStreamer-RTSP-Server (videotestsrc) zum Testen von Live-Eingängen.<br>
+        URL kann direkt als Live-Quelle verwendet werden.
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 8px;align-items:center;margin-bottom:8px;font-size:11px">
+        <label>Port</label>
+        <input type="number" id="cfg-rtsp-port" value="8554" min="1024" max="65535" style="font-size:11px;padding:2px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:3px">
+        <label>Pfad</label>
+        <input type="text" id="cfg-rtsp-path" value="/test" style="font-size:11px;padding:2px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:3px">
+        <label>Pattern</label>
+        <select id="cfg-rtsp-pattern" style="font-size:11px;padding:2px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:3px">
+          <option value="smpte">SMPTE Farbbalk</option>
+          <option value="ball">Ball</option>
+          <option value="snow">Rauschen</option>
+          <option value="black">Schwarz</option>
+          <option value="gradient">Verlauf</option>
+        </select>
+        <span></span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <button id="cfg-rtsp-start-btn" class="btn btn-g" style="font-size:10px" onclick="rtspTestStart()">▶ Starten</button>
+        <button id="cfg-rtsp-stop-btn" class="btn btn-r" style="font-size:10px;display:none" onclick="rtspTestStop()">■ Stoppen</button>
+        <code id="cfg-rtsp-test-url" style="font-size:9px;font-family:var(--mono);color:var(--accent2);padding:2px 4px;background:var(--bg3);border-radius:3px;display:none"></code>
       </div>
     </div>
 
@@ -2324,7 +2353,11 @@ function _connectSSE(){
       }).catch(()=>{});
       fetch('/api/assets').then(r=>r.json()).then(d=>{ S.assets=d; _renderAssetPanel(); }).catch(()=>{});
       fetch('/api/still/state').then(r=>r.json()).then(d=>{ _stillState=d||[]; _renderStillButtons(); _updateAssetStateBadge(); }).catch(()=>{});
-      fetch('/api/record/status').then(r=>r.json()).then(d=>{ S.recordStatus=d; _updateRecordBadge(); }).catch(()=>{});
+      fetch('/api/record/status').then(r=>r.json()).then(d=>{
+        const now = Date.now();
+        for (const [k,v] of Object.entries(d)) { if (v.durationMs != null && !v.startedAt) v.startedAt = now - v.durationMs; }
+        S.recordStatus=d; _updateRecordBadge();
+      }).catch(()=>{});
     }, 300);
   });
   sse.addEventListener('error',()=>{
@@ -2775,15 +2808,24 @@ sse.addEventListener('grafik',e=>{
     const d = JSON.parse(e.data);
     showToast(`⏺ Aufzeichnung: ${d.slot} (${d.videoSource||'pgm'})`);
     S.recordStatus = S.recordStatus || {};
-    S.recordStatus[d.slot] = d;
+    S.recordStatus[d.slot] = { ...d, startedAt: Date.now() };
     _updateRecordBadge();
+    if (document.getElementById('record-modal')?.classList.contains('show')) _renderRecordPanel();
   });
   sse.addEventListener('record-stopped', e => {
     const d = JSON.parse(e.data);
     S.recordStatus = S.recordStatus || {};
     delete S.recordStatus[d.slot];
     _updateRecordBadge();
+    if (document.getElementById('record-modal')?.classList.contains('show')) _renderRecordPanel();
   });
+  sse.addEventListener('rtsp-test-started', e => {
+    const d = JSON.parse(e.data);
+    const urlEl = document.getElementById('cfg-rtsp-test-url');
+    if (urlEl) urlEl.textContent = d.url || '';
+    _updateRtspTestUi(true, d.url);
+  });
+  sse.addEventListener('rtsp-test-stopped', () => { _updateRtspTestUi(false, null); });
 }
 
 
@@ -3315,7 +3357,16 @@ function toggleAssetPanel() {
   body?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   _renderAssetPanel();
 }
-function toggleRecordPanel() { document.getElementById('record-modal').classList.add('show'); _renderRecordPanel(); }
+let _recDurTimer = null;
+function toggleRecordPanel() {
+  document.getElementById('record-modal').classList.add('show');
+  _renderRecordPanel();
+  clearInterval(_recDurTimer);
+  _recDurTimer = setInterval(() => {
+    if (!document.getElementById('record-modal')?.classList.contains('show')) { clearInterval(_recDurTimer); return; }
+    _renderRecordPanel();
+  }, 1000);
+}
 
 // open the manage-assets list (read-only list with edit/delete)
 function openAssetEditorList() {
@@ -4830,7 +4881,7 @@ function renderPl(){
     const startTitle = isFixOnAir ? 'Jetzt starten (Fix-Zeit überspringen)' : 'Ab hier starten';
     const startLabel = isFixOnAir ? '⚡ Jetzt' : '▶ Start';
     cells.push(`<button class="pl-start-btn pl-cell${isFixOnAir?' pl-start-fix':''}" onclick="${startAction}" title="${startTitle}" style="${canP?'':'display:none'}">${startLabel}</button>`);
-    cells.push(`<span class="pl-cell" style="display:flex;gap:1px;justify-content:flex-end">
+    cells.push(`<span class="pl-cell" style="display:flex;gap:1px;justify-content:flex-end;position:relative;z-index:1">
       ${canE?`<button class="ib" onclick="openEventEditor(${i},event)" title="Bearbeiten">✏</button>`:''}
       ${canE?`<button class="ib" onclick="dupEvent(${i},event)" title="Duplizieren">⊕</button>`:''}
       ${canDel?`<button class="ib" onclick="delEvent(${i},event)" style="color:var(--red)" title="Löschen">✕</button>`:''}
@@ -5615,12 +5666,13 @@ let _liveRows = [];
 function _normalizeLiveSrc(ls) {
   const out = {...ls};
   if (!out.audioSources) {
-    // migrate from old hasAudio/gstAudioSrc format
     out.audioSources = (out.hasAudio && out.gstAudioSrc)
       ? [{ label: 'Audio', gstSrc: out.gstAudioSrc, channels: 2 }]
       : [];
   }
   delete out.hasAudio; delete out.gstAudioSrc;
+  // keepAlive default: false when uri set (network stream), true for decklink/manual gstSrc
+  if (out.keepAlive === undefined) out.keepAlive = !out.uri;
   return out;
 }
 async function _loadLiveTab(){
@@ -5629,6 +5681,7 @@ async function _loadLiveTab(){
     _liveRows = (r.liveSources||[]).map(_normalizeLiveSrc);
   } catch { _liveRows = (S.config?.liveSources||[]).map(_normalizeLiveSrc); }
   _renderLiveList();
+  _loadRtspTestStatus();
 }
 
 function _renderLiveList(){
@@ -5649,6 +5702,10 @@ function _renderLiveList(){
       </div>
       <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box;margin-top:2px" placeholder="gstAudioSrc (z.B. decklinkaudiosrc device-number=0 connection=2)"
         value="${_esc(a.gstSrc||'')}" oninput="_liveRows[${i}].audioSources[${ai}].gstSrc=this.value">`).join('');
+    const keepAlive = ls.keepAlive !== false;
+    const hasUri    = !!ls.uri;
+    const isDL      = /decklink/i.test(ls.gstSrc||'');
+    const dlFormats = ['','auto','1080i50','1080i5994','1080i60','1080p25','1080p2997','1080p30','1080p50','1080p5994','1080p60','720p50','720p5994','720p60'];
     return `
     <div style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px;display:grid;gap:4px">
       <div style="display:flex;gap:4px;align-items:center">
@@ -5657,8 +5714,28 @@ function _renderLiveList(){
         <input style="flex:2;font-size:11px" placeholder="Label (z.B. Kamera 1)" value="${_esc(ls.label||'')}" oninput="_liveRows[${i}].label=this.value">
         <button class="btn" style="font-size:10px;padding:2px 6px" onclick="_liveRows.splice(${i},1);_renderLiveList()">✕</button>
       </div>
-      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box" placeholder="gstSrc (z.B. decklinkvideosrc device-number=0 mode=1080p25)" value="${_esc(ls.gstSrc||'')}" oninput="_liveRows[${i}].gstSrc=this.value">
-      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box" placeholder="inputId — Cerebrum/NMOS Zielport" value="${_esc(ls.inputId||'')}" oninput="_liveRows[${i}].inputId=this.value">
+      <div style="display:flex;gap:6px;align-items:center;font-size:9px">
+        <label style="display:flex;align-items:center;gap:3px;cursor:pointer;color:var(--dim)" title="Keep-Alive: Quelle immer empfangen (Decklink). Off = nur beim Cuen starten (RTSP/Netzwerk).">
+          <input type="checkbox" style="accent-color:var(--accent)" ${keepAlive?'checked':''} onchange="_liveRows[${i}].keepAlive=this.checked;_renderLiveList()">
+          <span style="color:${keepAlive?'var(--green)':'var(--yellow)'}">Keep-Alive${keepAlive?'':' (on-demand)'}</span>
+        </label>
+        <span style="color:var(--dim);opacity:.5">|</span>
+        <select style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:1px 3px"
+          onchange="_liveRows[${i}].inputId=this.value" title="Decklink Input für BC-Routing">
+          <option value="${_esc(ls.inputId||'')}">inputId: ${_esc(ls.inputId||'(leer)')}</option>
+        </select>
+        <input style="flex:1;font-size:9px;font-family:var(--mono)" placeholder="inputId (Decklink-Eingang für BC)" value="${_esc(ls.inputId||'')}" oninput="_liveRows[${i}].inputId=this.value">
+      </div>
+      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box" placeholder="URI (rtsp://... / srt://... / udp://...)" value="${_esc(ls.uri||'')}" oninput="_liveRows[${i}].uri=this.value;if(!_liveRows[${i}].gstSrc){_liveRows[${i}].keepAlive=false;_renderLiveList();}">
+      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box;${ls.uri&&!ls.gstSrc?'color:var(--dim)':''}" placeholder="${ls.uri&&!ls.gstSrc?_esc(_gstSrcFromUri(ls.uri)||'wird automatisch aus URI generiert'):'gstSrc (z.B. decklinkvideosrc device-number=0 — leer = aus URI)'}" value="${_esc(ls.gstSrc||'')}" oninput="_liveRows[${i}].gstSrc=this.value">
+      ${isDL?`<div style="display:flex;gap:6px;align-items:center;font-size:9px">
+        <span style="color:var(--dim);width:72px;flex-shrink:0">Video-Format</span>
+        <select style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:1px 4px"
+          onchange="_liveRows[${i}].videoFormat=this.value">
+          ${dlFormats.map(f=>`<option value="${_esc(f)}"${(ls.videoFormat||'')==f?' selected':''}>${f||'(im gstSrc-Feld)'}</option>`).join('')}
+        </select>
+        ${ls.videoFormat?`<span style="color:var(--dim);font-family:var(--mono)">video-format=${_esc(ls.videoFormat)}</span>`:''}
+      </div>`:''}
       <div style="border-top:1px solid var(--border);margin-top:2px;padding-top:4px">
         <div style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">
           Audio-Quellen
@@ -5672,21 +5749,106 @@ function _renderLiveList(){
 
 function _esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;');}
 
+function _gstSrcFromUri(uri){
+  if(!uri) return '';
+  const u=uri.trim();
+  if(/^rtsp:\/\//i.test(u))  return `rtspsrc location="${u}" latency=200 ! decodebin ! videoconvert`;
+  if(/^rtsps:\/\//i.test(u)) return `rtspsrc location="${u}" latency=200 tls-validation-flags=0 ! decodebin ! videoconvert`;
+  if(/^srt:\/\//i.test(u))   return `srtsrc uri="${u}" ! decodebin ! videoconvert`;
+  if(/^udp:\/\//i.test(u)){
+    const m=u.match(/^udp:\/\/([^:/?]+):(\d+)/i);
+    return `udpsrc address="${m?.[1]||'0.0.0.0'}" port=${m?.[2]||'1234'} ! tsdemux ! decodebin ! videoconvert`;
+  }
+  return `uridecodebin uri="${u}" name=dec dec. ! videoconvert`;
+}
+
 function liveAddRow(){
-  _liveRows.push({id:'',label:'',gstSrc:'',inputId:'',audioSources:[]});
+  _liveRows.push({id:'',label:'',uri:'',gstSrc:'',inputId:'',keepAlive:true,audioSources:[]});
   _renderLiveList();
 }
 
+async function liveDiscoverDecklink(){
+  let devices;
+  try {
+    const r = await fetch('/api/devices').then(r=>r.json());
+    devices = r.filter(d=>d.type==='decklink');
+  } catch(e){ showToast('⚠ Discover fehlgeschlagen: '+e.message); return; }
+  if(!devices.length){ showToast('Keine DeckLink-Geräte gefunden'); return; }
+  let added=0;
+  for(const d of devices){
+    const existingId = `decklink-${d.deviceNumber}`;
+    if(_liveRows.some(r=>r.id===existingId)) continue;
+    _liveRows.push({
+      id: existingId,
+      label: d.name || `DeckLink ${d.deviceNumber}`,
+      uri: '',
+      gstSrc: d.gstSrc,
+      videoFormat: '1080i50',
+      inputId: '',
+      keepAlive: true,
+      audioSources: d.gstAudioSrc ? [{ label:'Audio', gstSrc: d.gstAudioSrc, channels: d.audioChannels||8 }] : [],
+    });
+    added++;
+  }
+  if(added) _renderLiveList();
+  showToast(added ? `✅ ${added} DeckLink-Gerät(e) hinzugefügt` : 'DeckLink-Geräte bereits eingetragen');
+}
+
 async function liveSave(){
-  const valid=_liveRows.filter(ls=>ls.id&&ls.gstSrc);
-  const invalid=_liveRows.filter(ls=>!ls.id||!ls.gstSrc);
-  if(invalid.length){showToast(`⚠ ${invalid.length} Einträge ohne id oder gstSrc werden ignoriert`);await new Promise(r=>setTimeout(r,1200));}
+  const valid=_liveRows.filter(ls=>ls.id&&(ls.gstSrc||ls.uri));
+  const invalid=_liveRows.filter(ls=>!ls.id||(!ls.gstSrc&&!ls.uri));
+  if(invalid.length){showToast(`⚠ ${invalid.length} Einträge ohne id, gstSrc oder URI werden ignoriert`);await new Promise(r=>setTimeout(r,1200));}
   if(!await _confirmRestart('Live-Quellen geändert — Pipeline-Neustart zur Aktivierung erforderlich')) return;
   try {
     const r=await fetch('/api/live-sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({liveSources:valid})}).then(r=>r.json());
     if(r.ok) showToast('✅ Live-Quellen gespeichert — Neustart läuft…');
     else showToast('⚠ '+r.error);
   } catch(e){ showToast('⚠ Fehler: '+e.message); }
+}
+
+// ── Test-RTSP-Server UI ───────────────────────────────────────────────────
+function _updateRtspTestUi(running, url) {
+  const startBtn = document.getElementById('cfg-rtsp-start-btn');
+  const stopBtn  = document.getElementById('cfg-rtsp-stop-btn');
+  const urlEl    = document.getElementById('cfg-rtsp-test-url');
+  if (!startBtn) return;
+  startBtn.style.display = running ? 'none' : '';
+  stopBtn.style.display  = running ? '' : 'none';
+  if (urlEl) { urlEl.textContent = url || ''; urlEl.style.display = url ? '' : 'none'; }
+}
+
+async function rtspTestStart() {
+  const port    = parseInt(document.getElementById('cfg-rtsp-port')?.value) || 8554;
+  const mpath   = document.getElementById('cfg-rtsp-path')?.value || '/test';
+  const pattern = document.getElementById('cfg-rtsp-pattern')?.value || 'smpte';
+  try {
+    const r = await api('POST', '/api/rtsp-test/start', { port, path: mpath, pattern, enabled: true });
+    if (r?.ok) { showToast(`▶ RTSP-Server: ${r.url}`); _updateRtspTestUi(true, r.url); }
+    else showToast('⚠ ' + (r?.error || 'Fehler'));
+  } catch(e) { showToast('⚠ ' + e.message); }
+}
+
+async function rtspTestStop() {
+  try {
+    await api('POST', '/api/rtsp-test/stop');
+    showToast('■ RTSP-Server gestoppt');
+    _updateRtspTestUi(false, null);
+  } catch(e) { showToast('⚠ ' + e.message); }
+}
+
+async function _loadRtspTestStatus() {
+  try {
+    const r = await fetch('/api/rtsp-test/status').then(r => r.json());
+    const port    = document.getElementById('cfg-rtsp-port');
+    const mpath   = document.getElementById('cfg-rtsp-path');
+    const pattern = document.getElementById('cfg-rtsp-pattern');
+    if (S.config?.testRtsp) {
+      if (port    && S.config.testRtsp.port)    port.value    = S.config.testRtsp.port;
+      if (mpath   && S.config.testRtsp.path)    mpath.value   = S.config.testRtsp.path;
+      if (pattern && S.config.testRtsp.pattern) pattern.value = S.config.testRtsp.pattern;
+    }
+    _updateRtspTestUi(r.running, r.url);
+  } catch {}
 }
 
 async function _loadAudioTab(){
@@ -7401,16 +7563,16 @@ async function _saveEventInner(){
   if(isP && file){
     const somSec0 = fromTC(somV) || 0;
     if(somSec0 < 0){ showToast('⚠ SOM darf nicht negativ sein'); return; }
-    if(_dmPolicy !== 'ignore'){
-      const info=S.library.find(m=>m.fileName===file||m.fileName.replace(/\.[^.]+$/,'')===(file.replace(/\.[^.]+$/,'')));
-      if(info&&info.duration>0){
-        const fps=parseFps(info.video?.fps||25);
-        const somSec=fromTC(somV,fps)||0;
-        const eomSec=eomV?fromTC(eomV,fps):null;
-        if(somSec>=info.duration) showToast(`⚠ SOM (${somV}) liegt nach Dateiende (${ftFF(info.duration,fps)})`);
-        else if(eomSec!==null&&(somSec+eomSec)>info.duration+0.1)
-          showToast(`⚠ Dauerfehler: SOM+EOM überschreitet Dateidauer um ${ftFF((somSec+eomSec)-info.duration,fps)}`);
-      }
+    const info=S.library?.find(m=>m.fileName===file||m.fileName.replace(/\.[^.]+$/,'')===(file.replace(/\.[^.]+$/,'')));
+    if(!info){
+      showToast(`⚠ "${file}" nicht in der Mediathek`);
+    } else if(_dmPolicy !== 'ignore' && info.duration>0){
+      const fps=parseFps(info.video?.fps||25);
+      const somSec=fromTC(somV,fps)||0;
+      const eomSec=eomV?fromTC(eomV,fps):null;
+      if(somSec>=info.duration) showToast(`⚠ SOM (${somV}) liegt nach Dateiende (${ftFF(info.duration,fps)})`);
+      else if(eomSec!==null&&(somSec+eomSec)>info.duration+0.1)
+        showToast(`⚠ Dauerfehler: SOM+EOM überschreitet Dateidauer um ${ftFF((somSec+eomSec)-info.duration,fps)}`);
     }
   }
   const somMode = document.querySelector('[name="em-sommode"]:checked')?.value || 'user';
@@ -9828,7 +9990,7 @@ function updateAll(){
   const cp = document.getElementById('toolbar-clock-provider');
   if (cp) cp.textContent = S.config?.clockProvider || '—';
 }
-function closeModal(id){document.getElementById(id).classList.remove('show');S.libPickerSlot=null;S.libPickerCb=null;if(id==='event-modal'&&_prepEditMode){_prepEditMode=false;_prepEditIdx=-1;}}
+function closeModal(id){document.getElementById(id).classList.remove('show');S.libPickerSlot=null;S.libPickerCb=null;if(id==='event-modal'&&_prepEditMode){_prepEditMode=false;_prepEditIdx=-1;}if(id==='record-modal'){clearInterval(_recDurTimer);}}
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)closeModal(m.id);}));
 function showToast(msg){
   let t=document.getElementById('toast');
@@ -10579,11 +10741,14 @@ async function _fetchLiveSourceHints() {
     const plugins = await fetch('/api/plugins').then(r => r.json());
     for (const p of (plugins || [])) {
       if (!p.enabled) continue;
-      // BC plugin: swp08SourceMap keys are valid upstream signal IDs
-      if (p.id === 'broadcast-controller' && p.config?.swp08SourceMap) {
-        let map = p.config.swp08SourceMap;
-        if (typeof map === 'string') { try { map = JSON.parse(map); } catch { map = {}; } }
-        for (const k of Object.keys(map || {})) hints.set(k, k);
+      // BC plugin: swp08SourceMap and cerebrumSourceMap keys are upstream signal IDs
+      if (p.id === 'broadcast-controller') {
+        for (const field of ['swp08SourceMap', 'cerebrumSourceMap']) {
+          let map = p.config?.[field];
+          if (!map) continue;
+          if (typeof map === 'string') { try { map = JSON.parse(map); } catch { map = {}; } }
+          for (const k of Object.keys(map || {})) hints.set(k, k);
+        }
       }
       // Convention for future plugins (e.g. NDI): expose routerSources in status.data
       for (const rs of (p.status?.data?.routerSources || [])) {

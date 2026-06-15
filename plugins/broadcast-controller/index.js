@@ -88,6 +88,14 @@ const meta = exports.meta = {
       key: 'cerebrumDestination', label: 'PGM-Destination', type: 'string', default: 'PGM1',
       condition: 'protocol=cerebrum',
     },
+    {
+      key: 'cerebrumSourceMap',
+      label: 'Quellen-Tabelle',
+      type: 'kvtable', default: '{"RP7": "RP7", "FeedWien": "FeedWien"}',
+      kvKeyLabel: 'Signal-Name', kvValLabel: 'Cerebrum-Source-ID',
+      condition: 'protocol=cerebrum',
+      help: 'Signal-Name → Cerebrum-Source-ID. Signalnamen erscheinen als Dropdown im Playlist-Event-Editor.',
+    },
 
     // ── HTTP ───────────────────────────────────────────────────────────────────
     { key: 'path',   label: 'HTTP Pfad',        type: 'string',   default: '/api/playlist-event', condition: 'protocol=http||protocol=https' },

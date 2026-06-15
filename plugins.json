@@ -19,7 +19,7 @@
     "enabled": false
   },
   "broadcast-controller": {
-    "enabled": false
+    "enabled": true
   },
   "marina-sync": {
     "config": {
