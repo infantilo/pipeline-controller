@@ -87,7 +87,13 @@ let _activeWorkers = 0;
 let _libCache      = {};
 let _libCacheTs    = 0;
 
-// System dirs fetched from server state (mediaDir, recordDir, backupMediaDirs)
+// Dirs where files are already player-accessible — no transfer needed.
+// Does NOT include recordDir: recordings are a transfer SOURCE, not a ready location.
+let _readyDirs = [];
+// The system's record dir (from server state) — treated as an additional source for
+// local-protocol transfers, so recordings are copied to mediaDir.
+let _recordDirFromSys = null;
+// All system dirs (ready + record) — used only for housekeeping "don't delete" guard.
 let _sysDirs   = [];
 let _sysDirsTs = 0;
 
@@ -168,9 +174,12 @@ function _sourceDirs() {
   return raw.split('\n').map(s => s.trim()).filter(Boolean);
 }
 
-// Find basename in configured source dirs; returns full path or null
+// Find basename in configured source dirs plus the system record dir; returns full path or null
 function _findInSourceDirs(basename) {
-  for (const dir of _sourceDirs()) {
+  // User-configured sourcePaths first, then the system's record dir as implicit source
+  const dirs = [..._sourceDirs()];
+  if (_recordDirFromSys && !dirs.includes(_recordDirFromSys)) dirs.push(_recordDirFromSys);
+  for (const dir of dirs) {
     try {
       const p = path.join(dir, basename);
       if (fs.existsSync(p)) return p;
@@ -179,9 +188,10 @@ function _findInSourceDirs(basename) {
   return null;
 }
 
-// Find basename in system dirs (MEDIA_DIR, recordDir, backupDirs) — already-local files
+// Find basename in player-ready dirs (mediaDir + backupDirs) — already accessible, no transfer needed.
+// recordDir is intentionally excluded: recordings must be copied to mediaDir first.
 function _findInSysDirs(basename) {
-  for (const dir of _sysDirs) {
+  for (const dir of _readyDirs) {
     try {
       const p = path.join(dir, basename);
       if (fs.existsSync(p)) return p;
@@ -196,15 +206,19 @@ async function _refreshSysDirs() {
   try {
     const state = await _api.getState();
     const cfg   = state?.config || {};
-    const dirs  = [
+    const ready = [
       cfg.mediaDir,
-      cfg.recordDir,
       ...(Array.isArray(cfg.backupMediaDirs) ? cfg.backupMediaDirs : []),
     ].filter(d => d && typeof d === 'string');
-    if (dirs.length) {
-      _sysDirs   = dirs;
-      _sysDirsTs = Date.now();
-      _api.log('info', `FTM: System-Verzeichnisse: ${dirs.join(', ')}`);
+    const recDir = (cfg.recordDir && typeof cfg.recordDir === 'string') ? cfg.recordDir : null;
+    // All system dirs for housekeeping guard only
+    const all = recDir ? [...ready, recDir] : [...ready];
+    if (ready.length || recDir) {
+      _readyDirs        = ready;
+      _recordDirFromSys = recDir;
+      _sysDirs          = all;
+      _sysDirsTs        = Date.now();
+      _api.log('info', `FTM: Bereit-Verzeichnisse: ${ready.join(', ')}${recDir ? ` | Aufnahme-Quelle: ${recDir}` : ''}`);
     } else {
       _sysDirsTs = Date.now(); // don't retry immediately even if empty
     }
@@ -360,7 +374,10 @@ async function _doTransfer(file, entry) {
     // Search all configured source directories
     srcPath = _findInSourceDirs(baseName);
     if (!srcPath) {
-      const searched = _sourceDirs().join(', ') || '(keine Quell-Verzeichnisse konfiguriert)';
+      const configuredDirs = _sourceDirs();
+      const allSearched = [...configuredDirs];
+      if (_recordDirFromSys && !allSearched.includes(_recordDirFromSys)) allSearched.push(_recordDirFromSys);
+      const searched = allSearched.join(', ') || '(keine Quell-Verzeichnisse konfiguriert)';
       _setTransfer(file, { ...entry, state: 'error', error: `Nicht gefunden in: ${searched}` });
       _publishStatus(); return;
     }

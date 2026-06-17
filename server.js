@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 'use strict';
+// Must be set before any require() so libuv thread pool is sized on first use.
+// 5 persistent busPop loops (2× player video+audio + master) plus StateChangeWorkers
+// exhaust the default pool of 4, stalling state changes by up to 500ms per slot.
+process.env.UV_THREADPOOL_SIZE = '16';
 process.env.GST_GL_API = 'none';
 
 // ── GStreamer debug filter muss VOR dem ersten require('gst-kit') gesetzt sein,
@@ -537,11 +541,11 @@ function _onPlayingCheckAsset(d) {
 function _buildUriLiveSrc(uri, latencyMs = 200) {
   if (!uri) return null;
   if (/^rtsp:\/\//i.test(uri)) {
-    // decodebin handles any codec (H.264, H.265, MPEG-2, etc.)
-    return `rtspsrc location="${uri}" latency=${latencyMs} ! decodebin ! videoconvert`;
+    // caps filter selects only the video RTP pad — prevents decodebin from getting audio pads
+    return `rtspsrc location="${uri}" latency=${latencyMs} ! application/x-rtp,media=video ! decodebin ! videoconvert`;
   }
   if (/^rtsps:\/\//i.test(uri)) {
-    return `rtspsrc location="${uri}" latency=${latencyMs} tls-validation-flags=0 ! decodebin ! videoconvert`;
+    return `rtspsrc location="${uri}" latency=${latencyMs} tls-validation-flags=0 ! application/x-rtp,media=video ! decodebin ! videoconvert`;
   }
   if (/^srt:\/\//i.test(uri)) {
     return `srtsrc uri="${uri}" ! decodebin ! videoconvert`;
@@ -558,10 +562,10 @@ function _buildUriLiveSrc(uri, latencyMs = 200) {
 function _buildUriLiveAudioSrc(uri, latencyMs = 200) {
   if (!uri) return null;
   if (/^rtsp:\/\//i.test(uri)) {
-    return `rtspsrc location="${uri}" latency=${latencyMs} ! decodebin ! audioconvert ! audioresample`;
+    return `rtspsrc location="${uri}" latency=${latencyMs} ! application/x-rtp,media=audio ! decodebin ! audioconvert ! audioresample`;
   }
   if (/^rtsps:\/\//i.test(uri)) {
-    return `rtspsrc location="${uri}" latency=${latencyMs} tls-validation-flags=0 ! decodebin ! audioconvert ! audioresample`;
+    return `rtspsrc location="${uri}" latency=${latencyMs} tls-validation-flags=0 ! application/x-rtp,media=audio ! decodebin ! audioconvert ! audioresample`;
   }
   if (/^srt:\/\//i.test(uri)) {
     return `srtsrc uri="${uri}" ! decodebin ! audioconvert ! audioresample`;
@@ -2434,6 +2438,26 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     if (removed) { library.save(); broadcast('library', _enrichLibrary(library.getAll())); }
     return json(res, { ok: true, removed });
   }
+  if (meth === 'DELETE' && p.startsWith('/api/library/')) {
+    const file    = decodeURIComponent(p.slice('/api/library/'.length));
+    const absPath = path.isAbsolute(file) ? file : path.join(library.mediaDir, file);
+    if (!fs.existsSync(absPath)) return json(res, { ok: false, error: 'File not found' }, 404);
+    const deadDir = _settings.deadDir || path.join(library.mediaDir, '..', 'dead');
+    try {
+      fs.mkdirSync(deadDir, { recursive: true });
+      const ext  = path.extname(file);
+      const base = path.basename(file, ext);
+      const dest = path.join(deadDir, `${base}.${Date.now()}${ext}`);
+      fs.renameSync(absPath, dest);
+      delete library.library[file];
+      library.save();
+      broadcast('library', _enrichLibrary(library.getAll()));
+      log(`🗑 Gelöscht (→ dead): ${file}`, 'info', 'library');
+      return json(res, { ok: true, movedTo: dest });
+    } catch(e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
 
   // Images
   if (meth === 'GET' && p === '/api/images') {
@@ -3059,11 +3083,13 @@ server.listen(PORT, () => {
 
 process.on('SIGTERM', async () => {
   pluginHost.dispatch('system:shutdown', {});
+  const t = setTimeout(() => process.exit(1), 5000); t.unref();
   await pluginHost.destroy().catch(()=>{});
-  process.exit(0);
+  clearTimeout(t); process.exit(0);
 });
 process.on('SIGINT', async () => {
   pluginHost.dispatch('system:shutdown', {});
+  const t = setTimeout(() => process.exit(1), 5000); t.unref();
   await pluginHost.destroy().catch(()=>{});
-  process.exit(0);
+  clearTimeout(t); process.exit(0);
 });

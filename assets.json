@@ -3,7 +3,7 @@
     "id": "hewh1w352eempu2llcz",
     "label": "Asset",
     "color": "#5aabff",
-    "icon": "⬛",
+    "icon": "🌅",
     "events": [
       {
         "id": "pj5fxegmqjompvhwsvj",
@@ -21,30 +21,6 @@
         "fixTime": null,
         "transition": "xfade",
         "transitionSpeed": "medium",
-        "audioPreset": null,
-        "audioConfig": {
-          "pgm": "pgm-de",
-          "secondary": "dup-pgm"
-        },
-        "branding": null,
-        "afd": "auto"
-      },
-      {
-        "id": "yr7j5wd26jmpvhvrp8",
-        "reconcileKey": "jkbrvvzm5smpvhvrp8",
-        "title": "player",
-        "source": "image",
-        "file": "IndianHeadTestPattern16x9.png",
-        "som": 0,
-        "eom": null,
-        "postroll": 0,
-        "duration": 5,
-        "startType": "sequential",
-        "startTime": null,
-        "endType": "sequential",
-        "fixTime": null,
-        "transition": "cut",
-        "transitionSpeed": "fast",
         "audioPreset": null,
         "audioConfig": {
           "pgm": "pgm-de",

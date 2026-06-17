@@ -29,21 +29,5 @@
       "awayColor": "#b71c1c"
     },
     "layer": "overlay"
-  },
-  {
-    "id": "64gtf4lk67xmoernlwj",
-    "label": "Spielegrafik",
-    "template": "scorebug",
-    "data": {
-      "homeTeam": "AUSTRIA",
-      "awayTeam": "RAPID",
-      "homeScore": 0,
-      "awayScore": 0,
-      "period": "1 Halbzeit",
-      "time": "12:00",
-      "homeColor": "#1a237e",
-      "awayColor": "#b71c1c"
-    },
-    "layer": "overlay"
   }
 ]

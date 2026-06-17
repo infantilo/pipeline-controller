@@ -338,6 +338,14 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
 /* Preview offline overlay */
 #preview-offline{display:none;flex:1;min-width:0;height:100%;align-items:center;justify-content:center;flex-direction:column;background:#080808;gap:5px;}
+
+/* Emoji Picker */
+#emoji-picker{position:fixed;z-index:9999;background:var(--bg2);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 20px rgba(0,0,0,.6);padding:6px;display:none;flex-direction:column;gap:4px;width:280px;}
+#emoji-picker-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:1px;max-height:220px;overflow-y:auto;}
+#emoji-picker-grid button{background:none;border:none;cursor:pointer;font-size:18px;padding:3px;border-radius:3px;line-height:1;color:inherit;}
+#emoji-picker-grid button:hover{background:var(--bg4);}
+#emoji-picker-clear{font-size:10px;color:var(--dim);cursor:pointer;padding:2px 4px;border-radius:3px;border:1px solid var(--border);background:none;align-self:flex-start;}
+#emoji-picker-clear:hover{background:var(--bg4);}
 </style>
 </head>
 <body>
@@ -380,6 +388,11 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:2px;color:var(--dim);cursor:pointer;font-size:8px;padding:1px 5px;line-height:1.4;white-space:nowrap">
     ↕ Follow
   </button>
+  <button id="btn-onair-ctrl" onclick="event.stopPropagation();toggleOnAirCtrlPopup(this)"
+    title="On-Air Steuerung: Audio-Preset &amp; AFD/Format"
+    style="margin-left:4px;background:none;border:1px solid var(--border);border-radius:2px;color:var(--dim);cursor:pointer;font-size:8px;padding:1px 5px;line-height:1.4;white-space:nowrap;display:none">
+    ⚙ OnAir
+  </button>
 </div>
 <div id="counter-strip" style="background:var(--bg2);border-bottom:2px solid var(--border);display:grid;grid-template-columns:1fr 1fr 100px 1fr 1fr 1fr;gap:1px;">
   <!-- FIX-EVENT Countdown -->
@@ -394,25 +407,6 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     <div id="cstrip-cur-val" style="font-family:var(--mono);font-size:26px;font-weight:800;color:var(--green);letter-spacing:.04em;line-height:1">—</div>
     <div style="width:100%;height:3px;background:var(--bg4);border-radius:2px;margin-top:2px"><div id="cstrip-cur-bar" style="height:100%;background:var(--green);border-radius:2px;transition:width .04s linear;width:0%"></div></div>
     <div id="cstrip-cur-sub" style="font-size:8px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;text-align:center;margin-top:1px">—</div>
-    <!-- On-Air Audio Preset hot-swap -->
-    <div id="cstrip-preset-row" style="display:none;margin-top:3px;width:100%;cursor:default" onclick="event.stopPropagation()">
-      <select id="cstrip-preset-sel" title="Audio Preset live ändern (synchroner Crossfade-Wechsel)"
-        style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;font-size:8px;padding:1px 3px"
-        onchange="_onAirPresetChange(this.value)"></select>
-    </div>
-    <!-- On-Air AFD/Format hot-swap -->
-    <div id="cstrip-afd-row" style="display:none;margin-top:3px;width:100%;cursor:default" onclick="event.stopPropagation()">
-      <select id="cstrip-afd-sel" title="AFD/Format live ändern (synchroner Crossfade-Wechsel)"
-        style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;font-size:8px;padding:1px 3px"
-        onchange="_onAirAfdChange(this.value)">
-        <option value="auto" data-i18n="afd.auto">Standard (Pipeline-Einstellung)</option>
-        <option value="16:9" data-i18n="afd.169">16:9 nativ</option>
-        <option value="4:3-pillarbox" data-i18n="afd.43pillar">4:3 Pillarbox → 16:9</option>
-        <option value="4:3-letterbox" data-i18n="afd.43letter">16:9 Letterbox in 4:3 → 16:9</option>
-        <option value="14:9-letterbox" data-i18n="afd.149letter">14:9 Letterbox → 16:9</option>
-        <option value="anamorphic" data-i18n="afd.anamorphic">Anamorph 16:9 in 4:3</option>
-      </select>
-    </div>
   </div>
   <!-- GAP / OVERLAP zum nächsten Event -->
   <div id="cs-cell-gap" style="background:var(--bg3);padding:5px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-right:1px solid var(--border)">
@@ -443,6 +437,33 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   </div>
 </div>
 </div><!-- /counter-strip-wrap -->
+
+<!-- On-Air Steuerung Popup (Preset + AFD) -->
+<div id="onair-ctrl-popup" style="display:none;position:fixed;z-index:400;background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:10px 12px;min-width:220px;box-shadow:0 6px 20px rgba(0,0,0,.6)">
+  <div style="display:flex;align-items:center;margin-bottom:8px">
+    <span style="font-size:9px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;flex:1">⚙ On-Air Steuerung</span>
+    <button onclick="document.getElementById('onair-ctrl-popup').style.display='none'" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">✕</button>
+  </div>
+  <div id="cstrip-preset-row" style="display:none;margin-bottom:8px">
+    <div style="font-size:9px;color:var(--dim);margin-bottom:3px">🔊 Audio Preset</div>
+    <select id="cstrip-preset-sel" title="Audio Preset live ändern (synchroner Crossfade-Wechsel)"
+      style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;font-size:11px;padding:2px 4px"
+      onchange="_onAirPresetChange(this.value)"></select>
+  </div>
+  <div id="cstrip-afd-row" style="display:none">
+    <div style="font-size:9px;color:var(--dim);margin-bottom:3px">🖼 AFD / Format</div>
+    <select id="cstrip-afd-sel" title="AFD/Format live ändern (synchroner Crossfade-Wechsel)"
+      style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;font-size:11px;padding:2px 4px"
+      onchange="_onAirAfdChange(this.value)">
+      <option value="auto" data-i18n="afd.auto">Standard (Pipeline-Einstellung)</option>
+      <option value="16:9" data-i18n="afd.169">16:9 nativ</option>
+      <option value="4:3-pillarbox" data-i18n="afd.43pillar">4:3 Pillarbox → 16:9</option>
+      <option value="4:3-letterbox" data-i18n="afd.43letter">16:9 Letterbox in 4:3 → 16:9</option>
+      <option value="14:9-letterbox" data-i18n="afd.149letter">14:9 Letterbox → 16:9</option>
+      <option value="anamorphic" data-i18n="afd.anamorphic">Anamorph 16:9 in 4:3</option>
+    </select>
+  </div>
+</div>
 
 <div class="main">
 
@@ -583,11 +604,10 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     </div>
     <div class="sec-body" id="sec-hotkeys">
       <div style="margin-top:5px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:6px;">
-        <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
-          <span style="font-size:8px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;flex:1">Grafik Hotkeys</span>
-          <button class="btn" style="font-size:9px;padding:1px 5px" onclick="hotkeyAdd()">＋</button>
+        <div style="margin-bottom:4px">
+          <span style="font-size:8px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em">Grafik Hotkeys</span>
         </div>
-        <div id="hotkey-list" style="display:flex;flex-direction:column;gap:2px"></div>
+        <div id="hotkey-list" class="mx-grid"></div>
         <!-- Hotkey-Editor (inline, ausgeblendet) -->
         <div id="hotkey-editor" style="display:none;margin-top:6px;background:var(--bg4);border:1px solid var(--border);border-radius:3px;padding:5px">
           <div style="font-size:9px;font-weight:700;color:var(--dim);margin-bottom:4px" id="hk-editor-title">Hotkey</div>
@@ -1897,7 +1917,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <input type="text" id="ae-label" placeholder="Asset-Name" style="font-size:11px">
       </div>
       <div class="fld" style="margin:0"><label>Icon</label>
-        <input type="text" id="ae-icon" placeholder="⬛" style="font-size:14px;text-align:center;padding:3px">
+        <input type="text" id="ae-icon" placeholder="⬛" style="font-size:14px;text-align:center;padding:3px;cursor:pointer" readonly
+          onclick="showEmojiPicker(this, v=>{this.value=v})">
       </div>
       <div class="fld" style="margin:0"><label>Farbe</label>
         <input type="color" id="ae-color" value="#5aabff" style="height:28px;width:52px">
@@ -2043,6 +2064,64 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 const SRC_ICON={player:'🎬',player1:'🎬',player2:'🎬',smpte:'📺',black:'⬛',image:'🖼',live:'📡',comment:'💬',block_start:'▶⊞',block_end:'⊟'};
 function _liveSourceIcon(src){const ls=(S.config?.liveSources||[]).find(l=>l.id===src);return ls?'📡':null;}
 const TRANS_ICON={cut:'|','v-fade':'.\/','fade-cut':'\\|','cut-fade':'|/','xfade':'X'};
+
+// ── Emoji Picker ─────────────────────────────────────────────────────────
+const _EMOJI_LIST = (() => {
+  const out = [];
+  // Exact range from user spec: 127744–128883, with three internal gaps
+  const skip = new Set([
+    ...Array.from({length:13},(_,k)=>128723+k), // 128723–128735
+    128749,128750,128751,                         // 128749–128751
+    ...Array.from({length:9}, (_,k)=>128759+k),  // 128759–128767
+  ]);
+  for (let c=127744;c<=128883;c++) if(!skip.has(c)) out.push(String.fromCodePoint(c));
+  return out;
+})();
+
+let _emojiPickerCb = null;
+let _emojiPickerTarget = null;
+
+function showEmojiPicker(anchorEl, callback) {
+  const picker = document.getElementById('emoji-picker');
+  const grid   = document.getElementById('emoji-picker-grid');
+  if (!picker || !grid) return;
+  _emojiPickerCb     = callback;
+  _emojiPickerTarget = anchorEl;
+  grid.innerHTML = _EMOJI_LIST.map(e =>
+    `<button type="button" title="${e}" onclick="_emojiSelect(${e.codePointAt(0)})">${e}</button>`
+  ).join('');
+  picker.style.display = 'flex';
+  const r = anchorEl.getBoundingClientRect();
+  let top  = r.bottom + 4;
+  let left = r.left;
+  if (left + 280 > window.innerWidth)  left = window.innerWidth - 288;
+  if (top  + 240 > window.innerHeight) top  = r.top - 244;
+  picker.style.top  = top  + 'px';
+  picker.style.left = left + 'px';
+}
+
+function _emojiSelect(cp) {
+  const em = String.fromCodePoint(cp);
+  if (_emojiPickerCb) _emojiPickerCb(em);
+  _emojiPickerClose();
+}
+
+function _emojiPickerClear() {
+  if (_emojiPickerCb) _emojiPickerCb('');
+  _emojiPickerClose();
+}
+
+function _emojiPickerClose() {
+  const picker = document.getElementById('emoji-picker');
+  if (picker) picker.style.display = 'none';
+  _emojiPickerCb = null; _emojiPickerTarget = null;
+}
+
+document.addEventListener('mousedown', e => {
+  const picker = document.getElementById('emoji-picker');
+  if (!picker || picker.style.display === 'none') return;
+  if (!picker.contains(e.target) && e.target !== _emojiPickerTarget) _emojiPickerClose();
+});
 const SPEED_MS={fast:500,medium:1000,slow:2000};
 
 function _applyTransitionSpeeds(speeds) {
@@ -3360,6 +3439,9 @@ function toggleAssetPanel() {
 let _recDurTimer = null;
 function toggleRecordPanel() {
   document.getElementById('record-modal').classList.add('show');
+  // Reset manual audiogroup checkboxes so they re-populate fresh from config
+  const manList = document.getElementById('rec-manual-audiogroups');
+  if (manList) manList.innerHTML = '<span style="font-size:10px;color:var(--dim)">(Standard aus Konfiguration)</span>';
   _renderRecordPanel();
   clearInterval(_recDurTimer);
   _recDurTimer = setInterval(() => {
@@ -3786,6 +3868,34 @@ async function captureStill(slot) {
   } catch(e) { showToast('❌ ' + e.message); }
 }
 
+function toggleOnAirCtrlPopup(btn) {
+  const popup = document.getElementById('onair-ctrl-popup');
+  if (!popup) return;
+  if (popup.style.display !== 'none') { popup.style.display = 'none'; return; }
+  const r = btn.getBoundingClientRect();
+  popup.style.top  = (r.bottom + 4) + 'px';
+  popup.style.right = (window.innerWidth - r.right) + 'px';
+  popup.style.left  = 'auto';
+  popup.style.display = 'block';
+}
+document.addEventListener('click', e => {
+  const popup = document.getElementById('onair-ctrl-popup');
+  const btn   = document.getElementById('btn-onair-ctrl');
+  if (popup && popup.style.display !== 'none' && !popup.contains(e.target) && e.target !== btn)
+    popup.style.display = 'none';
+});
+
+function _updateOnAirCtrlBtn() {
+  const presetVisible = document.getElementById('cstrip-preset-row')?.style.display !== 'none';
+  const afdVisible    = document.getElementById('cstrip-afd-row')?.style.display !== 'none';
+  const btn = document.getElementById('btn-onair-ctrl');
+  if (!btn) return;
+  const active = presetVisible || afdVisible;
+  btn.style.display    = active ? '' : 'none';
+  btn.style.color      = active ? 'var(--accent)' : 'var(--dim)';
+  btn.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+}
+
 // ── On-Air Audio Preset Hot-Swap ──────────────────────────────────────────
 function _updateOnAirPresetRow(event) {
   const row = document.getElementById('cstrip-preset-row');
@@ -3793,15 +3903,16 @@ function _updateOnAirPresetRow(event) {
   if (!row || !sel) return;
   // Only show for player clips (slotId set means it's a clip, not smpte/black/live)
   const isClip = event?.source === 'player' || (!['smpte','black','image','live','comment','block_start','block_end'].includes(event?.source||'') && !_isLiveSourceEv(event));
-  if (!isClip || !S.playlist.running) { row.style.display = 'none'; return; }
+  if (!isClip || !S.playlist.running) { row.style.display = 'none'; _updateOnAirCtrlBtn(); return; }
   // Populate with available presets
   const presets = Object.entries(S.audioConfig?.presets || {});
-  if (!presets.length) { row.style.display = 'none'; return; }
+  if (!presets.length) { row.style.display = 'none'; _updateOnAirCtrlBtn(); return; }
   const curPreset = event.audioPreset || event.audioConfig?.preset || '';
   sel.innerHTML = presets.map(([id, p]) =>
     `<option value="${id}"${id===curPreset?' selected':''}>${p.label||id}</option>`
   ).join('');
   row.style.display = '';
+  _updateOnAirCtrlBtn();
 }
 
 async function _onAirPresetChange(presetId) {
@@ -3819,9 +3930,10 @@ function _updateOnAirAfdRow(event) {
   const sel = document.getElementById('cstrip-afd-sel');
   if (!row || !sel) return;
   const isClip = event?.source === 'player' || (!['smpte','black','image','live','comment','block_start','block_end'].includes(event?.source||'') && !_isLiveSourceEv(event));
-  if (!isClip || !S.playlist.running) { row.style.display = 'none'; return; }
+  if (!isClip || !S.playlist.running) { row.style.display = 'none'; _updateOnAirCtrlBtn(); return; }
   sel.value = event.afd || 'auto';
   row.style.display = '';
+  _updateOnAirCtrlBtn();
 }
 
 async function _onAirAfdChange(afd) {
@@ -3963,9 +4075,9 @@ function _refreshRecordAudioGroupUi() {
       </label>`
     ).join('');
   }
-  // Manual record modal: checkboxes (populated fresh each time)
+  // Manual record modal: checkboxes — only populate when empty to preserve user selections
   const manList = document.getElementById('rec-manual-audiogroups');
-  if (manList && groups.length) {
+  if (manList && groups.length && !manList.querySelector('input[type="checkbox"]')) {
     const savedDef = S.config?.recordAudioGroups || (S.config?.recordAudioGroup ? [S.config.recordAudioGroup] : ['pgm-stereo']);
     manList.innerHTML = groups.map(g =>
       `<label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
@@ -5726,7 +5838,7 @@ function _renderLiveList(){
         </select>
         <input style="flex:1;font-size:9px;font-family:var(--mono)" placeholder="inputId (Decklink-Eingang für BC)" value="${_esc(ls.inputId||'')}" oninput="_liveRows[${i}].inputId=this.value">
       </div>
-      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box" placeholder="URI (rtsp://... / srt://... / udp://...)" value="${_esc(ls.uri||'')}" oninput="_liveRows[${i}].uri=this.value;if(!_liveRows[${i}].gstSrc){_liveRows[${i}].keepAlive=false;_renderLiveList();}">
+      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box" placeholder="URI (rtsp://... / srt://... / udp://...)" value="${_esc(ls.uri||'')}" oninput="_liveRows[${i}].uri=this.value;if(!_liveRows[${i}].gstSrc)_liveRows[${i}].keepAlive=false;">
       <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box;${ls.uri&&!ls.gstSrc?'color:var(--dim)':''}" placeholder="${ls.uri&&!ls.gstSrc?_esc(_gstSrcFromUri(ls.uri)||'wird automatisch aus URI generiert'):'gstSrc (z.B. decklinkvideosrc device-number=0 — leer = aus URI)'}" value="${_esc(ls.gstSrc||'')}" oninput="_liveRows[${i}].gstSrc=this.value">
       ${isDL?`<div style="display:flex;gap:6px;align-items:center;font-size:9px">
         <span style="color:var(--dim);width:72px;flex-shrink:0">Video-Format</span>
@@ -6064,9 +6176,9 @@ function _renderClassifSettings() {
   }
   el.innerHTML = _editClassifs.map((c, i) => `
     <div style="display:grid;grid-template-columns:32px 1fr 80px 40px 24px;gap:4px;align-items:center;margin-bottom:4px">
-      <input type="text" value="${(c.icon||'').replace(/"/g,'&quot;')}" placeholder="🏷" maxlength="4"
-        oninput="_editClassifs[${i}].icon=this.value"
-        style="background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px;font-size:14px;text-align:center">
+      <input type="text" value="${(c.icon||'').replace(/"/g,'&quot;')}" placeholder="🏷" readonly
+        onclick="showEmojiPicker(this, v=>{this.value=v;_editClassifs[${i}].icon=v;})"
+        style="background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px;font-size:14px;text-align:center;cursor:pointer">
       <input type="text" value="${(c.label||'').replace(/"/g,'&quot;')}" placeholder="Label"
         oninput="_editClassifs[${i}].label=this.value"
         style="background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 5px;border-radius:2px;font-size:11px">
@@ -8272,7 +8384,19 @@ function renderLib(){
   const lib=q?S.library.filter(m=>m.fileName.toLowerCase().includes(q)):S.library;
   if(!lib.length){body.innerHTML='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">'+(q?'Keine Treffer':'Keine Medien')+'</div>';return;}
   body.innerHTML=lib.map(m=>{
-    if(m.error) return `<div class="lib-item"><div class="lib-fn" style="color:var(--red)">${m._displayName||m.fileName}</div><div class="lib-meta">${m.error}</div></div>`;
+    if(m.error) {
+      const efn = m.fileName.replace(/'/g,"\\'");
+      const edir = m.filePath ? m.filePath.replace(/[/\\][^/\\]+$/,'') : '';
+      return `<div class="lib-item">
+        <div style="display:flex;align-items:center;gap:4px">
+          <div class="lib-fn" style="color:var(--red);flex:1">${m._displayName||m.fileName}</div>
+          <button class="ib" style="font-size:10px;flex-shrink:0;color:var(--red)" title="Datei löschen"
+            onclick="event.stopPropagation();libDeleteFile('${efn}')">🗑</button>
+        </div>
+        ${edir?`<div style="font-size:8px;color:var(--dim);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.filePath||''}">${edir}/</div>`:''}
+        <div class="lib-meta" style="color:var(--orange)">${m.error}</div>
+      </div>`;
+    }
     const fps=parseFps(m.video?.fps||25);
     const tracks=(m.audio||[]).map(t=>{const lbl=t.title?`${t.title} (${t.chLabel||t.channels+'ch'})`:t.chLabel||t.channels+'ch';return `<span class="tb ${ROLE_CLS[t.role]||''}" title="${t.role||''}">${lbl}</span>`;}).join('');
     const segs = _libSegments[m.fileName] || [];
@@ -8299,6 +8423,7 @@ function renderLib(){
     }
     const durStr = (m.duration>0) ? ftFF(m.duration,fps) : `<span style="color:var(--orange)" title="Dauer unbekannt — Datei neu analysieren">? unbekannt</span>`;
     const tcStr  = m.startTimecode ? `<span style="color:var(--dim)" title="Start-Timecode (eingebettet)">TC ${m.startTimecode}</span> · ` : '';
+    const dirPath = m.filePath ? m.filePath.replace(/[/\\][^/\\]+$/, '') : '';
     return `<div class="lib-item">
       <div style="display:flex;align-items:center;gap:4px">
         ${recBadge}<div class="lib-fn" style="flex:1">${m._displayName||m.fileName}</div>
@@ -8308,8 +8433,11 @@ function renderLib(){
           onclick="event.stopPropagation();rescanFile('${fn}')">⟳</button>`}
         <button class="ib" style="font-size:10px;flex-shrink:0" title="Segmente bearbeiten"
           onclick="event.stopPropagation();_libToggleSeg('${fn}')">${exp?'▾':'▸'} Seg</button>
+        <button class="ib" style="font-size:10px;flex-shrink:0;color:var(--red)" title="Datei löschen (verschoben in dead-Ordner)"
+          onclick="event.stopPropagation();libDeleteFile('${fn}')">🗑</button>
       </div>
       <div class="lib-meta">${m.format||'?'} · ${m.video?.width||'?'}x${m.video?.height||'?'}@${Math.round(fps)} · ${tcStr}${durStr} · ${((m.fileSize||0)/1048576).toFixed(1)}MB${m.tool?` <span style="color:var(--dim);font-size:8px">[${m.tool}]</span>`:''}</div>
+      ${dirPath?`<div style="font-size:8px;color:var(--dim);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px" title="${m.filePath||''}">${dirPath}/</div>`:''}
       <div style="margin-top:2px">${tracks}</div>
       ${segHtml}
     </div>`;
@@ -8368,6 +8496,13 @@ function _showLibPicker(){
 async function rescanFile(fn){
   await api('POST',`/api/library/${encodeURIComponent(fn)}/rescan`);
   showToast(`⟳ Analysiere ${fn}…`);
+}
+async function libDeleteFile(fn){
+  const name = fn.replace(/.*[/\\]/,'');
+  if (!await _confirm(`Datei "${name}" löschen?\n\nSie wird in den dead-Ordner verschoben und kann dort wiederhergestellt werden.`, {ok:'Löschen', danger:true})) return;
+  const r = await api('DELETE', `/api/library/${encodeURIComponent(fn)}`);
+  if (r?.ok) showToast(`🗑 ${name} gelöscht`);
+  else showToast('❌ ' + (r?.error || 'Löschen fehlgeschlagen'));
 }
 async function scanLib(){await api('POST','/api/library/scan');}
 async function libCleanup(){
@@ -9471,20 +9606,28 @@ let _hkEditId = null;  // null = neu, sonst ID
 function _renderHotkeys() {
   const el = document.getElementById('hotkey-list');
   if (!el) return;
-  if (!_hotkeys.length) {
-    el.innerHTML = '<div style="font-size:9px;color:var(--dim);padding:2px 0">Noch keine Hotkeys</div>';
-    return;
-  }
+  const newCard = `<div style="display:flex;flex-direction:column;gap:1px">
+    <button class="mx-btn" onclick="hotkeyAdd()" title="Neuen Hotkey anlegen" style="flex:1;opacity:.5;border-style:dashed">
+      <span class="mx-icon">＋</span>
+      <span class="mx-label">Neu</span>
+    </button>
+  </div>`;
+  if (!_hotkeys.length) { el.innerHTML = newCard; return; }
   el.innerHTML = _hotkeys.map(hk => {
     const onAir = _grafikActiveMap.has(hk.template);
-    return `<div style="display:flex;gap:2px;align-items:center">
-      <button class="btn ${onAir?'btn-r':'btn-g'}" style="flex:1;font-size:10px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-        onclick="hotkeyFire('${hk.id}')" title="${hk.template}">${onAir?'● ':''} ${hk.label}</button>
-      <button class="btn btn-r" style="font-size:9px;padding:1px 5px;opacity:${onAir?1:.4}" ${onAir?'':'disabled'} onclick="hotkeyHide('${hk.id}')" title="Take Out">■</button>
-      <button class="btn" style="font-size:9px;padding:1px 4px" onclick="hotkeyEdit('${hk.id}')">✎</button>
-      <button class="btn btn-r" style="font-size:9px;padding:1px 4px" onclick="hotkeyDelete('${hk.id}')">✕</button>
+    return `<div style="display:flex;flex-direction:column;gap:1px">
+      <button class="mx-btn${onAir?' mx-onair':''}" onclick="${onAir?`hotkeyHide('${hk.id}')`:`hotkeyFire('${hk.id}')`}" title="${onAir?'▪ Take Out: ':'▶ Take In: '}${hk.template}">
+        <span class="mx-icon">${onAir ? '■' : '▶'}</span>
+        <span class="mx-label" style="${onAir ? 'color:var(--red)' : ''}">${hk.label}</span>
+        <span class="mx-dur">${hk.template}</span>
+        ${onAir ? '<div class="mx-prog"><div class="mx-prog-fill" style="width:100%"></div></div>' : ''}
+      </button>
+      <div style="display:flex;gap:1px">
+        <button class="mx-btn" style="flex:1;min-height:18px;padding:2px 4px;font-size:8px;color:var(--dim)" onclick="hotkeyEdit('${hk.id}')">✎</button>
+        <button class="mx-btn" style="flex:1;min-height:18px;padding:2px 4px;font-size:8px;color:var(--red)" onclick="hotkeyDelete('${hk.id}')">✕</button>
+      </div>
     </div>`;
-  }).join('');
+  }).join('') + newCard;
 }
 
 function hotkeyAdd() {
@@ -12114,6 +12257,12 @@ function _prompt(msg, defaultVal=''){
   <div class="modal-box" style="max-width:400px;min-width:280px">
     <div id="dialog-body"></div>
   </div>
+</div>
+
+<!-- Emoji Picker Popup -->
+<div id="emoji-picker">
+  <div id="emoji-picker-grid"></div>
+  <button id="emoji-picker-clear" onclick="_emojiPickerClear()">✕ Löschen</button>
 </div>
 
 </body>

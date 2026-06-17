@@ -22,7 +22,7 @@ launch = (
     f' ! rtph264pay name=pay0 pt=96'
     f' audiotestsrc wave=sine freq=1000 is-live=true'
     f' ! audio/x-raw,rate=48000,channels=2'
-    f' ! audioconvert ! avenc_aac ! rtpmp4apay name=pay1 pt=97 )'
+    f' ! audioconvert ! opusenc ! rtpopuspay name=pay1 pt=97 )'
 )
 
 server  = GstRtspServer.RTSPServer.new()
