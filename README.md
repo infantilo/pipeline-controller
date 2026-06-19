@@ -31,6 +31,8 @@ Pipeline Controller is a complete **broadcast playout system** built on the open
 - 🌐 **Full REST API**, SSE event stream, and **HTTPS support**
 - 🕐 **PTP clock support** (IEEE 1588 / SMPTE 2110) and DST-safe scheduling
 - 🌍 **Bilingual UI** (English / German) with light/dark mode
+- 📺 **Multi-channel supervisor** — run several independent channels/playlists per host (e.g. a main channel + a sign-language variant), each with its own data dir/port, with a central dashboard
+- 🔗 **ChannelBus cross-channel triggers** — send NEXT/NEXT_LIVE/JUMP/CUT commands between channels (or hosts), including playlist-item-bound trigger children with frame-accurate pre-roll
 
 ---
 
@@ -83,6 +85,13 @@ node server.js
 ```
 
 Then open in your browser: **http://localhost:3000**
+
+### Option 4: Multi-channel (several playlists on one host)
+
+```bash
+node supervisor.js channels.json
+```
+Opens a dashboard at **http://localhost:3099** listing all configured channels, each running as its own isolated `server.js` process (own port, own data dir). See [Multi-Channel Operation](./HANDBUCH.html#multi-channel) in the manual.
 
 ---
 
@@ -236,7 +245,9 @@ The plain HTTP port stays active in parallel (useful for local access).
 
 ```
 pipeline-controller/
-├── server.js               # Main server
+├── server.js               # Main server (one process = one channel)
+├── supervisor.js           # Multi-channel supervisor + dashboard
+├── channels.json           # Multi-channel config (id/dataDir/port per channel)
 ├── ui.html                 # Web interface (SPA)
 ├── settings.json           # Settings (auto-generated)
 ├── audio_config.json       # Audio groups + presets + clock
@@ -249,6 +260,7 @@ pipeline-controller/
 │   ├── PlaylistEngine.js
 │   ├── GrafixEngine.js
 │   ├── VoiceoverEngine.js
+│   ├── ChannelBus.js       # Cross-channel/cross-host trigger bus
 │   └── ...
 ├── plugins/                # Plugin system
 │   ├── broadcast-controller/
@@ -271,6 +283,8 @@ pipeline-controller/
 - 🎬 [Getting started](./HANDBUCH.html#start)
 - 📦 [Installer package (recommended)](./HANDBUCH.html#installation-installer)
 - 🔒 [HTTPS / TLS setup](./HANDBUCH.html#https)
+- 📺 [Multi-channel operation & supervisor dashboard](./HANDBUCH.html#multi-channel-supervisor)
+- 🔗 [ChannelBus cross-channel triggers](./HANDBUCH.html#multi-channel-bus)
 - 👥 [User management & roles](./HANDBUCH.html#user-management)
 - ⌨️ [Keyboard shortcuts](./HANDBUCH.html#shortcuts)
 - 🔊 [Audio configuration](./HANDBUCH.html#audio-config)

@@ -12,7 +12,7 @@ process.env.GST_GL_API = 'none';
   if (process.env.GST_DEBUG) return; // bereits via Env gesetzt → nicht überschreiben
   const fs   = require('fs');
   const path = require('path');
-  const settingsPath = path.join(__dirname, 'settings.json');
+  const settingsPath = path.join(process.env.PC_DATA_DIR || __dirname, 'settings.json');
   try {
     const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     if (s.gstDebugFilter) {
@@ -35,12 +35,18 @@ const { PreviewPipeline } = require('./lib/PreviewPipeline');
 const PipelineDebugger   = require('./lib/PipelineDebugger');
 const GrafixEngine       = require('./lib/GrafixEngine');
 const DiagnosticBundle   = require('./lib/DiagnosticBundle');
+const ChannelBus         = require('./lib/ChannelBus');
 
 // ── AppImage: schreibbares Arbeitsverzeichnis (außerhalb des read-only squashfs) ─
 const _appImageWorkDir = process.env.APPDIR
   ? path.join(process.env.XDG_DATA_HOME || path.join(process.env.HOME || '~', '.local', 'share'), 'pipeline-controller')
   : null;
+// PC_DATA_DIR: vom Multi-Channel-Supervisor (siehe supervisor.js) gesetzt, damit mehrere
+// Channel-Prozesse auf demselben Host eigene settings.json/library.json/playlists/ etc.
+// haben statt sich das Repo-Root zu teilen. Hat Vorrang vor AppImage-Erkennung.
+const _instanceDir = process.env.PC_DATA_DIR || null;
 function _writablePath(relPath) {
+  if (_instanceDir) return path.join(_instanceDir, relPath);
   return _appImageWorkDir ? path.join(_appImageWorkDir, relPath) : path.join(__dirname, relPath);
 }
 
@@ -966,7 +972,7 @@ transitionEngine._log = (m, l) => log(`[trans] ${m}`, l, 'playlist');
 const PluginHost = require('./lib/PluginHost');
 const pluginHost = new PluginHost({
   pluginsDir:  path.join(__dirname, 'plugins'),
-  configPath:  path.join(__dirname, 'plugins.json'),
+  configPath:  _writablePath('plugins.json'),
   log:         (msg, lvl) => log(msg, lvl, 'plugins'),
   getState:    () => getState(),
   getPlaylist: () => playlist?.playlist || [],
@@ -1062,6 +1068,23 @@ if (_settings.testRtsp?.enabled) {
   setTimeout(() => _rtspTestStart(_settings.testRtsp), 1000);
 }
 
+// ── ChannelBus: Cross-Channel/Cross-Host Trigger + Sync (siehe lib/ChannelBus.js) ─
+// Nur aktiv wenn explizit konfiguriert (_settings.channelBus.enabled) — ohne Config
+// verhält sich der Channel exakt wie bisher (kein offener Port, keine Peer-Connects).
+let channelBus = null;
+const _cbCfg = _settings.channelBus;
+if (_cbCfg?.enabled) {
+  channelBus = new ChannelBus({
+    id:         _cbCfg.channelId || _settings.channelName || 'CHANNEL',
+    groups:     _cbCfg.groups     || [],
+    listenPort: _cbCfg.listenPort || null,
+    peers:      _cbCfg.peers      || [],
+    log: (msg, level) => log(msg, level, 'channelbus'),
+  });
+  channelBus.start();
+  channelBus.on('peer-connected', d => log(`ChannelBus Peer verbunden: ${d.id} [${(d.groups||[]).join(',')}]`, 'info', 'channelbus'));
+}
+
 const playlist = new PlaylistEngine(master, players, transitionEngine, {
   mediaDir:         MEDIA_DIR,
   gapSource:        _settings.gapSource || 'black',
@@ -1075,6 +1098,7 @@ const playlist = new PlaylistEngine(master, players, transitionEngine, {
   grafixEngine,
   voiceoverEngine,
   recordEngine,
+  channelBus,
   liveSources:      _settings.liveSources     || [],
   liveCueMode:      _settings.liveCueMode     || 'timed',   // 'asap' | 'timed'
   liveCueLeadSec:   _settings.liveCueLeadSec  ?? 5,         // Sekunden Vorlauf für 'timed'
@@ -2343,6 +2367,35 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     return json(res, { ok: true, restartRequired: restartHint });
   }
 
+  // ── ChannelBus API (Cross-Channel/Cross-Host Trigger, siehe lib/ChannelBus.js) ─
+  if (meth === 'GET' && p === '/api/config/channelbus') {
+    return json(res, {
+      enabled:    !!_cbCfg?.enabled,
+      channelId:  _cbCfg?.channelId  || _settings.channelName || '',
+      groups:     _cbCfg?.groups     || [],
+      listenPort: _cbCfg?.listenPort || null,
+      peers:      _cbCfg?.peers      || [],
+      connectedPeers: channelBus
+        ? [...channelBus._sockets.values()].filter(m => m.id).map(m => ({ id: m.id, groups: m.groups }))
+        : [],
+    });
+  }
+  if (meth === 'POST' && p === '/api/config/channelbus') {
+    const sess = _requireAuth(req, res, ['admin']); if (sess === false) return;
+    const b = await parseBody(req);
+    _settings.channelBus = {
+      enabled:    !!b.enabled,
+      channelId:  b.channelId  || '',
+      groups:     Array.isArray(b.groups) ? b.groups : [],
+      listenPort: b.listenPort ? parseInt(b.listenPort) : null,
+      peers:      Array.isArray(b.peers) ? b.peers.map(pr => ({ host: String(pr.host||''), port: parseInt(pr.port) })) : [],
+    };
+    saveSettings(_settings);
+    _userLog(sess, 'config.save', 'channelbus');
+    // Restart erforderlich: ChannelBus-Verbindungen werden nur beim Server-Start aufgebaut.
+    return json(res, { ok: true, restartRequired: true });
+  }
+
   // ── Library Segments API ───────────────────────────────────────────────────
   if (meth === 'GET' && p.startsWith('/api/library/') && p.endsWith('/segments')) {
     const file = decodeURIComponent(p.slice('/api/library/'.length, -'/segments'.length));
@@ -3011,7 +3064,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   if (meth === 'GET' && p === '/api/debug/bundle') {
     const text = DiagnosticBundle.collect({
       settings: _settings, masterOpts, master, debugger_, logs,
-      workDir: _appImageWorkDir || __dirname,
+      workDir: _instanceDir || _appImageWorkDir || __dirname,
     });
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end(text);
@@ -3020,7 +3073,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   // Letzter automatisch erkannter Prozess-Absturz (geschrieben von
   // scripts/collect-crash-diagnostics.sh über den AppRun-Restart-Loop).
   if (meth === 'GET' && p === '/api/debug/lastcrash') {
-    const text = DiagnosticBundle.readLastCrash(_appImageWorkDir || __dirname);
+    const text = DiagnosticBundle.readLastCrash(_instanceDir || _appImageWorkDir || __dirname);
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end(text || '(kein Crash-Report vorhanden)');
   }
@@ -3206,12 +3259,14 @@ server.listen(PORT, () => {
 
 process.on('SIGTERM', async () => {
   pluginHost.dispatch('system:shutdown', {});
+  channelBus?.stop();
   const t = setTimeout(() => process.exit(1), 5000); t.unref();
   await pluginHost.destroy().catch(()=>{});
   clearTimeout(t); process.exit(0);
 });
 process.on('SIGINT', async () => {
   pluginHost.dispatch('system:shutdown', {});
+  channelBus?.stop();
   const t = setTimeout(() => process.exit(1), 5000); t.unref();
   await pluginHost.destroy().catch(()=>{});
   clearTimeout(t); process.exit(0);

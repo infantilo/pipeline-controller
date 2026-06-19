@@ -253,6 +253,11 @@
   <a href="#start">Starten</a>
   <a href="#https">HTTPS / TLS</a>
 
+  <div class="nav-section">Multi-Channel-Betrieb</div>
+  <a href="#multi-channel">Übersicht &amp; Architektur</a>
+  <a href="#multi-channel-supervisor">Supervisor &amp; Dashboard</a>
+  <a href="#multi-channel-bus">ChannelBus &amp; Trigger</a>
+
   <div class="nav-section">Konfiguration</div>
   <a href="#einstellungen">Einstellungen (UI)</a>
   <a href="#design-sprache">Design &amp; Sprache</a>
@@ -506,6 +511,141 @@ journalctl --user -u pipeline-controller -f</code></pre>
 <pre><code>HTTPS_KEY=/path/to/key.pem HTTPS_CERT=/path/to/cert.pem HTTPS_PORT=3443 node server.js</code></pre>
 
 <p>Nach dem Neustart ist die Web-Oberfläche unter <strong>https://server:3443</strong> erreichbar. Bei selbstsignierten Zertifikaten muss die Browser-Ausnahme einmalig bestätigt werden.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="multi-channel">
+<h2>Multi-Channel-Betrieb: Übersicht &amp; Architektur</h2>
+<p>Eine DeckLink-IP-100-Karte (oder ähnliche Multi-I/O-Hardware) hat mehrere physische Ein-/Ausgänge. Pipeline Controller kann pro Host <strong>mehrere unabhängige Channels/Playlisten parallel</strong> betreiben – jeder Channel ist ein eigenständiger <code>server.js</code>-Prozess mit eigenem DeckLink-Device, eigenen Daten (<code>settings.json</code>, <code>library.json</code>, Playlisten) und eigenem Web-Port.</p>
+
+<h3>Warum ein eigener Prozess pro Channel?</h3>
+<p>gst-kit's natives GStreamer-Addon ist nicht <code>worker_thread</code>-sicher (siehe Plugin-System), deshalb läuft jeder Channel als vollständig isolierter Node-Prozess (<code>child_process.fork()</code>). Ein Absturz eines Channels (z.B. durch eine defekte Mediendatei) hat <strong>keine Auswirkung</strong> auf die anderen laufenden Channels.</p>
+
+<h3>Typischer Anwendungsfall: Hauptkanal + Variante</h3>
+<p>Beispiel: <strong>ORF2</strong> spielt das Hauptprogramm, <strong>ORF2E</strong> spielt dasselbe Programm mit Gebärdensprachdolmetsch. Beide laufen als eigene Channel-Prozesse auf demselben Rechner (oder auf getrennten Rechnern für Redundanz). Beim Wegstieg von ORF2 in ein Live-Ereignis muss ORF2E synchron mitschalten – dafür sorgt der <a href="#multi-channel-bus">ChannelBus</a>.</p>
+<p>Ein weiterer Anwendungsfall: eine <strong>Regionalvariante</strong>, die inhaltlich identisch zur Hauptliste läuft, aber in Werbeblöcken eigene Spots einspielt.</p>
+
+<h3>Architekturdiagramm</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│  Browser → Supervisor-Dashboard (http://host:3099)           │
+│  Übersicht aller Channels, Start/Stop/Restart, "UI öffnen"   │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ fork() + Health-Monitoring
+        ┌──────────────────┼──────────────────┐
+        ▼                                     ▼
+┌───────────────────┐                ┌───────────────────┐
+│ server.js (ORF2)   │  ChannelBus    │ server.js (ORF2E)  │
+│ PORT=3000           │◄──── TCP ────►│ PORT=3010           │
+│ PC_DATA_DIR=orf2/    │  Trigger/Sync  │ PC_DATA_DIR=orf2e/   │
+│ DeckLink Device 0   │                │ DeckLink Device 1   │
+└───────────────────┘                └───────────────────┘</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="multi-channel-supervisor">
+<h2>Supervisor &amp; Dashboard</h2>
+<p><code>supervisor.js</code> startet und überwacht mehrere <code>server.js</code>-Instanzen und bietet ein zentrales Web-Dashboard zur Verwaltung. Es ersetzt nicht den einzelnen Channel – jeder Channel bleibt über seinen eigenen Port erreichbar – sondern dient als <strong>Einstiegspunkt</strong>, von dem aus alle Channels gestartet, gestoppt und geöffnet werden können.</p>
+
+<h3>channels.json</h3>
+<p>Liste der Channels, relativ zum Repo-Root oder absolut. Wird beim Anlegen/Entfernen von Channels über das Dashboard automatisch aktualisiert.</p>
+<pre><code>[
+  { "id": "ORF2",  "dataDir": "channels/orf2",  "port": 3000, "grafikPort": 3101 },
+  { "id": "ORF2E", "dataDir": "channels/orf2e", "port": 3010, "grafikPort": 3111 }
+]</code></pre>
+<table>
+  <tr><th>Feld</th><th>Beschreibung</th></tr>
+  <tr><td><code>id</code></td><td>Eindeutige Channel-ID (auch als ChannelBus-Adresse verwendet)</td></tr>
+  <tr><td><code>dataDir</code></td><td>Eigenes Datenverzeichnis des Channels (<code>settings.json</code>, <code>library.json</code>, <code>playlists/</code>, …) – wird beim ersten Start automatisch angelegt</td></tr>
+  <tr><td><code>port</code></td><td>HTTP-Port der Web-Oberfläche dieses Channels</td></tr>
+  <tr><td><code>grafikPort</code></td><td>Port des oGraf-Template-Servers (Default: <code>port + 100</code>)</td></tr>
+  <tr><td><code>env</code></td><td>(optional) Zusätzliche/überschreibende Umgebungsvariablen, z.B. für Hardware-spezifische Overrides</td></tr>
+</table>
+
+<h3>Starten</h3>
+<pre><code>node supervisor.js channels.json
+<span class="comment"># Dashboard:</span> http://localhost:3099</code></pre>
+<p>Eine leere oder fehlende <code>channels.json</code> ist erlaubt – Channels lassen sich dann ausschließlich über das Dashboard-Formular anlegen.</p>
+
+<h3>Dashboard-Funktionen</h3>
+<table>
+  <tr><th>Funktion</th><th>Beschreibung</th></tr>
+  <tr><td>Status-Übersicht</td><td>Alle Channels mit Status (<code>running</code>/<code>starting</code>/<code>restarting</code>/<code>stopped</code>/<code>crashed</code>), PID, Port, Restart-Zähler – Auto-Refresh alle 2s</td></tr>
+  <tr><td><strong>UI öffnen</strong></td><td>Öffnet die Web-Oberfläche des jeweiligen Channels in neuem Tab (eigener Port – kein gemeinsamer Reverse-Proxy)</td></tr>
+  <tr><td>Start / Stop / Restart</td><td>Pro Channel einzeln steuerbar</td></tr>
+  <tr><td>Channel hinzufügen</td><td>Formular (ID, Data-Dir, Port, Grafik-Port) → legt Channel an, startet ihn sofort, persistiert in <code>channels.json</code></td></tr>
+  <tr><td>Channel entfernen</td><td>Stoppt den Prozess und entfernt den Eintrag aus <code>channels.json</code></td></tr>
+</table>
+
+<h3>Crash-Recovery</h3>
+<p>Stürzt ein Channel-Prozess ab (Exit-Code ≠ 0 oder Signal), startet der Supervisor ihn nach 3 Sekunden automatisch neu (festes Intervall, kein Backoff). Andere laufende Channels bleiben dabei unberührt. Bei explizitem Stop über das Dashboard erfolgt <strong>kein</strong> automatischer Neustart.</p>
+
+<h3>Relevante Umgebungsvariablen</h3>
+<table>
+  <tr><th>Variable</th><th>Standard</th><th>Beschreibung</th></tr>
+  <tr><td><code>SUPERVISOR_PORT</code></td><td><code>3099</code></td><td>HTTP-Port des Supervisor-Dashboards</td></tr>
+  <tr><td><code>PC_DATA_DIR</code></td><td>Repo-Root</td><td>Wird vom Supervisor pro Channel automatisch gesetzt – überschreibt den Speicherort von <code>settings.json</code>/<code>library.json</code>/<code>playlists/</code> etc., damit Channels sich nicht gegenseitig überschreiben. Im Single-Channel-Betrieb (ohne Supervisor) nicht gesetzt → Standardverhalten unverändert.</td></tr>
+</table>
+
+<p><strong>Hinweis:</strong> Es gibt aktuell keinen gemeinsamen Port für alle Channel-UIs (kein Reverse-Proxy) – jeder Channel bleibt unter seinem eigenen Port erreichbar. Das Dashboard ist der zentrale Einstiegspunkt, von dem aus man zu den einzelnen Channel-UIs verlinkt.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="multi-channel-bus">
+<h2>ChannelBus &amp; Trigger</h2>
+<p>Der <strong>ChannelBus</strong> (<code>lib/ChannelBus.js</code>) verbindet mehrere Channel-Prozesse – auf demselben Host <em>oder über mehrere Hosts hinweg</em> (Redundanz-Setups) – über einfache TCP-Verbindungen. Damit lassen sich Befehle wie <code>NEXT</code>, <code>NEXT_LIVE</code>, <code>JUMP</code>, <code>CUT</code> von einer Playlist zu einer anderen schicken.</p>
+
+<h3>Adressierung: Gruppen statt feste IDs</h3>
+<p>Jeder Channel kann einer oder mehreren <strong>Gruppen</strong> angehören. Ein Trigger wird an eine Gruppe gesendet, nicht an eine feste Channel-ID – die Hauptliste muss damit ihre "Follower" nicht namentlich kennen.</p>
+
+<h3>Aktivierung in settings.json</h3>
+<pre><code>{
+  "channelBus": {
+    "enabled": true,
+    "channelId": "ORF2",
+    "groups": [],
+    "listenPort": 17801,
+    "peers": [{ "host": "10.0.0.5", "port": 17802 }]
+  }
+}</code></pre>
+<table>
+  <tr><th>Feld</th><th>Beschreibung</th></tr>
+  <tr><td><code>enabled</code></td><td>ChannelBus aktivieren (ohne diese Einstellung verhält sich der Channel unverändert – kein offener Port)</td></tr>
+  <tr><td><code>channelId</code></td><td>Eigene Adresse im Bus (Default: <code>channelName</code>)</td></tr>
+  <tr><td><code>groups</code></td><td>Gruppen-Mitgliedschaften, z.B. <code>["orf2-followers"]</code></td></tr>
+  <tr><td><code>listenPort</code></td><td>TCP-Port, auf dem dieser Channel auf eingehende Peer-Verbindungen lauscht</td></tr>
+  <tr><td><code>peers</code></td><td>Ausgehende Verbindungen zu anderen Channels (<code>host</code>/<code>port</code>) – mit automatischem Reconnect bei Abbruch</td></tr>
+</table>
+<p>Änderungen wirken erst nach Neustart (Verbindungen werden nur beim Prozessstart aufgebaut). Konfigurierbar über die UI (<strong>Einstellungen</strong>) oder direkt per <code>GET</code>/<code>POST /api/config/channelbus</code>.</p>
+
+<h3>Trigger als Playlist-Event-Children</h3>
+<p>Ein Trigger lässt sich direkt an ein Playlist-Item hängen – als <strong>Child-Event</strong>, zeitlich exakt geplant wie Grafik- oder Voiceover-Children (inklusive negativem Delay für Pre-Roll, z.B. um eine Sekunde vor dem eigentlichen Umschnitt zu feuern):</p>
+<pre><code>{
+  "source": "trigger",
+  "trigger": {
+    "targetGroup": "orf2-followers",
+    "type": "NEXT_LIVE",
+    "delayFrames": -50,
+    "payload": { "reason": "live-in" }
+  }
+}</code></pre>
+<table>
+  <tr><th>Feld</th><th>Beschreibung</th></tr>
+  <tr><td><code>targetGroup</code> / <code>target</code></td><td>Zielgruppe bzw. feste Channel-ID</td></tr>
+  <tr><td><code>type</code></td><td>Befehl: <code>NEXT</code>, <code>JUMP</code>, <code>FORCE_JUMP</code>, <code>NEXT_LIVE</code>, <code>CUT</code>, <code>STOP</code>, <code>PLAY</code></td></tr>
+  <tr><td><code>delayFrames</code> / <code>delay</code></td><td>Zeitpunkt relativ zum Clip-Start (negativ = Pre-Roll, vor dem eigentlichen Start)</td></tr>
+  <tr><td><code>endOffsetFrames</code> / <code>endOffset</code></td><td>Zeitpunkt relativ zum Clip-Ende (negativ = davor)</td></tr>
+  <tr><td><code>payload</code></td><td>Beliebige Zusatzdaten, die beim Empfänger ankommen</td></tr>
+</table>
+
+<h3>Verhalten beim Empfänger</h3>
+<p><code>index</code>/<code>slotId</code> im Payload referenzieren immer die <strong>eigene</strong> Playlist des Empfänger-Channels – jeder Channel hat eine eigenständige Item-Indizierung. <code>NEXT_LIVE</code> ohne explizites <code>payload.index</code> sucht automatisch das nächste eigene Live-Event ab der aktuellen Position: die Hauptliste muss also nur "jetzt Live" signalisieren, der Follower-Channel kennt seinen eigenen Live-Slot selbst.</p>
+
+<h3>Beispiel ORF2 / ORF2E</h3>
+<ol>
+  <li>ORF2-Playlist hat am Live-Event ein Trigger-Child: <code>targetGroup: "orf2-followers"</code>, <code>type: "NEXT_LIVE"</code>.</li>
+  <li>ORF2E ist Mitglied der Gruppe <code>orf2-followers</code> und hat in seiner eigenen Playlist ein Live-Event für den Gebärdendolmetsch-Feed.</li>
+  <li>Beim Wegstieg in ORF2 feuert der Trigger, ORF2E schaltet synchron auf seinen eigenen Live-Slot um.</li>
+</ol>
 </section>
 
 <!-- ─────────────────────────────────────────────────────────────────────────── -->
