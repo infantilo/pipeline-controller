@@ -7,13 +7,13 @@
   --bg:#0d0d0d;--bg2:#141414;--bg3:#1a1a1a;--bg4:#222;
   --border:#2e2e2e;--accent:#f0a830;--accent2:#5aabff;
   --green:#4ec94e;--red:#f05050;--yellow:#ffd040;--orange:#ffaa33;
-  --text:#ddd;--dim:#777;--mono:'JetBrains Mono','Fira Code',monospace;
+  --text:#ddd;--dim:#777;--dim-lt:#999;--mono:'JetBrains Mono','Fira Code',monospace;
   --col-play:#4ec94e;--col-cued:#5aabff;--col-cueing:#ffc832;
   --pl-bg:var(--bg2);--prep-bg:var(--bg2);
 }
 :root.light{
   --bg:#e4e4e4;--bg2:#f2f2f2;--bg3:#d8d8d8;--bg4:#c4c4c4;
-  --border:#a6a6a6;--text:#111111;--dim:#484848;
+  --border:#a6a6a6;--text:#111111;--dim:#484848;--dim-lt:#2e2e2e;
   /* semantic colours shifted darker so they read on light backgrounds */
   --col-play:#1a7a1a;--col-cued:#1058a8;--col-cueing:#926000;
   --yellow:#7a5500;--red:#be1a1a;--green:#1a7a1a;--orange:#9e4200;
@@ -130,7 +130,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
 /* Switcher */
 .sw-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:5px;}
-.sw-btn{background:var(--bg3);border:2px solid var(--border);border-radius:4px;padding:3px;cursor:pointer;text-align:center;transition:border-color .1s;}
+.sw-btn{background:var(--bg3);color:var(--text);border:2px solid var(--border);border-radius:4px;padding:3px;cursor:pointer;text-align:center;transition:border-color .1s;}
 .sw-btn:hover{border-color:#444;}
 .sw-btn.active{border-color:var(--accent);}
 .sw-btn.onair{border-color:var(--red);background:rgba(240,80,80,.07);}
@@ -140,7 +140,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
 /* Video Mixer */
 .mx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:4px;margin-bottom:6px;}
-.mx-btn{background:var(--bg3);border:2px solid var(--border);border-radius:4px;padding:5px 4px 4px;cursor:pointer;text-align:center;transition:border-color .15s,background .15s;display:flex;flex-direction:column;align-items:center;min-height:62px;position:relative;}
+.mx-btn{background:var(--bg3);color:var(--text);border:2px solid var(--border);border-radius:4px;padding:5px 4px 4px;cursor:pointer;text-align:center;transition:border-color .15s,background .15s;display:flex;flex-direction:column;align-items:center;min-height:62px;position:relative;}
 .mx-btn:hover{border-color:#555;}
 .mx-btn.active{border-color:var(--accent);background:rgba(99,102,241,.07);}
 .mx-btn.mx-onair{border-color:var(--red)!important;background:rgba(240,80,80,.1)!important;animation:mx-pulse 1.4s ease-in-out infinite;}
@@ -1212,6 +1212,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <!-- Audio-Gruppen -->
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
         <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1" data-i18n="cfg.audio.groups">Output-Gruppen</span>
+        <button class="btn" style="font-size:10px" onclick="cfgDiscoverDecklinkSinks()" data-i18n="btn.discoverDecklinkSinks">🔍 DeckLink-Ausgang suchen</button>
         <button class="btn" style="font-size:10px" onclick="cfgAddGroup()" data-i18n="cfg.audio.addGroup">＋ Gruppe</button>
       </div>
       <div id="cfg-groups-list" style="margin-bottom:12px"></div>
@@ -1280,7 +1281,10 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
     <!-- ── TAB: VIDEO ─────────────────────────────────────────────── -->
     <div id="cfg-panel-video" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.video.output">Video-Output</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;flex:1" data-i18n="cfg.video.output">Video-Output</span>
+        <button class="btn" style="font-size:10px" onclick="cfgDiscoverDecklinkSinks()" data-i18n="btn.discoverDecklinkSinks">🔍 DeckLink-Ausgang suchen</button>
+      </div>
       <div class="fld"><label data-i18n="cfg.video.sink">Video-Sink</label>
         <select id="cfg-video-sink">
           <option value="autovideosink">Auto (detect)</option>
@@ -1763,6 +1767,22 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <button class="btn" style="flex:1;font-size:10px" onclick="setGstDebugFilter(true)">✕ Aus</button>
       </div>
       <div id="gst-debug-current" style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:5px;padding:4px 6px;background:var(--bg3);border-radius:3px;border:1px solid var(--border)">Aktuell: —</div>
+
+      <div class="sep"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:8px 0 6px">Diagnose-Bundle (für Remote-Support)</div>
+      <div style="font-size:10px;color:var(--dim);line-height:1.5;margin-bottom:6px">
+        Sammelt System-/GStreamer-/DeckLink-Status, aktuelle Pipeline und letzte Logs in EINEM kopierbaren Text.
+        Kein Terminal, kein Datei-Transfer nötig — einfach Text markieren und weitergeben.
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:6px">
+        <button class="btn btn-p" style="flex:1;font-size:10px" onclick="loadDiagBundle()">📦 Diagnose-Bundle erzeugen</button>
+        <button class="btn" style="flex:1;font-size:10px" onclick="loadLastCrash()">⚠ Letzter Absturz</button>
+      </div>
+      <textarea id="diag-bundle-out" readonly placeholder="— noch nicht erzeugt —"
+        style="width:100%;height:220px;font-family:var(--mono);font-size:9px;color:var(--dim);background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:6px;white-space:pre;resize:vertical"></textarea>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="btn" style="flex:1;font-size:10px" onclick="copyDiagBundle()">📋 In Zwischenablage kopieren</button>
+      </div>
     </div>
 
     <!-- ── TAB: USERS ────────────────────────────────────────────── -->
@@ -2458,6 +2478,7 @@ function _connectSSE(){
   sse.addEventListener('state',e=>{
     const d=JSON.parse(e.data);
     const prevSlots=JSON.stringify(S.config?.slotIds);
+    const prevLiveSrc=JSON.stringify(S.config?.liveSources);
     Object.assign(S.master,d.master||{});
     Object.assign(S.playlist,d.playlist||{});
     Object.assign(S.config,d.config||{});
@@ -2481,6 +2502,8 @@ function _connectSSE(){
       _renderSwitcherGrid();
       _renderPlayerCards();
       _renderVoCards();
+    } else if(JSON.stringify(S.config?.liveSources)!==prevLiveSrc){
+      _renderSwitcherGrid();
     }
     updateAll();renderPl();
   });
@@ -2530,6 +2553,8 @@ sse.addEventListener('grafik',e=>{
     S._dlSignal=JSON.parse(e.data);
     // Re-render playlist so signal badges update
     if(S.plData?.length) renderPl();
+    // Re-render Live-Sources-Editor so the detected-format readout updates
+    if(document.getElementById('cfg-panel-live')?.style.display!=='none' && _liveRows?.length) _renderLiveList();
   });
   sse.addEventListener('playlist',e=>{
     // Unterdrücken wenn ein savePl() noch aussteht (Zähler)
@@ -3175,6 +3200,10 @@ function _swPadLabel(pad){
   if(pad===N)   return 'SMPTE';
   if(pad===N+1) return 'BLACK';
   if(pad===N+2) return 'IMAGE';
+  if(pad>=N+5){
+    const l=(S.config?.liveSources||[])[pad-(N+5)];
+    if(l) return (l.label||l.id).toUpperCase();
+  }
   return String(pad);
 }
 
@@ -3184,6 +3213,7 @@ function _renderSwitcherGrid(){
   const slots=S.config?.slotIds||['player1','player2'];
   const N=slots.length;
   const backupSlot=S.config?.backupSlot||null;
+  const liveSrcs=S.config?.liveSources||[];
   const btns=[
     ...slots.map((id,i)=>{
       const isBck=id===backupSlot;
@@ -3196,8 +3226,16 @@ function _renderSwitcherGrid(){
     `<div class="sw-btn" id="sw-${N}"   data-slot="playerSmpte" onclick="switchTo(${N})">  <span class="sw-icon">📺</span><span class="sw-label">SMPTE</span><span class="sw-sub">Testbild</span></div>`,
     `<div class="sw-btn" id="sw-${N+1}" data-slot="playerBlack" onclick="switchTo(${N+1})"><span class="sw-icon">⬛</span><span class="sw-label">BLACK</span><span class="sw-sub">Schwarz</span></div>`,
     `<div class="sw-btn" id="sw-${N+2}" data-slot="playerImage" onclick="switchTo(${N+2})"><span class="sw-icon">🖼</span><span class="sw-label">IMAGE</span><span class="sw-sub" id="sw${N+2}-sub">Standbild</span></div>`,
+    ...liveSrcs.map(l=>
+      `<div class="sw-btn" id="sw-live-${l.id}" data-live="${l.id}" onclick="switchLive('${l.id}')">
+        <span class="sw-icon">${l.icon||'📡'}</span>
+        <span class="sw-label">${(l.label||l.id).toUpperCase()}</span>
+        <span class="sw-sub">LIVE</span>
+      </div>`
+    ),
   ];
   grid.innerHTML=btns.join('');
+  updateSw();
 
   // VO-Player im Switcher — Basis-Struktur rendern, State via _updateVoSw() setzen
   const voSlots=S.config?.voSlotIds||[];
@@ -3339,6 +3377,12 @@ function _renderPlayerCards(){
   }).join('');
 }
 
+async function switchLive(id){
+  const r=await apiFetch('/api/switch/live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  const d=await r?.json();
+  if(!d?.ok) showToast('❌ '+(d?.error||'Fehler'));
+}
+
 function updateSw(){
   const p=S.master.activePad;
   const slots=S.config?.slotIds||['player1','player2'];
@@ -3349,6 +3393,13 @@ function updateSw(){
     el.classList.toggle('active',i===p);
     el.classList.toggle('onair',i===p&&S.master.running);
   }
+  (S.config?.liveSources||[]).forEach((l,i)=>{
+    const el=document.getElementById(`sw-live-${l.id}`);
+    if(!el) return;
+    const padIdx=N+5+i;
+    el.classList.toggle('active',padIdx===p);
+    el.classList.toggle('onair',padIdx===p&&S.master.running);
+  });
   document.getElementById('onair-txt').textContent=S.master.running?`ON AIR: ${_swPadLabel(p)}`:'—';
 }
 function updateSwSub(slotId){
@@ -3466,6 +3517,40 @@ function _mxFmtTime(ms) {
   return `${m}:${String(s % 60).padStart(2,'0')}`;
 }
 
+// Clamp a user-picked hex color's lightness so it stays readable as text
+// on the current theme's button background (dark buttons need light text,
+// light buttons need dark text) while keeping the hue for asset identity.
+function _readableColor(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return hex || 'var(--text)';
+  const r = parseInt(m[1].slice(0,2),16)/255, g = parseInt(m[1].slice(2,4),16)/255, b = parseInt(m[1].slice(4,6),16)/255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  let h=0, s=0; const l=(max+min)/2;
+  if (max !== min) {
+    const d = max-min;
+    s = l>0.5 ? d/(2-max-min) : d/(max+min);
+    if (max===r) h = ((g-b)/d + (g<b?6:0));
+    else if (max===g) h = (b-r)/d + 2;
+    else h = (r-g)/d + 4;
+    h/=6;
+  }
+  const isLight = document.documentElement.classList.contains('light');
+  const minL = isLight ? 0 : 0.55;
+  const maxL = isLight ? 0.45 : 1;
+  const l2 = Math.min(maxL, Math.max(minL, l));
+  if (l2 === l) return hex;
+  const hue2rgb = (p,q,t) => { if(t<0)t+=1; if(t>1)t-=1; if(t<1/6)return p+(q-p)*6*t; if(t<1/2)return q; if(t<2/3)return p+(q-p)*(2/3-t)*6; return p; };
+  let r2,g2,b2;
+  if (s === 0) { r2=g2=b2=l2; }
+  else {
+    const q = l2<0.5 ? l2*(1+s) : l2+s-l2*s;
+    const p = 2*l2-q;
+    r2 = hue2rgb(p,q,h+1/3); g2 = hue2rgb(p,q,h); b2 = hue2rgb(p,q,h-1/3);
+  }
+  const toHex = v => Math.round(v*255).toString(16).padStart(2,'0');
+  return `#${toHex(r2)}${toHex(g2)}${toHex(b2)}`;
+}
+
 function _mxStartCountdown(asset, startMs) {
   clearInterval(_mxCountdownTimer);
   const durEvs = (asset?.events || []).filter(e => !e._offClipMode);
@@ -3547,6 +3632,7 @@ function _renderAssetPanel() {
 
   assetGrid.innerHTML = assets.map((a, i) => {
     const col        = a.color || '#5aabff';
+    const labelCol   = _readableColor(col);
     const isOnAir    = activeId === a.id;
     const durEvs     = (a.events||[]).filter(e => !e._offClipMode);
     const offEvs     = (a.events||[]).filter(e => e._offClipMode);
@@ -3559,12 +3645,12 @@ function _renderAssetPanel() {
     return `<div style="display:flex;flex-direction:column;gap:1px">` +
       `<button class="mx-btn${onairCls}" style="flex:1;border-color:${isOnAir?'var(--red)':col+'66'}" onclick="cutAsset(${i})" title="CUT: ${a.label||'Asset'}">` +
         `<span class="mx-icon">${a.icon||'🎬'}</span>` +
-        `<span class="mx-label" style="color:${isOnAir?'var(--red)':col}">${a.label||'Asset'}${offTag}</span>` +
+        `<span class="mx-label" style="color:${isOnAir?'var(--red)':labelCol}">${a.label||'Asset'}${offTag}</span>` +
         `<span class="mx-dur${isOnAir?' countdown':''}" id="mx-dur-${a.id}">${cdText}</span>` +
         (isOnAir ? `<div class="mx-prog"><div class="mx-prog-fill" style="width:0%"></div></div>` : '') +
       `</button>` +
       `<div style="display:flex;gap:1px">` +
-        `<button class="mx-btn" title="Asset bearbeiten" style="flex:1;min-height:18px;padding:2px 4px;font-size:8px;color:var(--dim)" onclick="openAssetEditor(${i})">✏ Edit</button>` +
+        `<button class="mx-btn" title="Asset bearbeiten" style="flex:1;min-height:18px;padding:2px 4px;font-size:8px;color:var(--dim-lt)" onclick="openAssetEditor(${i})">✏ Edit</button>` +
         `<button class="mx-btn" title="Asset löschen" style="min-height:18px;padding:2px 6px;font-size:8px;color:var(--red)" onclick="deleteAsset(${i})">✕</button>` +
       `</div>` +
     `</div>`;
@@ -3600,14 +3686,15 @@ function _renderAssetEditorList() {
   }
   body.innerHTML = assets.map((a, i) => {
     const col     = a.color || '#5aabff';
+    const labelCol = _readableColor(col);
     const ocCount = (a.events||[]).filter(e=>e._offClipMode).length;
     const evCount = (a.events||[]).length;
     const evSummary = evCount === 0 ? 'leer'
       : (ocCount > 0 ? `${evCount-ocCount}+${ocCount}OC` : `${evCount} Ev.`);
     return `<div style="background:var(--bg3);border:1px solid ${col}44;border-radius:4px;padding:6px 10px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
-      <span style="color:${col};font-size:14px">${a.icon||'⬛'}</span>
+      <span style="color:${labelCol};font-size:14px">${a.icon||'⬛'}</span>
       <div style="flex:1;min-width:0">
-        <div style="color:${col};font-weight:700;font-size:11px">${a.label||'Asset'}</div>
+        <div style="color:${labelCol};font-weight:700;font-size:11px">${a.label||'Asset'}</div>
         <div style="font-size:9px;color:var(--dim)">${evSummary} · ${a.returnMode||'break'}</div>
       </div>
       <button class="ib" style="font-size:10px" onclick="openAssetEditor(${i});closeModal('asset-editor-list-modal')">✏</button>
@@ -3819,7 +3906,7 @@ function _renderStillButtons() {
       </button>
       <!-- Capture (bottom, smaller) -->
       <button class="mx-btn" title="Aktuelles Bild aufnehmen (Vorschau)"
-        style="min-height:18px;padding:2px 4px;font-size:8px;color:var(--dim);flex-shrink:0"
+        style="min-height:18px;padding:2px 4px;font-size:8px;color:var(--dim-lt);flex-shrink:0"
         onclick="captureStill(${i})">
         📷 aufnehmen
       </button>
@@ -4897,7 +4984,7 @@ function renderPl(){
     const _liveLabel=e.source==='live'?(e.liveSourceLabel||e.liveSource||null):null;
     // DeckLink signal badge — only for live sources whose gstSrc contains decklink
     const _dlSrc=_lsConf&&/decklink/i.test(_lsConf.gstSrc||'')?_lsConf:null;
-    const _dlStatus=_dlSrc?Object.values(S._dlSignal||{}).find(s=>s&&typeof s==='object'):null;
+    const _dlStatus=_dlSrc?(S._dlSignal||{})[_dlSrc.id]:null;
     const _dlBadge=_dlSrc?(_dlStatus?.ok===false
       ?`<span style="font-size:8px;color:var(--red);font-weight:700;margin-left:3px" title="DeckLink: Kein Signal">📡✗</span>`
       :_dlStatus?.ok===true
@@ -5372,7 +5459,7 @@ function _dlSignalOkForEvent(ev) {
   if (!ev) return true;
   const lsConf = (S.config?.liveSources||[]).find(ls=>ls.id===ev.source);
   if (!lsConf || !/decklink/i.test(lsConf.gstSrc||'')) return true;
-  const status = Object.values(S._dlSignal||{}).find(s=>s&&typeof s==='object');
+  const status = (S._dlSignal||{})[lsConf.id];
   return status?.ok !== false; // ok if unknown or confirmed ok
 }
 
@@ -5808,7 +5895,7 @@ function _renderLiveList(){
         <input style="flex:1;font-size:10px" placeholder="Label (z.B. PGM Stereo)" value="${_esc(a.label||'')}"
           oninput="_liveRows[${i}].audioSources[${ai}].label=this.value">
         <select style="font-size:10px;width:60px" onchange="_liveRows[${i}].audioSources[${ai}].channels=+this.value">
-          ${[1,2,4,6,8].map(n=>`<option value="${n}"${a.channels===n?' selected':''}>${n}ch</option>`).join('')}
+          ${[2,8,16].map(n=>`<option value="${n}"${a.channels===n?' selected':''}>${n}ch</option>`).join('')}
         </select>
         <button class="btn" style="font-size:10px;padding:1px 5px" onclick="_liveRows[${i}].audioSources.splice(${ai},1);_renderLiveList()">✕</button>
       </div>
@@ -5818,6 +5905,12 @@ function _renderLiveList(){
     const hasUri    = !!ls.uri;
     const isDL      = /decklink/i.test(ls.gstSrc||'');
     const dlFormats = ['','auto','1080i50','1080i5994','1080i60','1080p25','1080p2997','1080p30','1080p50','1080p5994','1080p60','720p50','720p5994','720p60'];
+    // Tatsächlich verhandeltes Format der Karte (aus negotiated Caps gepollt, siehe
+    // MasterPipeline._parseVideoCaps) — rein die Video-Essence (Auflösung/FPS), nicht
+    // die 2110-Netzwerk-Transportparameter (die sind GStreamer nicht zugänglich).
+    const _detFmt   = isDL ? (S._dlSignal?.[ls.id]?.format||null) : null;
+    const _curFmtStr = `${S.config?.width||1920}x${S.config?.height||1080}@${S.config?.fps||25}`;
+    const _detFmtMatches = _detFmt && `${_detFmt.width}x${_detFmt.height}@${_detFmt.fps}` === _curFmtStr;
     return `
     <div style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px;display:grid;gap:4px">
       <div style="display:flex;gap:4px;align-items:center">
@@ -5847,6 +5940,13 @@ function _renderLiveList(){
           ${dlFormats.map(f=>`<option value="${_esc(f)}"${(ls.videoFormat||'')==f?' selected':''}>${f||'(im gstSrc-Feld)'}</option>`).join('')}
         </select>
         ${ls.videoFormat?`<span style="color:var(--dim);font-family:var(--mono)">video-format=${_esc(ls.videoFormat)}</span>`:''}
+      </div>`:''}
+      ${_detFmt?`<div style="display:flex;gap:6px;align-items:center;font-size:9px;background:var(--bg4);border-radius:2px;padding:3px 5px">
+        <span style="color:var(--dim)">📡 Erkannt (negotiated Caps):</span>
+        <span style="font-family:var(--mono);color:${_detFmtMatches?'var(--green)':'var(--yellow)'}">${_detFmt.width}x${_detFmt.height}@${_detFmt.fps}${_detFmt.interlaced?'i':'p'}</span>
+        ${_detFmtMatches
+          ?`<span style="color:var(--dim);margin-left:auto">= Pipeline-Format</span>`
+          :`<button class="btn" style="font-size:9px;padding:1px 6px;margin-left:auto" onclick="applyDetectedLiveFormat(${_detFmt.width},${_detFmt.height},${_detFmt.fps})" title="Pipeline-Auflösung/Framerate auf das von der Karte erkannte Format setzen (Neustart der Master-Pipeline)">↳ Als Pipeline-Format übernehmen</button>`}
       </div>`:''}
       <div style="border-top:1px solid var(--border);margin-top:2px;padding-top:4px">
         <div style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">
@@ -5895,10 +5995,13 @@ async function liveDiscoverDecklink(){
       label: d.name || `DeckLink ${d.deviceNumber}`,
       uri: '',
       gstSrc: d.gstSrc,
-      videoFormat: '1080i50',
+      // "auto" (Modus-Autodetect) statt eines geratenen festen Modus (z.B. "1080i50") —
+      // ein falscher fixer Modus crasht/blockiert die Pipeline, wenn er nicht exakt
+      // zum tatsächlich eingehenden Signal passt.
+      videoFormat: 'auto',
       inputId: '',
       keepAlive: true,
-      audioSources: d.gstAudioSrc ? [{ label:'Audio', gstSrc: d.gstAudioSrc, channels: d.audioChannels||8 }] : [],
+      audioSources: d.gstAudioSrc ? [{ label:'Audio', gstSrc: d.gstAudioSrc, channels: d.audioChannels||2 }] : [],
     });
     added++;
   }
@@ -5911,10 +6014,20 @@ async function liveSave(){
   const invalid=_liveRows.filter(ls=>!ls.id||(!ls.gstSrc&&!ls.uri));
   if(invalid.length){showToast(`⚠ ${invalid.length} Einträge ohne id, gstSrc oder URI werden ignoriert`);await new Promise(r=>setTimeout(r,1200));}
   if(!await _confirmRestart('Live-Quellen geändert — Pipeline-Neustart zur Aktivierung erforderlich')) return;
+  showToast('⏳ Live-Quellen werden gespeichert — Pipeline wird neu aufgebaut…');
   try {
     const r=await fetch('/api/live-sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({liveSources:valid})}).then(r=>r.json());
-    if(r.ok) showToast('✅ Live-Quellen gespeichert — Neustart läuft…');
-    else showToast('⚠ '+r.error);
+    if(r.ok) showToast('✅ Live-Quellen gespeichert — Pipeline neu aufgebaut');
+    else showToast('⚠ '+(r.error||r.note||'Fehler'));
+  } catch(e){ showToast('⚠ Fehler: '+e.message); }
+}
+
+async function applyDetectedLiveFormat(w,h,fps){
+  if(!await _confirmRestart(`Auflösung/Framerate: ${S.config?.width||1920}x${S.config?.height||1080}@${S.config?.fps||25} → ${w}x${h}@${fps}\n(erkannt von der DeckLink-Karte)`)) return;
+  showToast('⏳ Pipeline-Format wird übernommen — Neustart läuft…');
+  try {
+    const r = await fetch('/api/config/format',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({width:w,height:h,fps})}).then(r=>r.json());
+    showToast(r.ok ? '✅ Pipeline-Format übernommen' : '⚠ '+(r.error||'Fehler'));
   } catch(e){ showToast('⚠ Fehler: '+e.message); }
 }
 
@@ -5997,6 +6110,42 @@ const AUDIO_SINK_OPTS = [
   { value: 'fakesink',     label: 'Fake' },
 ];
 
+// Sucht DeckLink-Ausgänge (Programm-Output, getrennt von Live-Quellen-Discovery)
+// und ergänzt sie als Optionen im Video-Sink-Dropdown sowie in AUDIO_SINK_OPTS
+// für die Output-Gruppen.
+async function cfgDiscoverDecklinkSinks(){
+  let sinks;
+  try { sinks = await fetch('/api/devices/sinks').then(r=>r.json()); }
+  catch(e){ showToast('⚠ Discover fehlgeschlagen: '+e.message); return; }
+  if (!Array.isArray(sinks) || !sinks.length) { showToast('Keine DeckLink-Ausgänge gefunden'); return; }
+
+  // Video-Sink-Dropdown: vorherige DeckLink-Optionen entfernen, neu einfügen
+  const vSel = document.getElementById('cfg-video-sink');
+  if (vSel) {
+    [...vSel.querySelectorAll('option[data-decklink]')].forEach(o=>o.remove());
+    sinks.filter(s=>s.videoSink).forEach(s=>{
+      const o = document.createElement('option');
+      o.value = s.videoSink; o.dataset.decklink = '1';
+      o.textContent = `DeckLink ${s.deviceNumber} (Video-Ausgang)${s.videoModeWarning ? ' ⚠' : ''}`;
+      if (s.videoModeWarning) o.title = s.videoModeWarning;
+      vSel.appendChild(o);
+    });
+  }
+
+  // AUDIO_SINK_OPTS: vorherige DeckLink-Einträge entfernen, neu eintragen
+  for (let i = AUDIO_SINK_OPTS.length - 1; i >= 0; i--) {
+    if (/^decklink-out-/.test(AUDIO_SINK_OPTS[i].value)) AUDIO_SINK_OPTS.splice(i, 1);
+  }
+  sinks.filter(s=>s.audioSink).forEach(s=>{
+    AUDIO_SINK_OPTS.push({ value: s.id, label: `DeckLink ${s.deviceNumber} (Audio-Ausgang)` });
+  });
+  _renderGroupsList();
+
+  const warn = sinks.find(s=>s.videoModeWarning);
+  if (warn) showToast('⚠ ' + warn.videoModeWarning);
+  else showToast(`✅ ${sinks.length} DeckLink-Ausgang/Ausgänge gefunden`);
+}
+
 function _renderGroupsList(){
   const el=document.getElementById('cfg-groups-list');
   if(!el) return;
@@ -6011,7 +6160,9 @@ function _renderGroupsList(){
         ${[1,2,4,6,8].map(n=>`<option value="${n}"${g.channels===n?' selected':''}>${n}ch</option>`).join('')}
       </select>
       <select style="font-size:10px" onchange="cfgGroupChange(${i},'sink',this.value)">
-        ${AUDIO_SINK_OPTS.map(o=>`<option value="${o.value}"${(g.sink||'')=== o.value?' selected':''}>${o.label}</option>`).join('')}
+        ${(AUDIO_SINK_OPTS.some(o=>o.value===(g.sink||''))||!g.sink ? AUDIO_SINK_OPTS
+          : [...AUDIO_SINK_OPTS, {value:g.sink, label:g.sink}]
+        ).map(o=>`<option value="${o.value}"${(g.sink||'')=== o.value?' selected':''}>${o.label}</option>`).join('')}
       </select>
       <button class="btn btn-r" style="font-size:10px;padding:2px 4px" onclick="cfgRemoveGroup(${i})">✕</button>
     </div>`).join('');
@@ -7045,7 +7196,21 @@ function openSettings(){
       ? cfg.idleImagePath.split('/').pop()
       : (S.config?.idleImagePath ? S.config.idleImagePath.split('/').pop() : '');
     document.getElementById('cfg-idle-image').value = imgVal;
-    document.getElementById('cfg-video-sink').value = cfg.videoSink || cfg.current || 'autovideosink';
+    {
+      const vSel = document.getElementById('cfg-video-sink');
+      const want = cfg.videoSink || cfg.current || 'autovideosink';
+      // Discovered DeckLink-Sink-Optionen werden nur zur Laufzeit per Discover-Button
+      // eingefügt — nach Reload/Neustart sind sie weg. Fehlt der gespeicherte Wert in
+      // der Liste, hier provisorisch nachtragen, damit er nicht stillschweigend auf
+      // den ersten Eintrag zurückfällt.
+      if (vSel && ![...vSel.options].some(o => o.value === want)) {
+        const o = document.createElement('option');
+        o.value = want; o.dataset.decklink = '1';
+        o.textContent = want;
+        vSel.appendChild(o);
+      }
+      if (vSel) vSel.value = want;
+    }
     // Format-Dropdown befüllen
     const w = cfg.width || 1920, h = cfg.height || 1080, fps = cfg.fps || 25;
     const fmtVal = `${w}x${h}@${fps}`;
@@ -7385,6 +7550,37 @@ async function avSyncReset() {
   const res = document.getElementById('cfg-avsync-result');
   if (res) res.textContent = '✓ Reset auf 0ms';
   showToast('A/V-Sync zurückgesetzt');
+}
+
+// ── Diagnose-Bundle (Remote-Support ohne Terminal/Datei-Transfer) ────────────
+async function loadDiagBundle(){
+  const out = document.getElementById('diag-bundle-out');
+  out.value = '… sammle Diagnose-Informationen …';
+  try {
+    const text = await fetch('/api/debug/bundle').then(r=>r.text());
+    out.value = text;
+    out.select();
+  } catch(e) { out.value = '[Fehler beim Laden: ' + e.message + ']'; }
+}
+async function loadLastCrash(){
+  const out = document.getElementById('diag-bundle-out');
+  out.value = '… lade letzten Crash-Report …';
+  try {
+    const text = await fetch('/api/debug/lastcrash').then(r=>r.text());
+    out.value = text;
+    out.select();
+  } catch(e) { out.value = '[Fehler beim Laden: ' + e.message + ']'; }
+}
+async function copyDiagBundle(){
+  const out = document.getElementById('diag-bundle-out');
+  if (!out.value) { showToast('Erst Bundle erzeugen'); return; }
+  try {
+    await navigator.clipboard.writeText(out.value);
+    showToast('In Zwischenablage kopiert ✓');
+  } catch {
+    out.select(); document.execCommand('copy');
+    showToast('In Zwischenablage kopiert ✓');
+  }
 }
 
 // ── Debug-Funktionen ──────────────────────────────────────────────────────
@@ -8988,6 +9184,7 @@ const I18N = {
     'pl.empty':'Keine Events — ＋ Event oder Mediathek öffnen',
     // Live devices
     'btn.discoverDevices':'🔍 Live-Quellen suchen',
+    'btn.discoverDecklinkSinks':'🔍 DeckLink-Ausgang suchen',
     // Counter strip
     'cstrip.nextAction':'⏭ NÄCHSTE AKTION','cstrip.nextMiss':'⚠ NÄCHSTES FEHLT',
     // AFD options
@@ -9237,6 +9434,7 @@ const I18N = {
     'pl.empty':'No events — ＋ Event or open Media Library',
     // Live devices
     'btn.discoverDevices':'🔍 Discover Live Sources',
+    'btn.discoverDecklinkSinks':'🔍 Discover DeckLink Output',
     // Counter strip
     'cstrip.nextAction':'⏭ NEXT ACTION','cstrip.nextMiss':'⚠ NEXT MISSING',
     // AFD options

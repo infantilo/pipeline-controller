@@ -33,9 +33,31 @@ if   [[ -d "${SCRIPT_DIR}/node_modules" ]];   then NODE_MODULES_SRC="${SCRIPT_DI
 elif [[ -d "/home/infantilo/node_modules" ]];  then NODE_MODULES_SRC="/home/infantilo/node_modules"
 else echo "FEHLER: node_modules nicht gefunden!" >&2; exit 1; fi
 
-GST_PLUGIN_SRC="/usr/lib/x86_64-linux-gnu/gstreamer-1.0"
-GST_LIB_SRC="/usr/lib/x86_64-linux-gnu"
-GST_SCANNER_SRC="/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner"
+# ── Ziel-ABI-Quelle (Glibc/ld-Kompatibilität) ─────────────────────────────────
+# Build-Host (z.B. Debian 12, glibc 2.36) ist NEUER als das Ziel-System
+# (Ubuntu 22.04, glibc 2.35). Mit libc/pthread/etc. bewusst ausgeschlossen
+# (siehe copy_libs) lädt das AppImage diese vom Zielsystem — bundlete .so-Dateien,
+# die gegen eine neuere Glibc gelinkt wurden, brechen dort mit "Symbol/Version
+# nicht gefunden" (äußert sich oft wie "Lib fehlt"). Fix: GStreamer/ffmpeg/libstdc++
+# aus einem extrahierten Ubuntu-22.04-Paketbaum holen statt vom Build-Host.
+# Baum erzeugen: siehe scripts/build_jammy_pkgroot.sh
+JAMMY_ROOT="${JAMMY_ROOT:-/opt/jammy-apt/extracted}"
+if [[ -d "$JAMMY_ROOT" ]]; then
+    echo "[build] Ziel-ABI-Quelle: ${JAMMY_ROOT} (Ubuntu 22.04 Pakete)"
+    GST_PLUGIN_SRC="${JAMMY_ROOT}/usr/lib/x86_64-linux-gnu/gstreamer-1.0"
+    GST_LIB_SRC="${JAMMY_ROOT}/usr/lib/x86_64-linux-gnu"
+    GST_SCANNER_SRC="${JAMMY_ROOT}/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner"
+    FFMPEG_SRC="${JAMMY_ROOT}/usr/bin/ffmpeg"
+    FFPROBE_SRC="${JAMMY_ROOT}/usr/bin/ffprobe"
+else
+    echo "[WARN]  JAMMY_ROOT (${JAMMY_ROOT}) nicht gefunden — falle auf Build-Host-Libs zurück." >&2
+    echo "[WARN]    Das AppImage kann dann auf älteren Ziel-Systemen mit Glibc-Symbolfehlern scheitern." >&2
+    GST_PLUGIN_SRC="/usr/lib/x86_64-linux-gnu/gstreamer-1.0"
+    GST_LIB_SRC="/usr/lib/x86_64-linux-gnu"
+    GST_SCANNER_SRC="/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner"
+    FFMPEG_SRC="$(command -v ffmpeg 2>/dev/null || true)"
+    FFPROBE_SRC="$(command -v ffprobe 2>/dev/null || true)"
+fi
 
 # ── Hilfsfunktionen ───────────────────────────────────────────────────────────
 log()  { echo "[build] $*"; }
@@ -52,6 +74,23 @@ fetch() {
 
 # Iterative Library-Sammlung: alle .so-Deps einer Liste von Dateien kopieren
 # copy_libs <outdir> <file1> [file2 ...]
+# SONAME → Pfad auflösen. JAMMY_ROOT (Ziel-ABI) hat Vorrang vor dem Build-Host —
+# sonst landen z.B. transitive Deps von jammy-Paketen (libexpat, libpcre1) über
+# den Host-ldconfig-Cache in einer falschen (zu neuen) Glibc-Version im Bundle.
+# Bewusst KEIN `ldd $file`-Aufruf mit umgebogenem LD_LIBRARY_PATH — würde auch
+# ld-linux/libc selbst über jammy auflösen und die aufrufende Shell zerschießen.
+_LDCONFIG_CACHE="$(/sbin/ldconfig -p 2>/dev/null)"
+
+_resolve_soname() {
+    local soname="$1" d
+    if [[ -n "${JAMMY_ROOT:-}" && -d "${JAMMY_ROOT}" ]]; then
+        for d in "${JAMMY_ROOT}/usr/lib/x86_64-linux-gnu" "${JAMMY_ROOT}/lib/x86_64-linux-gnu"; do
+            [[ -e "${d}/${soname}" ]] && { echo "${d}/${soname}"; return 0; }
+        done
+    fi
+    awk -v s="$soname" '$1==s{print $NF; exit}' <<< "$_LDCONFIG_CACHE"
+}
+
 copy_libs() {
     local outdir="$1"; shift
     local seen_file; seen_file="$(mktemp)"
@@ -88,20 +127,20 @@ copy_libs() {
             fi
         fi
 
-        # ldd-Abhängigkeiten in Queue aufnehmen
-        while IFS= read -r dep; do
-            [[ -z "$dep" ]]             && continue
-            [[ "$dep" == *"ld-linux"* ]] && continue
-            [[ "$dep" == *"libc.so"*  ]] && continue
-            [[ "$dep" == *"libpthread"* ]] && continue
-            [[ "$dep" == *"libm.so"*  ]] && continue
-            [[ "$dep" == *"libdl.so"* ]] && continue
-            [[ "$dep" == *"librt.so"* ]] && continue
-            [[ "$dep" == *"libutil.so"* ]] && continue
-            local dbase; dbase="$(basename "$dep")"
-            grep -qxF "$dbase" "$seen_file" 2>/dev/null && continue
-            echo "$dep" >> "$queue_file"
-        done < <(ldd "$file" 2>/dev/null | grep -oP '=> \K/\S+' || true)
+        # NEEDED-Einträge (statisch aus dem ELF gelesen) auflösen und in Queue aufnehmen
+        while IFS= read -r soname; do
+            [[ -z "$soname" ]]             && continue
+            [[ "$soname" == *"ld-linux"* ]] && continue
+            [[ "$soname" == libc.so*      ]] && continue
+            [[ "$soname" == libpthread*   ]] && continue
+            [[ "$soname" == libm.so*      ]] && continue
+            [[ "$soname" == libdl.so*     ]] && continue
+            [[ "$soname" == librt.so*     ]] && continue
+            [[ "$soname" == libutil.so*   ]] && continue
+            grep -qxF "$soname" "$seen_file" 2>/dev/null && continue
+            local resolved; resolved="$(_resolve_soname "$soname")"
+            [[ -n "$resolved" ]] && echo "$resolved" >> "$queue_file"
+        done < <(readelf -d "$file" 2>/dev/null | grep -oP 'Shared library: \[\K[^\]]+' || true)
     done
 
     rm -f "$seen_file" "$queue_file"
@@ -126,6 +165,19 @@ APP_GSTTOOLS="${APP_USR}/lib/gstreamer1.0/gstreamer-1.0"
 APP_SRC="${APPDIR}/app"
 
 mkdir -p "$APP_BIN" "$APP_LIB" "$APP_GST" "$APP_GSTTOOLS" "$APP_SRC"
+
+# ── 0. ABI-kritische Basis-Libs zuerst aus JAMMY_ROOT vorlegen ────────────────
+# copy_libs() überspringt Dateien, die bereits im Zielverzeichnis liegen — daher
+# müssen die Ziel-ABI-Versionen von libstdc++/libgcc/libatomic VOR dem
+# Node-Bundling (das sonst die Build-Host-Versionen mitzieht) kopiert werden.
+if [[ -d "$JAMMY_ROOT" ]]; then
+    log "Basis-Libs (libstdc++/libgcc/libatomic) aus ${JAMMY_ROOT}..."
+    for pat in 'libstdc++.so*' 'libgcc_s.so*' 'libatomic.so*'; do
+        for f in "${GST_LIB_SRC}/"${pat}; do
+            [[ -f "$f" || -L "$f" ]] && cp -aL "$f" "${APP_LIB}/$(basename "$f")" 2>/dev/null || true
+        done
+    done
+fi
 
 # ── 1. Node.js ────────────────────────────────────────────────────────────────
 log "Node.js: ${NODE_BIN}"
@@ -202,8 +254,9 @@ done
 
 # ── 5b. ffmpeg / ffprobe ──────────────────────────────────────────────────────
 for _bin in ffmpeg ffprobe; do
-    _bin_path="$(command -v "$_bin" 2>/dev/null || true)"
-    if [[ -n "$_bin_path" ]]; then
+    _bin_var="${_bin^^}_SRC"
+    _bin_path="${!_bin_var:-}"
+    if [[ -n "$_bin_path" && -f "$_bin_path" ]]; then
         log "Bundling ${_bin}: ${_bin_path}"
         cp -aL "$_bin_path" "${APP_BIN}/${_bin}"
         copy_libs "$APP_LIB" "$_bin_path"
@@ -409,10 +462,77 @@ export PUPPETEER_CACHE_DIR="${WORK_DIR}/puppeteer-cache"
 export PUPPETEER_SKIP_DOWNLOAD=1
 
 cd "${APPDIR}/app"
-exec "${APPDIR}/usr/bin/node" \
-    --require "${APPDIR}/app/appimage_bootstrap.js" \
-    "${APPDIR}/app/server.js" \
-    "$@"
+
+# ── Absturz-resistenter Start: persistentes Logfile + Auto-Restart-Loop ──────
+# Hintergrund: Auf abgeschotteten Zielrechnern (kein Internet, nur Jumphost+RDP)
+# ist es extrem mühsam, Logs/Stacktraces nachträglich einzusammeln. Ein nativer
+# Absturz (Segfault im gst-kit-Addon, z.B. bei DeckLink-Quellen) killt den ganzen
+# Node-Prozess OHNE dass JS-Handler (uncaughtException) greifen — daher wird hier
+# auf Shell-Ebene mitgeschnitten: stdout/stderr laufen dauerhaft in ein Logfile,
+# und nach jedem abnormalen Exit sammelt collect-crash-diagnostics.sh automatisch
+# Coredump/dmesg/DeckLink-Status in EINEM Report, bevor der Server neu startet.
+LOG_DIR="${WORK_DIR}/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/server.log"
+# Logfile beim Start auf die letzten 5000 Zeilen begrenzen (kein unbegrenztes Wachstum)
+if [[ -f "$LOG_FILE" ]]; then
+    tail -n 5000 "$LOG_FILE" > "${LOG_FILE}.tmp" 2>/dev/null && mv "${LOG_FILE}.tmp" "$LOG_FILE"
+fi
+
+ulimit -c unlimited 2>/dev/null || true
+
+# ── Hardware-Erkennung (DeckLink / NVIDIA) ────────────────────────────────────
+# Läuft VOR dem Node-Start, damit (a) sofort im Log sichtbar ist, ob die Karten
+# überhaupt erkannt wurden (statt erst nach evtl. langwierigem Geräte-Scan in
+# Node), und (b) Node per Env-Var weiß, ob es DeckLink/NVIDIA-Pfade überhaupt
+# probieren muss — vermeidet unnötige gst-device-monitor-Scans und Log-Rauschen
+# auf Maschinen ohne diese Hardware.
+HW_DECKLINK_PRESENT=0
+if lsmod 2>/dev/null | grep -qi blackmagic; then
+    HW_DECKLINK_PRESENT=1
+elif command -v lspci &>/dev/null && lspci 2>/dev/null | grep -qi blackmagic; then
+    HW_DECKLINK_PRESENT=1
+fi
+export HW_DECKLINK_PRESENT
+
+HW_NVIDIA_PRESENT=0
+if command -v nvidia-smi &>/dev/null && nvidia-smi -L &>/dev/null; then
+    HW_NVIDIA_PRESENT=1
+elif command -v lspci &>/dev/null && lspci 2>/dev/null | grep -qi nvidia; then
+    HW_NVIDIA_PRESENT=1
+fi
+export HW_NVIDIA_PRESENT
+
+{
+    echo "=== AppRun: Hardware-Erkennung $(date -Is) ==="
+    echo "  DeckLink: $([[ $HW_DECKLINK_PRESENT -eq 1 ]] && echo "gefunden" || echo "nicht gefunden")"
+    echo "  NVIDIA:   $([[ $HW_NVIDIA_PRESENT -eq 1 ]] && echo "gefunden" || echo "nicht gefunden")"
+} >> "$LOG_FILE"
+echo "[AppRun] DeckLink: $([[ $HW_DECKLINK_PRESENT -eq 1 ]] && echo "✓ gefunden" || echo "✗ nicht gefunden") | NVIDIA: $([[ $HW_NVIDIA_PRESENT -eq 1 ]] && echo "✓ gefunden" || echo "✗ nicht gefunden")"
+
+while true; do
+    echo "=== AppRun: Start $(date -Is) ===" >> "$LOG_FILE"
+    set +e
+    "${APPDIR}/usr/bin/node" \
+        --require "${APPDIR}/app/appimage_bootstrap.js" \
+        "${APPDIR}/app/server.js" \
+        "$@" >> "$LOG_FILE" 2>&1
+    NODE_EXIT=$?
+    set -e
+    echo "=== AppRun: Node beendet, Exit-Code=${NODE_EXIT} $(date -Is) ===" >> "$LOG_FILE"
+
+    if [[ "$NODE_EXIT" -eq 0 ]]; then
+        echo "[AppRun] Geordneter Shutdown — beende."
+        break
+    fi
+
+    echo "[AppRun] Abnormaler Exit (${NODE_EXIT}) — sammle Diagnose-Report..."
+    if [[ -x "${APPDIR}/app/scripts/collect-crash-diagnostics.sh" ]]; then
+        "${APPDIR}/app/scripts/collect-crash-diagnostics.sh" "$NODE_EXIT" "$LOG_FILE" "$WORK_DIR" || true
+    fi
+    echo "[AppRun] Neustart in 3s... (Diagnose unter ${WORK_DIR}/diagnostics/latest-crash.txt)"
+    sleep 3
+done
 APPRUN
 chmod +x "${APPDIR}/AppRun"
 

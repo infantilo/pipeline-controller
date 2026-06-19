@@ -34,6 +34,7 @@ const MediaLibrary   = require('./lib/MediaLibrary');
 const { PreviewPipeline } = require('./lib/PreviewPipeline');
 const PipelineDebugger   = require('./lib/PipelineDebugger');
 const GrafixEngine       = require('./lib/GrafixEngine');
+const DiagnosticBundle   = require('./lib/DiagnosticBundle');
 
 // ── AppImage: schreibbares Arbeitsverzeichnis (außerhalb des read-only squashfs) ─
 const _appImageWorkDir = process.env.APPDIR
@@ -178,6 +179,9 @@ function resolveIdleImage(nameOrPath) {
 // Kein NVDEC-Fehler bei nicht vorhandenen Elementen: execFileSync wirft, IIFE fängt.
 (function applyNvdecRankEarly() {
   if (_settings.gpuDecode === false) return;
+  // AppRun's Startup-Hardwarecheck hat bereits "keine NVIDIA-GPU" festgestellt —
+  // den 3s-gst-inspect-Versuch (der ohnehin scheitern würde) gar nicht erst starten.
+  if (process.env.HW_NVIDIA_PRESENT === '0') return;
   const { execFileSync } = require('child_process');
   try {
     execFileSync('gst-inspect-1.0', ['nvdec'], { stdio: 'ignore', timeout: 3000 });
@@ -902,11 +906,20 @@ master.on('switched', d => {
   }
 });
 master.on('error',    msg => log(msg, 'error', 'master'));
-// Embedded Decklink live sources in the master pipeline emit signal events
+// Embedded DeckLink live sources: signal-Property wird in MasterPipeline gepollt
+// (_startLiveSignalPoll) und nur bei Änderung hier emittiert — Key ist die Live-
+// Quellen-ID (z.B. "live1"), nicht ein Geräte-Slot.
 master.on('decklink-signal', d => {
-  _dlSignalStatus[d.slot] = { ok: d.ok, ts: Date.now(), structure: d.structure };
+  _dlSignalStatus[d.id] = { ...(_dlSignalStatus[d.id]||{}), ok: d.ok, ts: Date.now() };
   broadcast('decklink-signal', _dlSignalStatus);
-  if (!d.ok) log(`DeckLink signal loss (master embedded) slot ${d.slot}: ${d.structure}`, 'warn', 'system');
+  if (!d.ok) log(`DeckLink: kein Signal auf Live-Quelle "${d.id}"`, 'warn', 'system');
+});
+// Tatsächlich verhandeltes Video-Format (Auflösung/FPS/Interlace) der DeckLink-
+// Source — rein informativ aus den negotiated Caps, siehe MasterPipeline._parseVideoCaps.
+master.on('decklink-format', d => {
+  _dlSignalStatus[d.id] = { ...(_dlSignalStatus[d.id]||{}), format: { width: d.width, height: d.height, fps: d.fps, interlaced: d.interlaced } };
+  broadcast('decklink-signal', _dlSignalStatus);
+  log(`DeckLink-Format [${d.id}]: ${d.width}x${d.height}@${d.fps}${d.interlaced?'i':'p'}`, 'info', 'system');
 });
 
 const players = Object.fromEntries([
@@ -1708,6 +1721,20 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     return json(res, { ok: true });
   }
 
+  // Direct hard-cut to a live source pad — bypasses the playlist/asset-break
+  // mechanism entirely, like the SMPTE/BLACK/IMAGE switcher buttons.
+  if (meth === 'POST' && p === '/api/switch/live') {
+    const b = await parseBody(req);
+    await ensureMaster();
+    const ls = (_settings.liveSources || []).find(l => l.id === b.id);
+    if (!ls) return json(res, { ok: false, error: 'Live-Quelle nicht gefunden' });
+    const pad = master.padForLiveSource(ls.id);
+    if (pad < 0) return json(res, { ok: false, error: 'Kein Pad für diese Live-Quelle' });
+    try { await master.startLiveFeeder(ls); } catch (e) { return json(res, { ok: false, error: e.message }); }
+    master.switchTo(pad);
+    return json(res, { ok: true, pad });
+  }
+
   // Players
   if (meth === 'POST' && p === '/api/player/cue') {
     const b = await parseBody(req);
@@ -2473,8 +2500,11 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     try { execSync('ls /dev/video* 2>/dev/null',{timeout:2000}).toString().trim().split('\n').filter(Boolean)
       .forEach((dev,i) => devices.push({ id:`v4l2-${i}`, type:'v4l2', path:dev, name:dev, gstSrc:`v4l2src device=${dev}` })); } catch {}
 
-    // DeckLink (Blackmagic) — uncompressed hardware sources, no decodebin required
+    // DeckLink (Blackmagic) — uncompressed hardware sources, no decodebin required.
+    // Skip the (slow, up to 5s) device-monitor scan entirely if AppRun's startup
+    // hardware-check already determined no DeckLink card is present.
     try {
+      if (process.env.HW_DECKLINK_PRESENT === '0') throw new Error('no decklink hw');
       const dlRaw = execSync('gst-device-monitor-1.0 Video/Source 2>/dev/null', { timeout: 5000 }).toString();
       let devNum = 0;
       for (const block of dlRaw.split(/(?=Device found:)/)) {
@@ -2484,9 +2514,14 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
         // Prefer explicit device-number from properties, else use enumeration order
         const numMatch = block.match(/device[.\-](?:number|path)\s*[=:]\s*(\d+)/i);
         const dn = numMatch ? parseInt(numMatch[1]) : devNum;
-        // Detect audio channel count from device caps if listed
-        const chMatch = block.match(/channels\s*=\s*\(int\)\s*(\d+)/);
-        const audioCh = chMatch ? Math.min(16, parseInt(chMatch[1])) : 8;
+        // Detect audio channel count from device caps if listed. decklinkaudiosrc's
+        // "channels" property is a FIXED ENUM {2, 8, 16} (0="max") — any other value
+        // is an invalid property and silently breaks the whole pipeline parse.
+        // Default 2 (decklinkaudiosrc's own default) — most embedded SDI audio is
+        // stereo; 8ch was a too-aggressive default that doesn't match every signal.
+        const chMatch  = block.match(/channels\s*=\s*\(int\)\s*(\d+)/);
+        const rawCh    = chMatch ? parseInt(chMatch[1]) : 2;
+        const audioCh  = rawCh >= 16 ? 16 : rawCh >= 8 ? 8 : 2;
         devices.push({
           id: `decklink-${dn}`, type: 'decklink', deviceNumber: dn, name,
           gstSrc:      `decklinkvideosrc device-number=${dn}`,
@@ -2499,6 +2534,66 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     } catch {}
 
     return json(res, devices);
+  }
+
+  // decklinkvideosink hat kein "auto"-Default (anders als die Source!) — Default ist
+  // "ntsc" (SD 720×486). Ohne explizites mode= passend zur konfigurierten Auflösung
+  // schlägt die Caps-Verhandlung fehl ("could not link queue1 to vsink"). Nur Modi mit
+  // exaktem Auflösungs-/Framerate-Match aus den Format-Presets der Settings-UI —
+  // kleinere Presets (960x540, 640x360 — reine CPU-Spar-Presets) haben kein SDI-Äquivalent.
+  const DECKLINK_MODE_BY_RES = {
+    '1920x1080@25': '1080p25',
+    '1920x1080@50': '1080p50',
+    '1280x720@50':  '720p50',
+  };
+  function _decklinkModeForCurrentRes() {
+    const w = masterOpts.width || 1920, h = masterOpts.height || 1080, fps = masterOpts.fps || 25;
+    return DECKLINK_MODE_BY_RES[`${w}x${h}@${fps}`] || null;
+  }
+
+  // DeckLink-Ausgänge (Programm-Output) — getrennt von /api/devices (Live-Quellen),
+  // damit Sinks nicht versehentlich als Source eingetragen werden können.
+  if (meth === 'GET' && p === '/api/devices/sinks') {
+    if (process.env.HW_DECKLINK_PRESENT === '0') return json(res, []);
+    const { execSync } = require('child_process');
+    const byDevNum = new Map();
+
+    const scan = (category, prop) => {
+      let raw;
+      try { raw = execSync(`gst-device-monitor-1.0 ${category} 2>/dev/null`, { timeout: 5000 }).toString(); }
+      catch { return; }
+      let devNum = 0;
+      for (const block of raw.split(/(?=Device found:)/)) {
+        const nameMatch = block.match(/name\s*:\s*(.+)/);
+        const name = nameMatch?.[1]?.trim() || '';
+        if (!/decklink|blackmagic/i.test(name)) continue;
+        const numMatch = block.match(/device[.\-](?:number|path)\s*[=:]\s*(\d+)/i);
+        const dn = numMatch ? parseInt(numMatch[1]) : devNum;
+        const chMatch = block.match(/channels\s*=\s*\(int\)\s*(\d+)/);
+        const audioCh = chMatch ? Math.min(16, parseInt(chMatch[1])) : 8;
+        const entry = byDevNum.get(dn) || { id: `decklink-out-${dn}`, type: 'decklink-sink', deviceNumber: dn, name };
+        entry[prop] = true;
+        if (prop === 'hasAudio') entry.audioChannels = audioCh;
+        byDevNum.set(dn, entry);
+        devNum++;
+      }
+    };
+    scan('Video/Sink', 'hasVideo');
+    scan('Audio/Sink', 'hasAudio');
+
+    const dlMode = _decklinkModeForCurrentRes();
+    const sinks = [...byDevNum.values()].map(d => ({
+      id: d.id, type: d.type, deviceNumber: d.deviceNumber, name: d.name,
+      videoSink: d.hasVideo
+        ? `decklinkvideosink device-number=${d.deviceNumber}${dlMode ? ` mode=${dlMode}` : ''}`
+        : null,
+      videoModeWarning: d.hasVideo && !dlMode
+        ? `Keine DeckLink-SDI-Norm für aktuelle Auflösung ${masterOpts.width||1920}x${masterOpts.height||1080}@${masterOpts.fps||25} — Video-Sink wird vermutlich nicht funktionieren. Auflösung auf 1920x1080@25, 1920x1080@50 oder 1280x720@50 stellen.`
+        : null,
+      audioSink: d.hasAudio ? `decklinkaudiosink device-number=${d.deviceNumber}` : null,
+      audioChannels: d.audioChannels || 8,
+    }));
+    return json(res, sinks);
   }
 
   // ── Grafik API ─────────────────────────────────────────────────────────────
@@ -2725,10 +2820,18 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       if (ls.keepAlive === undefined) ls.keepAlive = !ls.uri;
     }
     _settings.liveSources = b.liveSources;
+    masterOpts.liveSources = b.liveSources;
     saveSettings(_settings);
+    log(`Live-Quellen aktualisiert: ${b.liveSources.length} Einträge — Pipeline wird neu aufgebaut`, 'info', 'system');
+    // Echter Rebuild: master.stop()+ensureMaster() ruft build() auf derselben Instanz
+    // erneut auf, das jetzt _liveSources frisch aus masterOpts liest (siehe
+    // MasterPipeline.build()) — neue Pads entstehen ohne Prozess-Neustart.
+    await master.stop(); masterStarted = false;
+    const ok = await ensureMaster();
     broadcast('state', getState());
-    log(`Live-Quellen aktualisiert: ${b.liveSources.length} Einträge (Neustart erforderlich)`, 'info', 'system');
-    return json(res, { ok: true, note: 'Neustart erforderlich damit GStreamer-Pipeline neu aufgebaut wird' });
+    return json(res, ok
+      ? { ok: true, note: 'Pipeline neu aufgebaut' }
+      : { ok: false, error: 'Pipeline-Rebuild fehlgeschlagen — siehe Server-Log' });
   }
 
   // ── Pipeline-Latenz-Messung ─────────────────────────────────────────────────
@@ -2900,6 +3003,26 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   // ── Debug API ──────────────────────────────────────────────────────────────
   if (meth === 'GET' && p === '/api/debug/stats') {
     return json(res, debugger_.getStats());
+  }
+
+  // Ein-Klick-Diagnose-Bundle: alles für DeckLink/GPU/Pipeline-Ferndiagnose in
+  // einem kopierbaren Text-Dokument (siehe lib/DiagnosticBundle.js). Gedacht für
+  // abgeschottete Zielrechner — der Nutzer kopiert den Text direkt aus der UI.
+  if (meth === 'GET' && p === '/api/debug/bundle') {
+    const text = DiagnosticBundle.collect({
+      settings: _settings, masterOpts, master, debugger_, logs,
+      workDir: _appImageWorkDir || __dirname,
+    });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end(text);
+  }
+
+  // Letzter automatisch erkannter Prozess-Absturz (geschrieben von
+  // scripts/collect-crash-diagnostics.sh über den AppRun-Restart-Loop).
+  if (meth === 'GET' && p === '/api/debug/lastcrash') {
+    const text = DiagnosticBundle.readLastCrash(_appImageWorkDir || __dirname);
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end(text || '(kein Crash-Report vorhanden)');
   }
   if (meth === 'POST' && p === '/api/debug/enable') {
     const b = await parseBody(req);
