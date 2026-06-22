@@ -115,6 +115,12 @@ function _saveUsers(u) {
   fs.writeFileSync(USERS_PATH, JSON.stringify(u, null, 2));
 }
 let _users = _loadUsers();
+// Auth ist nur aktiv wenn authEnabled UND mindestens ein User existiert — eine
+// leere users.json (z.B. letzten User gelöscht) zählt wie "kein Auth konfiguriert",
+// sonst wäre niemand mehr in der Lage sich einzuloggen (Lockout).
+function _authActive() {
+  return !!_settings.authEnabled && Array.isArray(_users) && _users.length > 0;
+}
 
 // Sessions: token → { userId, username, roles, ip }
 const _sessions = new Map();
@@ -133,7 +139,7 @@ function _getSession(req) {
  * roles: array of role strings, any match is sufficient. 'admin' always passes.
  */
 function _requireAuth(req, res, roles) {
-  if (!_settings.authEnabled || !_users) return {}; // auth disabled
+  if (!_authActive()) return {}; // auth disabled (oder kein User angelegt)
   const sess = _getSession(req);
   if (!sess) {
     res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
@@ -1539,7 +1545,7 @@ async function _requestHandler(req, res) {
   // ── Auth endpoints (always accessible) ──────────────────────────────────────
   if (meth === 'POST' && p === '/api/auth/login') {
     const b = await parseBody(req);
-    if (!_settings.authEnabled || !_users) return json(res, { ok: true, token: null, username: 'anonymous', roles: ['admin'] });
+    if (!_authActive()) return json(res, { ok: true, token: null, username: 'anonymous', roles: ['admin'] });
     const user = _users.find(u => u.username === b.username && u.password === _hashPw(b.password || ''));
     if (!user) return json(res, { error: 'Invalid credentials' }, 401);
     const token = _genToken();
@@ -1554,7 +1560,7 @@ async function _requestHandler(req, res) {
     return json(res, { ok: true });
   }
   if (meth === 'GET' && p === '/api/auth/me') {
-    if (!_settings.authEnabled || !_users) return json(res, { authEnabled: false, username: 'anonymous', roles: ['admin'] });
+    if (!_authActive()) return json(res, { authEnabled: false, username: 'anonymous', roles: ['admin'] });
     const sess = _getSession(req);
     if (!sess) return json(res, { authEnabled: true, authenticated: false });
     return json(res, { authEnabled: true, authenticated: true, username: sess.username, roles: sess.roles });
@@ -1593,7 +1599,10 @@ async function _requestHandler(req, res) {
     }
     if (meth === 'DELETE') {
       const name = arr[idx].username;
-      arr.splice(idx, 1); _saveUsers(arr); _userLog(sess, 'user.delete', name);
+      arr.splice(idx, 1); _users = arr; _saveUsers(arr); _userLog(sess, 'user.delete', name);
+      if (!arr.length && _settings.authEnabled) {
+        log('Letzter User gelöscht — "Login erforderlich" ist damit wirkungslos, bis ein neuer User angelegt wird.', 'warn', 'auth');
+      }
       return json(res, { ok: true });
     }
   }
@@ -1611,7 +1620,7 @@ async function _requestHandler(req, res) {
 
   // SSE
   if (p === '/events') {
-    if (_settings.authEnabled && _users) {
+    if (_authActive()) {
       const sess = _getSession(req);
       if (!sess) { res.writeHead(401); res.end('Unauthorized'); return; }
     }
@@ -1620,7 +1629,7 @@ async function _requestHandler(req, res) {
       // Emergency Override: Admin kann ältesten Client verdrängen
       const overrideToken = url.searchParams.get('override_token') || '';
       const isAdmin = overrideToken && _sessions.get(overrideToken)?.roles?.includes('admin');
-      const authDisabled = !_settings.authEnabled || !_users;
+      const authDisabled = !_authActive();
       const allowOverride = isAdmin || (authDisabled && url.searchParams.get('override') === '1');
 
       if (allowOverride && clients.size > 0) {
@@ -2348,7 +2357,12 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     if (b.defaultStartTimecode !== undefined) { _settings.defaultStartTimecode = b.defaultStartTimecode; }
     if (b.prepKeepReconcile    !== undefined) { _settings.prepKeepReconcile    = !!b.prepKeepReconcile; }
     if (b.userLogPath  !== undefined) { _settings.userLogPath  = b.userLogPath; }
-    if (b.authEnabled  !== undefined) { _settings.authEnabled  = !!b.authEnabled; }
+    if (b.authEnabled  !== undefined) {
+      if (b.authEnabled && (!Array.isArray(_users) || !_users.length)) {
+        return json(res, { ok: false, error: 'Mindestens ein User muss angelegt sein, bevor "Login erforderlich" aktiviert werden kann.' }, 400);
+      }
+      _settings.authEnabled  = !!b.authEnabled;
+    }
     if (b.missingBehavior !== undefined && ['skip','idle'].includes(b.missingBehavior)) {
       _settings.missingBehavior = b.missingBehavior;
       playlist.opts.missingBehavior = b.missingBehavior;

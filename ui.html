@@ -1002,15 +1002,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
           <option value="ignore" data-i18n="em.durErr.ignore">– Ignorieren</option>
         </select>
       </div>
-      <div class="two-col">
-        <div class="fld"><label data-i18n="em.lbl.postroll">Postroll</label><input type="text" id="em-postroll" placeholder="00:00:00:00" style="font-family:var(--mono)"></div>
-        <div class="fld"><label data-i18n="em.lbl.audioPreset">Audio-Preset</label>
-          <select id="em-audio-preset" data-i18n-title="em.title.audioPreset" title="Routing-Preset für dieses Event" onchange="_showPresetDesc()">
-            <option value="" data-i18n="em.ap.default">(Standard / Legacy)</option>
-          </select>
-        </div>
-      </div>
-      <div id="em-preset-desc" style="font-size:9px;color:var(--dim);margin:-4px 0 4px;padding:0 2px;min-height:12px;white-space:pre-wrap"></div>
+      <div class="fld"><label data-i18n="em.lbl.postroll">Postroll</label><input type="text" id="em-postroll" placeholder="00:00:00:00" style="font-family:var(--mono)"></div>
       <div class="fld"><label data-i18n="em.lbl.afd">AFD / Format</label>
         <select id="em-afd" style="font-size:10px" title="Seitenverhältnis-Behandlung für dieses Event">
           <option value="auto"         data-i18n="afd.auto">Standard (Pipeline-Einstellung)</option>
@@ -1050,6 +1042,14 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <div id="em-imageinfo" style="font-size:9px;color:var(--dim);margin-top:3px" data-i18n="em.imageinfo.hint">— Aus channelbranding/ oder media/</div>
       </div>
       <div class="fld"><label data-i18n="em.lbl.duration">Dauer (HH:MM:SS:FF)</label><input type="text" id="em-image-duration" value="00:00:05:00" style="font-family:var(--mono)"></div>
+    </div>
+    <div id="em-audio-preset-section" style="display:none">
+      <div class="fld"><label data-i18n="em.lbl.audioPreset">Audio-Preset</label>
+        <select id="em-audio-preset" data-i18n-title="em.title.audioPreset" title="Routing-Preset für dieses Event" onchange="_showPresetDesc()">
+          <option value="" data-i18n="em.ap.default">(Standard / Legacy)</option>
+        </select>
+      </div>
+      <div id="em-preset-desc" style="font-size:9px;color:var(--dim);margin:-4px 0 4px;padding:0 2px;min-height:12px;white-space:pre-wrap"></div>
     </div>
   </div><!-- /em-panel-content -->
 
@@ -1117,7 +1117,9 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <button class="btn" style="font-size:10px" onclick="emAddImage()" data-i18n="em.btn.addImage">＋ Bild</button>
       <button class="btn" style="font-size:10px" onclick="emAddVoiceover()">🎙 VO</button>
       <button class="btn" style="font-size:10px" onclick="emAddRecord()">⏺ Rec</button>
+      <button class="btn" style="font-size:10px" onclick="emAddTrigger()">📡 Trigger</button>
     </div>
+    <datalist id="em-trigger-targets"></datalist>
     <div id="em-grafik-list" style="font-size:10px"></div>
     <div id="em-grafik-hint" style="font-size:9px;color:var(--dim);margin-top:3px" data-i18n="em.child.hint">Child Events starten relativ zum Clip-Start. HTML = Puppeteer/Template, Bild = JPG/PNG/GIF direkt, 🎙 = Voiceover WAV/MP3, ⏺ = Sekundär-Aufzeichnung.</div>
     </div>
@@ -3988,9 +3990,12 @@ function _updateOnAirPresetRow(event) {
   const row = document.getElementById('cstrip-preset-row');
   const sel = document.getElementById('cstrip-preset-sel');
   if (!row || !sel) return;
-  // Only show for player clips (slotId set means it's a clip, not smpte/black/live)
-  const isClip = event?.source === 'player' || (!['smpte','black','image','live','comment','block_start','block_end'].includes(event?.source||'') && !_isLiveSourceEv(event));
-  if (!isClip || !S.playlist.running) { row.style.display = 'none'; _updateOnAirCtrlBtn(); return; }
+  // Player-Clips UND Live-Quellen (eigene Audio-Pipeline bzw. Master-Matrix-Hotswap) —
+  // nur statische Quellen (smpte/black/image) und Strukturmarker bleiben außen vor.
+  const STATIC_NO_AUDIO_PRESET = ['smpte','black','image','comment','block_start','block_end'];
+  const isClip     = event?.source === 'player' || (!STATIC_NO_AUDIO_PRESET.includes(event?.source||'') && !_isLiveSourceEv(event) && event?.source !== 'live');
+  const isLiveSrc  = _isLiveSourceEv(event) || event?.source === 'live';
+  if ((!isClip && !isLiveSrc) || !S.playlist.running) { row.style.display = 'none'; _updateOnAirCtrlBtn(); return; }
   // Populate with available presets
   const presets = Object.entries(S.audioConfig?.presets || {});
   if (!presets.length) { row.style.display = 'none'; _updateOnAirCtrlBtn(); return; }
@@ -4540,23 +4545,28 @@ function _normalizeChild(c) {
   return c;
 }
 function _buildChildrenHtml(e, fps, isBlock){
-  const kids=(e.children||[]).map(_normalizeChild).filter(c=>c.source==='grafik'||c.source==='oGraf'||c.source==='image'||c.source==='voiceover'||c.source==='record');
+  const kids=(e.children||[]).map(_normalizeChild).filter(c=>c.source==='grafik'||c.source==='oGraf'||c.source==='image'||c.source==='voiceover'||c.source==='record'||c.source==='trigger');
   if(!kids.length) return '';
   const endRef = isBlock ? 'Block-Ende' : 'Clip-Ende';
   const expanded=!!_expandedChildren[e.id];
   const voCount  = kids.filter(c=>c.source==='voiceover').length;
   const recCount = kids.filter(c=>c.source==='record').length;
-  const gfxCount = kids.length - voCount - recCount;
+  const trgCount = kids.filter(c=>c.source==='trigger').length;
+  const gfxCount = kids.length - voCount - recCount - trgCount;
   const parts = [];
   if(gfxCount>0)  parts.push(`${gfxCount} Grafik${gfxCount>1?'en':''}`);
   if(voCount>0)  parts.push(`${voCount} 🎙`);
   if(recCount>0) parts.push(`${recCount} ⏺`);
+  if(trgCount>0) parts.push(`${trgCount} 📡`);
   const expandBtn=`<span class="pl-child-expand" onclick="toggleChildExpand('${e.id}',event)">${expanded?'▾':'▸'} ${parts.join(' + ')}</span>`;
   let kidsHtml='';
   if(expanded){
     kidsHtml=kids.map(c=>{
-      // Timing-Felder: voiceover/image direkt auf c, record in c.record, grafik in c.grafik
-      const t = (c.source==='image'||c.source==='voiceover') ? c : (c.source==='record' ? (c.record||{}) : (c.grafik||{}));
+      // Timing-Felder: voiceover/image direkt auf c, record in c.record, trigger in c.trigger, grafik in c.grafik
+      const t = (c.source==='image'||c.source==='voiceover') ? c
+        : c.source==='record' ? (c.record||{})
+        : c.source==='trigger' ? (c.trigger||{})
+        : (c.grafik||{});
       const delaySec = t.delayFrames!=null ? t.delayFrames/fps : (t.delayMs!=null ? t.delayMs/1000 : (t.delay??0));
       const startIsRel = t._startRelEnd===true;
       const delayStr = startIsRel
@@ -4589,6 +4599,15 @@ function _buildChildrenHtml(e, fps, isBlock){
           <span style="color:var(--dim);font-size:8px;min-width:50px">${c.preset||''}</span>
           <span style="color:var(--dim);min-width:60px">${delayStr}</span>
           <span style="color:var(--dim)">${endStr}</span>
+        </div>`;
+      }
+      if(c.source==='trigger'){
+        const tr=c.trigger||{};
+        return `<div class="pl-child" style="display:flex;gap:4px;align-items:center;padding:1px 0">
+          <span style="color:var(--orange);font-weight:600;min-width:24px">📡</span>
+          <span style="color:var(--orange);min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${tr.target||''}">${tr.target||'?'}</span>
+          <span style="color:var(--dim);font-size:8px;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${tr.type||''}">${tr.type||'?'}</span>
+          <span style="color:var(--dim);min-width:60px">${delayStr}</span>
         </div>`;
       }
       if(c.source==='record'){
@@ -5718,8 +5737,20 @@ function openEventEditor(idx,ev){
   // Grafik/Bild-Children laden
   S._editGrafik = (e.children||[])
     .map(_normalizeChild)
-    .filter(c => c.source==='grafik' || c.source==='image' || c.source==='voiceover' || c.source==='record')
+    .filter(c => c.source==='grafik' || c.source==='image' || c.source==='voiceover' || c.source==='record' || c.source==='trigger')
     .map(c => {
+      if(c.source==='trigger'){
+        const tr=c.trigger||{};
+        const known = TRIGGER_TYPES.find(t=>t.id===tr.type);
+        return { type:'trigger',
+          target:tr.target||tr.targetGroup||'', triggerType:tr.type||'',
+          _customMode: !!tr.type && !known,
+          index: (known?.payload==='index'||known?.payload==='indexOptional') ? String(tr.payload?.index ?? '') : '',
+          slotId: known?.payload==='slotId' ? (tr.payload?.slotId || '') : '',
+          payloadText: (!known && tr.payload!=null) ? JSON.stringify(tr.payload) : '{}',
+          delay:tr.delay??0, delayFrames:tr.delayFrames,
+          endOffset:tr.endOffset, endOffsetFrames:tr.endOffsetFrames,
+          _startRelEnd:tr._startRelEnd??false, _startBeforeClip:tr._startBeforeClip??false }; }
       if(c.source==='image') return { type:'image', src:c.src||'', delay:c.delay, duration:c.duration,
         delayFrames:c.delayFrames, durationFrames:c.durationFrames,
         endOffset:c.endOffset, endOffsetFrames:c.endOffsetFrames,
@@ -5741,6 +5772,7 @@ function openEventEditor(idx,ev){
         overwrite:r.overwrite??false }; }
       return { type:'grafik', ...c.grafik };
     });
+  if (S._editGrafik.some(g=>g.type==='trigger')) _ensureCbTargets();
   _renderGrafikList();
   emSourceChange();emValidateFile();
   document.getElementById('event-modal').classList.add('show');
@@ -5762,6 +5794,8 @@ function emSourceChange(){
   // Explizite Live-Quellen-Hinweis
   const liveHint=document.getElementById('em-live-hint');
   if(liveHint) liveHint.style.display=isLive?'':'none';
+  // Audio-Preset: Clips + jede Live-Quelle (explizit oder generisch) — nicht für Bild/Meta
+  document.getElementById('em-audio-preset-section').style.display=(isP||isLive||isGenericLive)?'block':'none';
   // comment: keine Child Events; block_start: Child Events mit Block-Ende-Referenz
   const childSec=document.getElementById('em-children-section');
   if(childSec) childSec.style.display=src==='comment'?'none':'';
@@ -5954,6 +5988,16 @@ function _renderLiveList(){
           <button class="btn" style="font-size:9px;padding:1px 5px" onclick="_liveRows[${i}].audioSources.push({label:'',gstSrc:'',channels:2});_renderLiveList()">＋ Audio</button>
         </div>
         ${audioRows||'<span style="font-size:9px;color:var(--dim)">(keine)</span>'}
+        ${(audios.length && Object.keys(S.audioConfig?.presets||{}).length) ? `
+        <div style="display:flex;gap:4px;align-items:center;margin-top:5px">
+          <span style="font-size:9px;color:var(--dim);width:64px;flex-shrink:0" title="Routing-Preset, mit dem die Audio-Kanäle dieser Quelle auf die Audio-Gruppen gemappt werden (zero-gap im laufenden Betrieb umschaltbar)">Audio-Preset</span>
+          <select style="flex:1;font-size:10px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:1px 4px"
+            onchange="_liveRows[${i}].audioConfig={...(_liveRows[${i}].audioConfig||{}),preset:this.value||undefined}">
+            <option value="">(Standard: "stereo")</option>
+            ${Object.entries(S.audioConfig?.presets||{}).map(([id,p])=>
+              `<option value="${id}"${(ls.audioConfig?.preset||'')===id?' selected':''}>${_esc(p.label||id)}</option>`).join('')}
+          </select>
+        </div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -7056,16 +7100,30 @@ async function savePaths(){
   }
 }
 async function saveAsRun(){
-  const enabled = document.getElementById('cfg-asrun-enabled')?.checked;
-  const dir     = document.getElementById('cfg-asrun-dir')?.value.trim()||undefined;
-  const ch      = document.getElementById('cfg-channel-name')?.value.trim()||undefined;
-  const ulp     = document.getElementById('cfg-userlog-path')?.value.trim()||undefined;
-  const auth    = document.getElementById('cfg-auth-enabled')?.checked;
+  const enabled  = document.getElementById('cfg-asrun-enabled')?.checked;
+  const dir      = document.getElementById('cfg-asrun-dir')?.value.trim()||undefined;
+  const ch       = document.getElementById('cfg-channel-name')?.value.trim()||undefined;
+  const ulp      = document.getElementById('cfg-userlog-path')?.value.trim()||undefined;
+  const authChk  = document.getElementById('cfg-auth-enabled');
+  const auth     = authChk?.checked;
+  // Clientseitige Vorab-Prüfung: ohne angelegten User würde "Login erforderlich"
+  // sofort zum Aussperren führen — Checkbox direkt zurücksetzen statt erst den
+  // Server-Fehler abzuwarten.
+  if (auth && !_usersData.length) {
+    authChk.checked = false;
+    showToast('⚠ Erst mindestens einen User anlegen, bevor Login erforderlich aktiviert wird');
+    return;
+  }
   const body = { asRunEnabled: !!enabled, authEnabled: !!auth };
   if(dir) body.asRunDir    = dir;
   if(ch)  body.channelName = ch;
   if(ulp !== undefined) body.userLogPath = ulp || '';
-  await apiFetch('/api/config/paths', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  const r = await apiFetch('/api/config/paths', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  const d = await r?.json().catch(()=>null);
+  if (d && d.ok === false) {
+    if (authChk) authChk.checked = false;
+    showToast('❌ ' + (d.error || 'Speichern fehlgeschlagen'));
+  }
 }
 
 async function saveMissingBehavior(){
@@ -7770,7 +7828,35 @@ function emUpdateFixGap(){const el=document.getElementById('em-fixtime-gap');if(
 function saveEvent(){
   _saveEventInner().catch(err => { console.error('[saveEvent]', err); showToast('❌ Fehler beim Speichern: '+err.message); });
 }
+// Bekannte Trigger-Typen, die PlaylistEngine._onRemoteMessage() auf der Empfänger-
+// Seite versteht (siehe lib/PlaylistEngine.js) — steuert, welche Payload-Felder
+// der Editor anzeigt. 'index' adressiert IMMER die eigene Playlist des
+// EMPFÄNGER-Channels, nie die des Senders (jeder Channel hat eigene Indizes).
+const TRIGGER_TYPES = [
+  { id:'NEXT',       label:'NEXT — nächstes Element abspielen',         payload:'none',         hint:'Kein Payload nötig.' },
+  { id:'JUMP',       label:'JUMP — zu Index springen',                  payload:'index',        hint:'Index = Position in der Playlist des ZIEL-Channels (0-basiert).' },
+  { id:'FORCE_JUMP', label:'FORCE_JUMP — zu Index springen (erzwungen)', payload:'index',        hint:'Wie JUMP, aber auch während eines laufenden Übergangs.' },
+  { id:'NEXT_LIVE',  label:'NEXT_LIVE — zum nächsten Live-Event',       payload:'indexOptional', hint:'Leer = Ziel-Channel sucht selbst sein nächstes Live-Event ab der aktuellen Position.' },
+  { id:'CUT',        label:'CUT — Audio-Slot umschalten',               payload:'slotId',       hint:'Slot-ID wie im Audio-Routing des Ziel-Channels (z.B. dup-pgm).' },
+  { id:'STOP',       label:'STOP — Wiedergabe stoppen',                 payload:'none',         hint:'Kein Payload nötig.' },
+  { id:'PLAY',       label:'PLAY — Wiedergabe starten',                 payload:'indexOptional', hint:'Leer = Start bei Index 0 der Ziel-Playlist.' },
+];
 function _mapGrafikChild(g) {
+  if(g.type==='trigger') {
+    const known = TRIGGER_TYPES.find(t => t.id === g.triggerType);
+    let payload;
+    if (known?.payload === 'index') payload = { index: parseInt(g.index, 10) || 0 };
+    else if (known?.payload === 'indexOptional') payload = (g.index !== '' && g.index != null) ? { index: parseInt(g.index, 10) || 0 } : undefined;
+    else if (known?.payload === 'slotId') payload = { slotId: g.slotId || '' };
+    else if (known?.payload === 'none') payload = undefined;
+    else { try { payload = g.payloadText ? JSON.parse(g.payloadText) : undefined; } catch { payload = undefined; } }
+    return { source:'trigger', trigger:{
+      target:g.target||'', type:g.triggerType||'', payload,
+      delay:g.delay??0, delayFrames:g.delayFrames,
+      endOffset:g.endOffset, endOffsetFrames:g.endOffsetFrames,
+      _startRelEnd:g._startRelEnd??false, _startBeforeClip:g._startBeforeClip??false,
+    }};
+  }
   if(g.type==='voiceover') return { source:'voiceover', file:g.file, preset:g.preset,
     delay:g.delay, duration:g.duration, endOffset:g.endOffset,
     _startRelEnd:g._startRelEnd, _endRelEnd:g._endRelEnd, _startBeforeClip:g._startBeforeClip };
@@ -7944,6 +8030,38 @@ function emAddRecord(){
   S._editGrafik.push({ type:'record', slot:'auto', videoSource:'pgm', delay:0, duration:null, endOffset:null,
     _startRelEnd:false, _endRelEnd:false, fileTemplate:'{date}_{time}_{title}', overwrite:false });
   _renderGrafikList();
+}
+function emAddTrigger(){
+  if(!S._editGrafik) S._editGrafik=[];
+  S._editGrafik.push({ type:'trigger', target:'', triggerType:'', index:'', slotId:'', payloadText:'{}',
+    _customMode:false, delay:0, delayFrames:0, _startRelEnd:false, _startBeforeClip:false });
+  _ensureCbTargets();
+  _renderGrafikList();
+}
+function emTriggerSetKnownType(i, val){
+  const g = S._editGrafik[i]; if(!g) return;
+  if (val === '__custom__') {
+    g._customMode = true;
+    if (TRIGGER_TYPES.some(t=>t.id===g.triggerType)) g.triggerType = '';
+  } else {
+    g._customMode = false;
+    g.triggerType = val;
+  }
+  _renderGrafikList();
+}
+// Lädt einmalig bekannte ChannelBus-Ziele (eigene Gruppen + verbundene Peers) für das Trigger-Datalist.
+async function _ensureCbTargets(){
+  if (S._cbTargets) return;
+  S._cbTargets = [];
+  try {
+    const r = await fetch('/api/config/channelbus');
+    if (!r.ok) return;
+    const cfg = await r.json();
+    const ids = new Set(['*', ...(cfg.groups||[]), ...(cfg.connectedPeers||[]).flatMap(p=>[p.id, ...(p.groups||[])])]);
+    S._cbTargets = [...ids].filter(Boolean);
+    const dl = document.getElementById('em-trigger-targets');
+    if (dl) dl.innerHTML = S._cbTargets.map(t=>`<option value="${t}">`).join('');
+  } catch {}
 }
 function emRemoveGrafik(i){
   S._editGrafik.splice(i,1);
@@ -8240,6 +8358,83 @@ function _renderGrafikList(){
           <div style="color:var(--dim);font-size:8px;margin-top:1px" id="em-gfk-endlbl-${i}">∞ bis ${endRef}</div>
         </div>
       </div>`;
+
+    // ── Trigger entry (Cross-Channel/ChannelBus, siehe lib/ChannelBus.js) ──
+    if (g.type === 'trigger') {
+      const anchorMode = g._startRelEnd === true ? 'end' : (g._startBeforeClip === true ? 'preStart' : 'start');
+      const trFrames = g._startRelEnd === true
+        ? Math.abs(g.endOffsetFrames ?? 0)
+        : Math.abs(g.delayFrames ?? Math.round((g.delay ?? 0) * fps));
+      const trTC = _framesToTC(trFrames, fps);
+      const known = TRIGGER_TYPES.find(t => t.id === g.triggerType);
+      const isCustom = g._customMode || (!!g.triggerType && !known);
+      const typeSelectVal = isCustom ? '__custom__' : (g.triggerType || '');
+      const typeOptions = `<option value=""${typeSelectVal===''?' selected':''}>— Typ wählen —</option>`
+        + TRIGGER_TYPES.map(t=>`<option value="${t.id}"${typeSelectVal===t.id?' selected':''}>${t.label}</option>`).join('')
+        + `<option value="__custom__"${typeSelectVal==='__custom__'?' selected':''}>⚙ Custom / eigener Typ…</option>`;
+
+      let payloadBlock;
+      if (isCustom) {
+        payloadBlock = `<div>
+          <input type="text" value="${(g.triggerType||'').replace(/"/g,'&quot;')}" placeholder="Eigener Trigger-Typ (z.B. graphic.show)"
+            oninput="emGrafikField(${i},'triggerType',this.value)"
+            style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:10px;margin-bottom:4px">
+          <span style="color:var(--dim);font-size:9px">Payload (JSON):</span>
+          <textarea rows="2" oninput="emGrafikField(${i},'payloadText',this.value)"
+            style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:10px;font-family:var(--mono);resize:vertical;margin-top:2px">${(g.payloadText||'{}').replace(/</g,'&lt;')}</textarea>
+          <div style="font-size:8px;color:var(--dim);margin-top:2px">Unbekannte Typen landen beim Ziel-Channel als <code>remote-trigger</code>-Event — die Host-App entscheidet, was damit passiert.</div>
+        </div>`;
+      } else if (known?.payload === 'index' || known?.payload === 'indexOptional') {
+        payloadBlock = `<div>
+          <span style="color:var(--dim);font-size:9px">Ziel-Index${known.payload==='indexOptional'?' (optional)':''}:</span>
+          <input type="number" min="0" step="1" value="${g.index ?? ''}" placeholder="${known.payload==='indexOptional'?'leer = automatisch':'0'}"
+            oninput="emGrafikField(${i},'index',this.value)"
+            style="width:80px;display:block;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:11px;font-family:var(--mono);margin-top:2px">
+          <div style="font-size:8px;color:var(--dim);margin-top:2px">${known.hint}</div>
+        </div>`;
+      } else if (known?.payload === 'slotId') {
+        payloadBlock = `<div>
+          <span style="color:var(--dim);font-size:9px">Slot-ID:</span>
+          <input type="text" value="${(g.slotId||'').replace(/"/g,'&quot;')}" placeholder="z.B. dup-pgm"
+            oninput="emGrafikField(${i},'slotId',this.value)"
+            style="width:100%;display:block;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:11px;font-family:var(--mono);margin-top:2px">
+          <div style="font-size:8px;color:var(--dim);margin-top:2px">${known.hint}</div>
+        </div>`;
+      } else if (known?.payload === 'none') {
+        payloadBlock = `<div style="font-size:9px;color:var(--dim)">${known.hint}</div>`;
+      } else {
+        payloadBlock = `<div style="font-size:9px;color:var(--dim)">Bitte zuerst einen Trigger-Typ wählen.</div>`;
+      }
+
+      return `<div style="background:var(--bg3);border:1px solid rgba(250,180,60,.4);border-radius:3px;padding:7px 9px;margin-bottom:6px">
+        <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+          <span style="color:var(--orange);font-weight:700;font-size:10px;flex-shrink:0">📡 Trigger</span>
+          <input type="text" list="em-trigger-targets" value="${(g.target||'').replace(/"/g,'&quot;')}" placeholder="Ziel-Channel / Gruppe / *"
+            oninput="emGrafikField(${i},'target',this.value)"
+            style="width:140px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:10px">
+          <button class="ib" style="color:var(--red);margin-left:auto" onclick="emRemoveGrafik(${i})">✕</button>
+        </div>
+        <div style="margin-bottom:6px">
+          <select onchange="emTriggerSetKnownType(${i},this.value)"
+            style="width:100%;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:10px">
+            ${typeOptions}
+          </select>
+        </div>
+        <div style="margin-bottom:6px">${payloadBlock}</div>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
+          <select onchange="emTriggerSetAnchor(${i},this.value)"
+            style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--dim);padding:1px 3px;border-radius:2px">
+            <option value="start"${anchorMode==='start'?' selected':''}>ab Start</option>
+            <option value="preStart"${anchorMode==='preStart'?' selected':''}>vor Start</option>
+            <option value="end"${anchorMode==='end'?' selected':''}>vor ${endRef}</option>
+          </select>
+          <input type="text" value="${trTC}" placeholder="00:00:03:00"
+            oninput="emTriggerTcField(${i},this.value)"
+            style="width:110px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:2px;font-size:11px;font-family:var(--mono)">
+          <span style="color:var(--dim);font-size:8px">${anchorMode==='end'?`🔚 vor ${endRef}`:anchorMode==='preStart'?'⏪ vor Block-Beginn':'🎬 ab Block-Beginn'}</span>
+        </div>
+      </div>`;
+    }
 
     // ── Voiceover entry ───────────────────────────────────────────────────
     if (g.type === 'voiceover') {
@@ -8538,6 +8733,39 @@ function emGrafikTcField(i, which, val) {
   }
 }
 
+// Trigger-Children haben nur einen Zeitpunkt (kein Start/Ende-Bereich) — eigene
+// schlanke Anchor/TC-Helfer statt emGrafikSetStartMode/emGrafikTcField.
+function emTriggerSetAnchor(i, mode) {
+  const g = S._editGrafik[i]; if (!g) return;
+  const fps = S.config?.fps || 25;
+  const frames = g._startRelEnd === true
+    ? Math.abs(g.endOffsetFrames ?? 0)
+    : Math.abs(g.delayFrames ?? Math.round((g.delay ?? 0) * fps));
+  g._startRelEnd     = (mode === 'end');
+  g._startBeforeClip = (mode === 'preStart');
+  if (mode === 'end') {
+    g.endOffsetFrames = -frames; g.endOffset = -frames / fps;
+    g.delayFrames = undefined; g.delay = undefined;
+  } else {
+    const signed = (mode === 'preStart') ? -frames : frames;
+    g.delayFrames = signed; g.delay = signed / fps;
+    g.endOffsetFrames = undefined; g.endOffset = undefined;
+  }
+  _renderGrafikList();
+}
+function emTriggerTcField(i, val) {
+  const fps = S.config?.fps || 25;
+  const g = S._editGrafik[i]; if (!g) return;
+  const frames = _tcToFrames(val, fps);
+  if (g._startRelEnd === true) {
+    g.endOffsetFrames = frames != null ? -frames : null;
+    g.endOffset       = g.endOffsetFrames != null ? g.endOffsetFrames / fps : null;
+  } else {
+    const signed = g._startBeforeClip ? -(frames ?? 0) : (frames ?? 0);
+    g.delayFrames = signed;
+    g.delay       = signed / fps;
+  }
+}
 function emGrafikSetStartMode(i, mode) {
   const g = S._editGrafik[i]; if (!g) return;
   if (mode === 'preStart' && (g.type === 'voiceover' || g.type === 'record' || g.type === 'image')) return;
@@ -9246,7 +9474,7 @@ const I18N = {
     // Event editor — graphics tab
     'em.lbl.branding':'Channel Branding','em.branding.none':'(kein)',
     'em.childEvents':'🎬 Child Events','em.btn.addHTML':'＋ HTML','em.btn.addImage':'＋ Bild',
-    'em.child.hint':'Child Events starten relativ zum Clip-Start. HTML = Puppeteer/Template, Bild = JPG/PNG/GIF direkt, 🎙 = Voiceover WAV/MP3, ⏺ = Sekundär-Aufzeichnung.',
+    'em.child.hint':'Child Events starten relativ zum Clip-Start. HTML = Puppeteer/Template, Bild = JPG/PNG/GIF direkt, 🎙 = Voiceover WAV/MP3, ⏺ = Sekundär-Aufzeichnung, 📡 = Cross-Channel-Trigger (ChannelBus).',
     // Voiceover panel
     'cfg.vo.fade':'Fade','cfg.vo.fadeIn':'Fade-in (ms)','cfg.vo.fadeOut':'Fade-out (ms)',
     // Idle panel
@@ -9496,7 +9724,7 @@ const I18N = {
     // Event editor — graphics tab
     'em.lbl.branding':'Channel Branding','em.branding.none':'(none)',
     'em.childEvents':'🎬 Child Events','em.btn.addHTML':'＋ HTML','em.btn.addImage':'＋ Image',
-    'em.child.hint':'Child events start relative to clip start. HTML = Puppeteer/Template, Image = JPG/PNG/GIF, 🎙 = Voiceover WAV/MP3, ⏺ = Secondary recording.',
+    'em.child.hint':'Child events start relative to clip start. HTML = Puppeteer/Template, Image = JPG/PNG/GIF, 🎙 = Voiceover WAV/MP3, ⏺ = Secondary recording, 📡 = Cross-channel trigger (ChannelBus).',
     // Idle panel
     'cfg.idle.heading':'Idle Mode (when no playlist is running)',
     'cfg.idle.source':'Idle Source','cfg.idle.stillImage':'Idle Still Image',
@@ -10634,8 +10862,8 @@ function drawTimeline() {
       ctx.restore();
     }
 
-    // ── Child Events (Grafik/oGraf/Voiceover/Record) — zweite Reihe ─────────
-    const kids = (ev.children || []).map(_normalizeChild).filter(c => c.source === 'grafik' || c.source === 'oGraf' || c.source === 'voiceover' || c.source === 'record');
+    // ── Child Events (Grafik/oGraf/Voiceover/Record/Trigger) — zweite Reihe ─
+    const kids = (ev.children || []).map(_normalizeChild).filter(c => c.source === 'grafik' || c.source === 'oGraf' || c.source === 'voiceover' || c.source === 'record' || c.source === 'trigger');
     if (kids.length) {
       // Für block_start: clipDurMs = Gesamtdauer aller inneren Block-Events
       let clipDurMs = entry.durMs;
@@ -10652,13 +10880,17 @@ function drawTimeline() {
       kids.forEach((c, ci) => {
         const isVo  = c.source === 'voiceover';
         const isRec = c.source === 'record';
-        // Timing-Felder: voiceover direkt auf c, record in c.record, grafik in c.grafik
-        const g = isVo ? c : isRec ? (c.record || c) : (c.grafik || c);
+        const isTrg = c.source === 'trigger';
+        // Timing-Felder: voiceover direkt auf c, record in c.record, trigger in c.trigger, grafik in c.grafik
+        const g = isVo ? c : isRec ? (c.record || c) : isTrg ? (c.trigger || c) : (c.grafik || c);
         const fps = S.config?.fps || 25;
         const delayMs   = g.delayFrames != null ? (g.delayFrames / fps) * 1000 : (g.delay ?? 0) * 1000;
         const endOffset = g.endOffsetFrames != null ? (g.endOffsetFrames / fps) * 1000 : (g.endOffset ?? 0) * 1000;
         let durationMs;
-        if (g._endRelEnd || g.endOffsetFrames != null || g.endOffset != null) {
+        if (isTrg) {
+          // Trigger ist ein einzelner Zeitpunkt, keine Spanne — schmaler Marker
+          durationMs = 0;
+        } else if (g._endRelEnd || g.endOffsetFrames != null || g.endOffset != null) {
           durationMs = clipDurMs - delayMs + endOffset;
         } else if (g.durationFrames != null) {
           durationMs = (g.durationFrames / fps) * 1000;
@@ -10668,16 +10900,19 @@ function drawTimeline() {
         } else {
           durationMs = (g.duration ?? 5) * 1000;
         }
-        durationMs = Math.max(durationMs, 500);
-        const chStart  = absStart + delayMs;
-        const chEnd    = chStart + durationMs;
+        durationMs = Math.max(durationMs, isTrg ? 0 : 500);
+        const chStart  = absStart + (isTrg && g._startRelEnd ? clipDurMs + endOffset : delayMs);
+        const chEnd    = chStart + Math.max(durationMs, isTrg ? 60 : 0);
         if (chEnd < viewStart || chStart > viewEnd) return;
 
         const cx1 = Math.max(PAD_L, tPx(chStart));
         const cx2 = Math.min(PAD_L + TW, tPx(chEnd));
-        const cbw = Math.max(cx2 - cx1, 2);
+        const cbw = Math.max(cx2 - cx1, isTrg ? 3 : 2);
 
-        if (isRec) {
+        if (isTrg) {
+          ctx.fillStyle   = _isLight ? '#ffe9c2' : '#4a3210';
+          ctx.strokeStyle = _isLight ? '#cc8822' : '#fab43c';
+        } else if (isRec) {
           ctx.fillStyle   = _isLight ? '#ffe0e0' : '#3a1010';
           ctx.strokeStyle = _isLight ? '#cc4444' : '#f05050';
         } else if (isVo) {
@@ -10691,12 +10926,12 @@ function drawTimeline() {
         ctx.lineWidth = 1;
         ctx.strokeRect(cx1 + .5, CHILD_Y + 1.5, cbw - 1, CHILD_H - 3);
 
-        if (cbw > 18) {
-          ctx.fillStyle = isRec ? (_isLight ? '#aa2222' : '#f05050') : isVo ? (_isLight ? '#1a6a4a' : '#7dc') : (_isLight ? '#5533aa' : '#c4b5fd');
+        if (cbw > 18 || isTrg) {
+          ctx.fillStyle = isTrg ? (_isLight ? '#995c00' : '#fab43c') : isRec ? (_isLight ? '#aa2222' : '#f05050') : isVo ? (_isLight ? '#1a6a4a' : '#7dc') : (_isLight ? '#5533aa' : '#c4b5fd');
           ctx.font = '7px system-ui';
           ctx.save();
-          ctx.beginPath(); ctx.rect(cx1 + 1, CHILD_Y, cbw - 2, CHILD_H); ctx.clip();
-          const lbl = isRec ? ('⏺ ' + (g.slot || 'rec')) : isVo ? ('🎙 ' + (c.file?.split('/').pop() || 'vo')) : (g.template || 'g');
+          ctx.beginPath(); ctx.rect(cx1 + 1, CHILD_Y, Math.max(cbw - 2, 30), CHILD_H); ctx.clip();
+          const lbl = isTrg ? ('📡 ' + (g.target || '?')) : isRec ? ('⏺ ' + (g.slot || 'rec')) : isVo ? ('🎙 ' + (c.file?.split('/').pop() || 'vo')) : (g.template || 'g');
           ctx.fillText(lbl, cx1 + 2, CHILD_Y + CHILD_H - 2.5);
           ctx.restore();
         }
@@ -10707,7 +10942,7 @@ function drawTimeline() {
   // ── Child-Row Beschriftung ────────────────────────────────────────────
   ctx.fillStyle = _isLight ? 'rgba(80,60,160,.4)' : 'rgba(167,139,250,.35)';
   ctx.font = '7px system-ui';
-  ctx.fillText('grafik / vo / rec', PAD_L + 1, CHILD_Y + CHILD_H - 2.5);
+  ctx.fillText('grafik / vo / rec / trig', PAD_L + 1, CHILD_Y + CHILD_H - 2.5);
 
   // ── Info-Zeile ────────────────────────────────────────────────────────
   const hintEl = document.getElementById('timeline-hint');

@@ -149,6 +149,15 @@ a.open{color:#5fa8e0;border-color:#2c4a66}
 form{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
 input{background:#1e2025;border:1px solid #3a3d45;color:#e6e6e6;border-radius:6px;padding:6px 8px;font-size:13px}
 label{font-size:12px;color:#9aa0ab;display:block;margin-bottom:3px}
+#cfgOverlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:100;align-items:center;justify-content:center}
+#cfgOverlay.show{display:flex}
+#cfgDialog{background:#1a1c21;border:1px solid #3a3d45;border-radius:8px;width:96vw;height:92vh;display:flex;flex-direction:column;overflow:hidden}
+#cfgTabs{display:flex;align-items:center;gap:2px;background:#15171c;border-bottom:1px solid #2a2d35;padding:6px 8px;flex-shrink:0;overflow-x:auto}
+#cfgTabs button{margin:0;border-radius:6px 6px 0 0;border-bottom:none;white-space:nowrap}
+#cfgTabs button.active{background:#2c4a66;color:#bfe0ff;border-color:#5fa8e0}
+#cfgClose{margin-left:auto;flex-shrink:0}
+#cfgFrame{flex:1;border:none;background:#0c0d10}
+#cfgEmpty{flex:1;display:flex;align-items:center;justify-content:center;color:#9aa0ab;font-size:13px}
 </style></head><body>
 <h1>Channel-Supervisor</h1>
 <table id="tbl"><thead><tr><th>ID</th><th>Status</th><th>Port</th><th>PID</th><th>Restarts</th><th>Aktionen</th></tr></thead><tbody></tbody></table>
@@ -160,19 +169,31 @@ label{font-size:12px;color:#9aa0ab;display:block;margin-bottom:3px}
   <div><label>Grafik-Port</label><input name="grafikPort" type="number" placeholder="3111"></div>
   <button type="submit">Anlegen + Starten</button>
 </form>
+
+<div id="cfgOverlay">
+  <div id="cfgDialog">
+    <div id="cfgTabs"><button id="cfgClose" onclick="closeConfig()">✕ Schließen</button></div>
+    <div id="cfgEmpty">Channel wird nicht ausgeführt — keine UI verfügbar.</div>
+    <iframe id="cfgFrame" style="display:none"></iframe>
+  </div>
+</div>
+
 <script>
+let _channels = [];
+let _activeId = null;
 function fmtUptime(ms){ if(!ms) return ''; const s=Math.floor((Date.now()-ms)/1000); const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h+'h '+m+'m'; }
 async function refresh(){
   const res = await fetch('/api/channels');
-  const list = await res.json();
+  _channels = await res.json();
   const tb = document.querySelector('#tbl tbody');
-  tb.innerHTML = list.map(c => \`<tr>
+  tb.innerHTML = _channels.map(c => \`<tr>
     <td>\${c.id}</td>
     <td><span class="status \${c.status}">\${c.status}</span></td>
     <td>\${c.port}</td>
     <td>\${c.pid || '–'}</td>
     <td>\${c.restarts}</td>
     <td>
+      <button class="open" onclick="openConfig('\${c.id}')">⚙ Konfigurieren</button>
       <a class="btn open" target="_blank" href="//\${location.hostname}:\${c.port}/">UI öffnen</a>
       <button onclick="act('\${c.id}','start')">Start</button>
       <button onclick="act('\${c.id}','stop')">Stop</button>
@@ -180,6 +201,11 @@ async function refresh(){
       <button onclick="del('\${c.id}')">Entfernen</button>
     </td>
   </tr>\`).join('');
+  // Dialog offen + Channel inzwischen entfernt → schließen; sonst Tabs/Frame synchron halten.
+  if (document.getElementById('cfgOverlay').classList.contains('show')) {
+    if (_activeId && !_channels.some(c => c.id === _activeId)) closeConfig();
+    else renderCfgTabs();
+  }
 }
 async function act(id, action){ await fetch('/api/channels/'+encodeURIComponent(id)+'/'+action, {method:'POST'}); refresh(); }
 async function del(id){ if(!confirm('Channel '+id+' entfernen (stoppt den Prozess)?')) return; await fetch('/api/channels/'+encodeURIComponent(id), {method:'DELETE'}); refresh(); }
@@ -192,6 +218,36 @@ document.querySelector('#addForm').addEventListener('submit', async (e) => {
   e.target.reset();
   refresh();
 });
+
+// ── Config-Dialog: Tableiste über allen Channels, darunter die jeweilige UI per iframe ──
+function renderCfgTabs(){
+  const tabs = document.getElementById('cfgTabs');
+  tabs.innerHTML = _channels.map(c =>
+    \`<button class="\${c.id===_activeId?'active':''}" onclick="openConfig('\${c.id}')">\${c.id===_activeId&&c.status!=='running'?'⚠ ':''}\${c.id}</button>\`
+  ).join('') + '<button id="cfgClose" onclick="closeConfig()">✕ Schließen</button>';
+}
+function openConfig(id){
+  _activeId = id;
+  document.getElementById('cfgOverlay').classList.add('show');
+  renderCfgTabs();
+  const c = _channels.find(c => c.id === id);
+  const frame = document.getElementById('cfgFrame');
+  const empty = document.getElementById('cfgEmpty');
+  if (!c || c.status !== 'running') {
+    frame.style.display = 'none'; frame.src = 'about:blank';
+    empty.style.display = 'flex';
+    return;
+  }
+  empty.style.display = 'none';
+  frame.style.display = '';
+  frame.src = \`//\${location.hostname}:\${c.port}/\`;
+}
+function closeConfig(){
+  _activeId = null;
+  document.getElementById('cfgOverlay').classList.remove('show');
+  document.getElementById('cfgFrame').src = 'about:blank';
+}
+document.getElementById('cfgOverlay').addEventListener('click', e => { if (e.target.id === 'cfgOverlay') closeConfig(); });
 refresh();
 setInterval(refresh, 2000);
 </script>
