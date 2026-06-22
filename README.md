@@ -139,6 +139,12 @@ Opens a dashboard at **http://localhost:3099** listing all configured channels, 
                                     Video Sink + Audio Sinks
 ```
 
+### Master Pipeline (actual GStreamer element graph)
+
+Auto-generated graph of the running master pipeline (compositor, video switcher, audio mixer/router, sinks):
+
+![Pipeline element graph](docs/pipeline-graph.svg)
+
 ---
 
 ## 🎨 oGraf Graphics Engine
