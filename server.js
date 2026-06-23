@@ -170,6 +170,61 @@ function _userLog(sess, action, detail) {
   } catch(e) { console.error('[userlog]', e.message); }
 }
 
+function _plEvLabel(e) {
+  return e?.title || e?.file || e?.source || e?.id || '?';
+}
+function _plFmtVal(v) {
+  if (v == null) return '-';
+  if (typeof v === 'object') return JSON.stringify(v).slice(0, 40);
+  return String(v).slice(0, 40);
+}
+
+// Compares old vs. new playlist event arrays (by id) for the user-log: which events were
+// added/removed/edited (with changed fields), or just reordered.
+const _PL_DIFF_IGNORE_KEYS = new Set(['_state']);
+function _diffPlaylistEvents(oldEvts, newEvts) {
+  const oldMap = new Map((oldEvts||[]).map(e => [e.id, e]));
+  const newMap = new Map((newEvts||[]).map(e => [e.id, e]));
+  const added = (newEvts||[]).filter(e => !oldMap.has(e.id));
+  const removed = (oldEvts||[]).filter(e => !newMap.has(e.id));
+  const edited = [];
+  for (const e of (newEvts||[])) {
+    const old = oldMap.get(e.id);
+    if (!old) continue;
+    const fields = [];
+    const keys = new Set([...Object.keys(old), ...Object.keys(e)]);
+    for (const k of keys) {
+      if (_PL_DIFF_IGNORE_KEYS.has(k)) continue;
+      const a = old[k], b = e[k];
+      if (JSON.stringify(a) !== JSON.stringify(b)) fields.push(`${k}: ${_plFmtVal(a)} → ${_plFmtVal(b)}`);
+    }
+    if (fields.length) edited.push({ event: e, fields });
+  }
+  let reordered = false;
+  if (!added.length && !removed.length && !edited.length) {
+    reordered = (oldEvts||[]).map(e=>e.id).join(',') !== (newEvts||[]).map(e=>e.id).join(',');
+  }
+  return { added, removed, edited, reordered };
+}
+
+function _logConfigDiff(req, label, before, after, keys) {
+  const sess = _getSession(req);
+  const changes = keys
+    .filter(k => JSON.stringify(before[k]) !== JSON.stringify(after[k]))
+    .map(k => `${k}: ${_plFmtVal(before[k])} → ${_plFmtVal(after[k])}`)
+    .join('; ');
+  _userLog(sess, 'config.save', `${label}${changes ? ': '+changes : ''}`);
+}
+
+function _describePlaylistDiff(diff) {
+  const parts = [];
+  if (diff.removed.length) parts.push(`gelöscht: ${diff.removed.map(_plEvLabel).join(', ')}`);
+  if (diff.added.length)   parts.push(`eingefügt: ${diff.added.map(_plEvLabel).join(', ')}`);
+  for (const ed of diff.edited) parts.push(`bearbeitet "${_plEvLabel(ed.event)}": ${ed.fields.join('; ')}`);
+  if (diff.reordered) parts.push('Reihenfolge geändert');
+  return parts.join(' | ').slice(0, 2000);
+}
+
 /**
  * Löst einen Idle-Bild-Dateinamen zu einem absoluten Pfad auf.
  * Sucht in: images/ → channelbranding/ → absolut
@@ -1034,6 +1089,17 @@ recordEngine.on('started', d => { broadcast('record-started', d); _arOnRecord('s
 recordEngine.on('stopped', d => { broadcast('record-stopped', d); _arOnRecord('stop', d); });
 recordEngine.on('remuxed', d => { library.unlock(d.outputPath); if (RECORD_IN_LIBRARY && d.ok) library.scan(); });
 
+// ── OutputEngine: optionale Zusatz-Ausgänge (Downconvert / Cleanfeed) ─────────
+const OutputEngine = require('./lib/OutputEngine');
+const outputEngine = new OutputEngine({
+  outputs: _settings.extraOutputs || [],
+  log:     (msg, lvl) => log(msg, lvl, 'output'),
+});
+outputEngine.on('started', d => broadcast('output-started', d));
+outputEngine.on('stopped', d => broadcast('output-stopped', d));
+outputEngine.on('error',   d => broadcast('output-error', d));
+outputEngine.startEnabled();
+
 // ── Test-RTSP-Server ─────────────────────────────────────────────────────────
 let _rtspTestProc = null;
 let _rtspTestUrl  = null;
@@ -1208,13 +1274,16 @@ playlist.on('playing',      d  => {
 });
 playlist.on('cut',          d  => broadcast('cut', d));
 playlist.on('ready-to-cut', d  => broadcast('ready-to-cut', d));
-playlist.on('ended',        () => { _currentPlaying = null; log('Playlist fertig', 'info', 'playlist'); broadcast('playlist-ended', {}); _arFlushPlay(Date.now(), 'Completed'); });
+playlist.on('ended',        () => { _currentPlaying = null; log('Playlist fertig', 'info', 'playlist'); broadcast('playlist-ended', {}); _arFlushPlay(Date.now(), 'natural'); });
 playlist.on('stopped',      () => {
   _currentPlaying = null;
   broadcast('playlist-ended', {});
   broadcast('state', getState());
   master?.stopAllLiveFeeders?.().catch(() => {});
+  _arFlushPlay(Date.now(), 'stopped');
 });
+playlist.on('advance-reason', d => { _ar.pendingReason = d.reason; });
+playlist.on('not-played',   d  => _arOnNotPlayed(d.event, d.reason, d.plannedSec, d.detail));
 playlist.on('manual-hold',  d  => { broadcast('manual-hold', d); broadcast('state', getState()); });
 playlist.on('live-precue',    d  => {
   broadcast('live-precue', d);
@@ -1231,9 +1300,28 @@ playlist.on('grafik',       d  => {
 });
 
 // ── As-Run Log (ORF Marina Text fixed-width format) ────────────────────────────
-const _AR_COLS = [4,22,22,32,20,32,11,32,11,12,11,12,11,32,32,32,32];
-const _AR_HDRS = ['TYPE','START TIME','END TIME','MEDIA ID','EVENT','TITLE','SOM','SEGMENT','DURATION','START TYPE','STRT OFFSET','END TYPE','END OFFSET','DEVICE STREAM','RECONCILE KEY','HOUSE ID','STATUS'];
-const _ar = { lastPlay: null, grafik: new Map(), vo: new Map(), _key: Date.now() };
+const _AR_COLS = [4,22,22,32,20,32,11,32,11,11,12,11,12,11,32,32,32,32,32];
+const _AR_HDRS = ['TYPE','START TIME','END TIME','MEDIA ID','EVENT','TITLE','SOM','SEGMENT','DURATION','PLANNED DUR','START TYPE','STRT OFFSET','END TYPE','END OFFSET','DEVICE STREAM','RECONCILE KEY','HOUSE ID','STATUS','REASON'];
+const _ar = { lastPlay: null, grafik: new Map(), vo: new Map(), _key: Date.now(), pendingReason: null };
+
+// Human-readable labels for disruption reasons recorded by PlaylistEngine
+const _AR_REASON_LABEL = {
+  'natural':         '',
+  'user-next':       'User Next/Play',
+  'user-jump':       'User Jump',
+  'fixtime-cutoff':  'Fix Event (downstream)',
+  'stopped':         'Playlist Stopped',
+  'missing-media':   'Media Missing',
+  'no-signal':       'No Input Signal',
+  'no-live-source':  'No Live Source Configured',
+  'no-pad':          'No Output Pad',
+  'no-player':       'No Player For Slot',
+  'error':           'Engine Error',
+};
+function _arReasonLabel(key, detail) {
+  const lbl = _AR_REASON_LABEL[key] || key || '';
+  return detail ? `${lbl}: ${detail}`.slice(0, 32) : lbl;
+}
 // ASRUN-independent clip-start tracker (works even when ASRUN is disabled)
 let _clipStartMs    = 0;  // wall-clock ms when current player clip went on-air
 let _anyEventStartMs = 0; // wall-clock ms when ANY event (incl. smpte/black/live) went on-air
@@ -1311,19 +1399,30 @@ function _arOnPlay(d) {
   if (ev.source === 'smpte' || ev.source === 'black' || ev.source === 'image') return;
   if (!ev.file && !ev.title) return;
   const now = Date.now();
-  if (_ar.lastPlay) _arFlushPlay(now, 'User Next');
-  _ar.lastPlay = { startMs: now, event: ev };
+  const reason = _ar.pendingReason || 'natural';
+  _ar.pendingReason = null;
+  if (_ar.lastPlay) _arFlushPlay(now, reason);
+  _ar.lastPlay = { startMs: now, event: ev, plannedSec: d.clipDur || 0, subReason: d.subReason || null };
 }
 
-function _arFlushPlay(endMs, status) {
+function _arFlushPlay(endMs, endReason) {
   if (!_ar.lastPlay) return;
-  const { startMs, event: ev } = _ar.lastPlay;
+  const { startMs, event: ev, plannedSec, subReason } = _ar.lastPlay;
   _ar.lastPlay = null;
   const file = _arFile(); if (!file) return;
-  const fps     = FPS;
-  const som     = ev.som != null ? _arFmtTC(typeof ev.som === 'number' ? ev.som : (ev.som||0), fps) : '';
-  const mediaId = path.basename(ev.file||'', path.extname(ev.file||''));
-  const evType  = ev._isAsset ? 'Asset Event' : 'Media Event';
+  const fps      = FPS;
+  const som      = ev.som != null ? _arFmtTC(typeof ev.som === 'number' ? ev.som : (ev.som||0), fps) : '';
+  const mediaId  = path.basename(ev.file||'', path.extname(ev.file||''));
+  const evType   = ev._isAsset ? 'Asset Event' : 'Media Event';
+  const actualMs = endMs - startMs;
+  let status, reasonTxt;
+  if (subReason) {
+    status = 'Substituted'; reasonTxt = _arReasonLabel(subReason);
+  } else if (!endReason || endReason === 'natural') {
+    status = 'Completed'; reasonTxt = '';
+  } else {
+    status = 'Aborted'; reasonTxt = _arReasonLabel(endReason);
+  }
   _arAppend(file, _arRow([
     'P',
     _arFmtDate(startMs),
@@ -1333,7 +1432,8 @@ function _arFlushPlay(endMs, status) {
     ev.title || ev.file || '',
     som,
     ev.segmentName || ev._assetLabel || '',
-    _arFmtDur(endMs - startMs),
+    _arFmtDur(actualMs),
+    plannedSec ? _arFmtDur(plannedSec * 1000) : '',
     'Sequential',
     '',
     'Duration',
@@ -1341,7 +1441,37 @@ function _arFlushPlay(endMs, status) {
     '',
     ev.reconcileKey || _arNextKey(),
     '',
-    status || 'Completed',
+    status,
+    reasonTxt,
+  ]));
+}
+
+// Logs an event that never aired at all (missing media, no live source, no pad, engine error, ...)
+function _arOnNotPlayed(ev, reason, plannedSec, detail) {
+  if (!ASRUN_ENABLED) return;
+  const file = _arFile(); if (!file) return;
+  const now = Date.now();
+  const mediaId = path.basename(ev?.file||'', path.extname(ev?.file||''));
+  _arAppend(file, _arRow([
+    'N',
+    _arFmtDate(now),
+    _arFmtDate(now),
+    mediaId,
+    ev?._isAsset ? 'Asset Event' : 'Media Event',
+    ev?.title || ev?.file || '',
+    '',
+    ev?.segmentName || ev?._assetLabel || '',
+    '00:00:00:00',
+    plannedSec ? _arFmtDur(plannedSec * 1000) : '',
+    'Sequential',
+    '',
+    'Duration',
+    '',
+    '',
+    ev?.reconcileKey || _arNextKey(),
+    '',
+    'Not Played',
+    _arReasonLabel(reason, detail),
   ]));
 }
 
@@ -1359,6 +1489,7 @@ function _arOnAssetCut(assetId, assetLabel) {
     '',
     '',
     '00:00:00:00',
+    '',
     'Immediate',
     '',
     '',
@@ -1367,6 +1498,7 @@ function _arOnAssetCut(assetId, assetLabel) {
     _arNextKey(),
     '',
     'Triggered',
+    '',
   ]));
 }
 
@@ -1391,6 +1523,7 @@ function _arOnVo(action, slotId, file) {
       '',
       '',
       _arFmtDur(now - v.startMs),
+      '',
       '+ParentStart',
       '00:00:00:00',
       '+ParentEnd',
@@ -1399,6 +1532,7 @@ function _arOnVo(action, slotId, file) {
       _arNextKey(),
       '',
       'Completed',
+      '',
     ]));
   }
 }
@@ -1426,6 +1560,7 @@ function _arOnRecord(action, d) {
       '',
       '',
       _arFmtDur(now - s.startMs),
+      '',
       '+ParentStart',
       '00:00:00:00',
       '+ParentEnd',
@@ -1434,6 +1569,7 @@ function _arOnRecord(action, d) {
       _arNextKey(),
       '',
       'Completed',
+      '',
     ]));
   }
 }
@@ -1458,6 +1594,7 @@ function _arOnGrafik(action, id, template, source) {
       '',
       '',
       _arFmtDur(now - g.startMs),
+      '',
       '+ParentStart',
       '00:00:00:00',
       '+ParentEnd',
@@ -1466,6 +1603,7 @@ function _arOnGrafik(action, id, template, source) {
       _arNextKey(),
       '',
       'Completed',
+      '',
     ]));
   }
 }
@@ -1796,6 +1934,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     if (!Array.isArray(b.classifications)) return json(res, { ok: false, error: 'array required' }, 400);
     _settings.classifications = b.classifications;
     saveSettings(_settings);
+    _userLog(sess, 'config.save', `classifications: ${b.classifications.length} Einträge`);
     broadcast('classifications', _getClassifications());
     return json(res, { ok: true });
   }
@@ -1919,6 +2058,53 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     return json(res, { ok: true });
   }
 
+  // ── Output-API: Zusatz-Ausgänge (Downconvert / Cleanfeed) ──────────────────
+  if (meth === 'GET' && p === '/api/outputs/status')
+    return json(res, outputEngine.getStatus());
+  if (meth === 'POST' && p === '/api/outputs/start') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    const b = await parseBody(req);
+    const ok = outputEngine.start(b.id);
+    return json(res, { ok });
+  }
+  if (meth === 'POST' && p === '/api/outputs/stop') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    const b = await parseBody(req);
+    outputEngine.stop(b.id);
+    return json(res, { ok: true });
+  }
+  if (meth === 'POST' && p === '/api/outputs/stop-all') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    outputEngine.stopAll();
+    return json(res, { ok: true });
+  }
+  if (meth === 'POST' && p === '/api/outputs/settings') {
+    const sess = _requireAuth(req, res, ['editor']); if (sess === false) return;
+    const b = await parseBody(req);
+    if (!Array.isArray(b.outputs)) return json(res, { ok: false, error: 'outputs[] erforderlich' }, 400);
+    const outputs = b.outputs.map((o, i) => ({
+      id:          o.id || `out${i + 1}`,
+      label:       o.label || `Ausgang ${i + 1}`,
+      enabled:     !!o.enabled,
+      source:      o.source === 'clean' ? 'clean' : 'pgm',
+      audioGroup:  o.audioGroup || 'pgm-stereo',
+      width:       parseInt(o.width)  || 0,
+      height:      parseInt(o.height) || 0,
+      bitrate:     parseInt(o.bitrate) || 4000,
+      speedPreset: o.speedPreset || 'veryfast',
+      sink:        o.sink || 'udp',
+      uri:         o.uri || '',
+      deviceNumber: o.deviceNumber != null ? parseInt(o.deviceNumber) : null,
+      decklinkMode: o.decklinkMode || '1080p25',
+      decklinkAudio: o.decklinkAudio !== false,
+    }));
+    _settings.extraOutputs = outputs;
+    saveSettings(_settings);
+    outputEngine.setConfig(outputs);
+    for (const o of outputs) if (o.enabled) outputEngine.start(o.id);
+    return json(res, { ok: true });
+  }
+
   // ── Test-RTSP-Server-API ───────────────────────────────────────────────────
   if (meth === 'GET' && p === '/api/rtsp-test/status')
     return json(res, { running: !!_rtspTestProc, url: _rtspTestUrl });
@@ -1989,7 +2175,8 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const sess = _requireAuth(req, res, ['editor']); if (sess === false) return;
     const b = await parseBody(req);
     const evts = Array.isArray(b) ? b : (b.events || b.playlist || []);
-    _userLog(sess, 'playlist.set', `${evts.length} events`);
+    const _plDiff = _diffPlaylistEvents(playlist.playlist, evts);
+    _userLog(sess, 'playlist.set', _describePlaylistDiff(_plDiff) || `${evts.length} events (keine Änderung erkannt)`);
     _suppressPlaylistUpdatedBroadcast += 2; // set() emits updated 1-2× before adaptation runs
     playlist.set(evts);
     _revalidateDurations();
@@ -2061,14 +2248,26 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     _userLog(sess, 'playlist.stop', '');
     await playlist.stop(); return json(res, { ok: true });
   }
-  if (meth === 'POST' && p === '/api/playlist/jump')      { const b = await parseBody(req); await playlist.jump(parseInt(b.index ?? 0)); return json(res, { ok: true }); }
-  if (meth === 'POST' && p === '/api/playlist/forcejump') { const b = await parseBody(req); await playlist.forceJump(parseInt(b.index ?? 0)); return json(res, { ok: true }); }
+  if (meth === 'POST' && p === '/api/playlist/jump') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    const b = await parseBody(req);
+    const idx = parseInt(b.index ?? 0);
+    _userLog(sess, 'playlist.jump', _plEvLabel(playlist.playlist[idx]) + ` (Index ${idx})`);
+    await playlist.jump(idx); return json(res, { ok: true });
+  }
+  if (meth === 'POST' && p === '/api/playlist/forcejump') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    const b = await parseBody(req);
+    const idx = parseInt(b.index ?? 0);
+    _userLog(sess, 'playlist.forcejump', _plEvLabel(playlist.playlist[idx]) + ` (Index ${idx})`);
+    await playlist.forceJump(idx); return json(res, { ok: true });
+  }
   if (meth === 'POST' && p === '/api/playlist/validate') return json(res, playlist.validate());
   if (meth === 'POST' && p === '/api/playlist/insert') {
     const sess = _requireAuth(req, res, ['editor']); if (sess === false) return;
     const b = await parseBody(req);
     if (!Array.isArray(b.events)) return json(res, { ok: false, error: 'events required' });
-    _userLog(sess, 'playlist.insert', `${b.events.length} events at index ${b.index ?? '?'}`);
+    _userLog(sess, 'playlist.insert', `eingefügt @${b.index ?? '?'}: ${b.events.map(_plEvLabel).join(', ')}`);
     const arr = [...playlist.playlist];
     arr.splice(Math.max(0, Math.min(b.index ?? arr.length, arr.length)), 0,
       ...b.events.map(ev => ({ ...ev, id: ev.id || genId() })));
@@ -2147,10 +2346,16 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     catch { return json(res, []); }
   }
   if (meth === 'POST' && p === '/api/branding/set') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
     const b = await parseBody(req); if (!b.file) return json(res, { ok: false, error: 'file required' });
+    _userLog(sess, 'branding.set', b.file);
     master.setBranding(b.file, true); return json(res, { ok: true, file: b.file });
   }
-  if (meth === 'POST' && p === '/api/branding/off') { master.setBranding(null); return json(res, { ok: true }); }
+  if (meth === 'POST' && p === '/api/branding/off') {
+    const sess = _requireAuth(req, res, ['editor','operator']); if (sess === false) return;
+    _userLog(sess, 'branding.off', '');
+    master.setBranding(null); return json(res, { ok: true });
+  }
 
   // ── Voiceover API ──────────────────────────────────────────────────────────
   if (meth === 'GET' && p === '/api/voiceover/config') {
@@ -2165,6 +2370,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       voiceoverEngine._presets = Object.assign({}, VoiceoverEngine.defaultPresets(), b.presets);
       _settings.voPresets = b.presets;
       saveSettings(_settings);
+      _userLog(_getSession(req), 'config.save', `voiceover-presets: ${Object.keys(b.presets).join(', ')}`);
     }
     return json(res, { ok: true });
   }
@@ -2188,9 +2394,11 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   if (meth === 'POST' && p === '/api/voiceover/config') {
     const sess = _requireAuth(req, res, ['admin']); if (sess === false) return;
     const b = await parseBody(req);
+    const _before = { voFadeInMs: _settings.voFadeInMs, voFadeOutMs: _settings.voFadeOutMs };
     if (b.fadeInMs  != null) { _settings.voFadeInMs  = parseInt(b.fadeInMs);  voiceoverEngine._fadeInMs  = _settings.voFadeInMs; }
     if (b.fadeOutMs != null) { _settings.voFadeOutMs = parseInt(b.fadeOutMs); voiceoverEngine._fadeOutMs = _settings.voFadeOutMs; }
     saveSettings(_settings);
+    _logConfigDiff(req, 'voiceover-config', _before, _settings, ['voFadeInMs','voFadeOutMs']);
     return json(res, { ok: true, fadeInMs: _settings.voFadeInMs, fadeOutMs: _settings.voFadeOutMs });
   }
 
@@ -2230,21 +2438,27 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   }
   if (meth === 'POST' && p === '/api/config/sink') {
     const b = await parseBody(req); if (!b.sink) return json(res, { ok: false, error: 'sink required' }, 400);
+    const _before = { videoSink: _settings.videoSink };
     masterOpts.videoSink = b.sink; _settings.videoSink = b.sink; saveSettings(_settings);
+    _logConfigDiff(req, 'videosink', _before, _settings, ['videoSink']);
     await master.stop(); await ensureMaster(); return json(res, { ok: true, sink: b.sink });
   }
   if (meth === 'POST' && p === '/api/config/audiosink') {
     const b = await parseBody(req); if (!b.sink) return json(res, { ok: false, error: 'sink required' }, 400);
+    const _before = { audioSink: _settings.audioSink };
     masterOpts.audioSink = b.sink; _settings.audioSink = b.sink; saveSettings(_settings);
+    _logConfigDiff(req, 'audiosink', _before, _settings, ['audioSink']);
     await master.stop(); masterStarted = false; await ensureMaster();
     return json(res, { ok: true, sink: b.sink });
   }
   if (meth === 'POST' && p === '/api/config/format') {
     const b = await parseBody(req);
+    const _before = { width: _settings.width, height: _settings.height, fps: _settings.fps };
     if (b.format) { const f = MasterPipeline.parseFormat(b.format); Object.assign(masterOpts, { width: f.w, height: f.h, fps: f.fps }); }
     else { if (b.width) masterOpts.width=parseInt(b.width); if (b.height) masterOpts.height=parseInt(b.height); if (b.fps) masterOpts.fps=parseInt(b.fps); }
     Object.assign(_settings, { width: masterOpts.width, height: masterOpts.height, fps: masterOpts.fps });
     saveSettings(_settings);
+    _logConfigDiff(req, 'format', _before, _settings, ['width','height','fps']);
     // GrafixEngine auf neue Auflösung bringen bevor Master neu startet
     grafixEngine.setFormat(masterOpts.width, masterOpts.height, masterOpts.fps).catch(() => {});
     await master.stop(); masterStarted = false;
@@ -2252,6 +2466,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   }
   if (meth === 'POST' && p === '/api/config/conversion') {
     const b = await parseBody(req);
+    const _before = { scaleMode: _settings.scaleMode, scaleMethod: _settings.scaleMethod, deinterlaceMode: _settings.deinterlaceMode };
     const SCALE_MODES   = ['fit','crop','stretch'];
     const DEINT_MODES   = ['auto','always','never'];
     const SCALE_METHODS = [0,1,2,3,4,5];
@@ -2259,34 +2474,42 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     if (b.scaleMethod     !== undefined && SCALE_METHODS.includes(+b.scaleMethod)) { masterOpts.scaleMethod  = +b.scaleMethod;   _settings.scaleMethod    = +b.scaleMethod; }
     if (b.deinterlaceMode !== undefined && DEINT_MODES.includes(b.deinterlaceMode)) { masterOpts.deinterlaceMode = b.deinterlaceMode; _settings.deinterlaceMode = b.deinterlaceMode; }
     saveSettings(_settings);
+    _logConfigDiff(req, 'conversion', _before, _settings, ['scaleMode','scaleMethod','deinterlaceMode']);
     await master.stop(); masterStarted = false;
     return json(res, { ok: await ensureMaster(), config: { scaleMode: masterOpts.scaleMode, scaleMethod: masterOpts.scaleMethod, deinterlaceMode: masterOpts.deinterlaceMode } });
   }
   if (meth === 'POST' && p === '/api/config/numplayers') {
     const b = await parseBody(req);
+    const _before = { numPlayers: _settings.numPlayers };
     const n = Math.max(1, Math.min(8, parseInt(b.numPlayers || '2')));
     _settings.numPlayers = n; saveSettings(_settings);
+    _logConfigDiff(req, 'numplayers', _before, _settings, ['numPlayers']);
     return json(res, { ok: true, numPlayers: n, restart: true });
   }
   if (meth === 'POST' && p === '/api/config/numvoslots') {
     const b = await parseBody(req);
+    const _before = { numVoSlots: _settings.numVoSlots };
     const n = Math.max(1, Math.min(4, parseInt(b.numVoSlots || '2')));
     _settings.numVoSlots = n; saveSettings(_settings);
+    _logConfigDiff(req, 'numvoslots', _before, _settings, ['numVoSlots']);
     return json(res, { ok: true, numVoSlots: n, restart: true });
   }
   if (meth === 'POST' && p === '/api/config/transitionspeeds') {
     const b = await parseBody(req);
+    const _before = { transitionSpeeds: _settings.transitionSpeeds };
     const speeds = {};
     if (b.fast   > 0) speeds.fast   = Math.max(100, Math.min(10000, parseInt(b.fast)));
     if (b.medium > 0) speeds.medium = Math.max(100, Math.min(20000, parseInt(b.medium)));
     if (b.slow   > 0) speeds.slow   = Math.max(100, Math.min(30000, parseInt(b.slow)));
     _settings.transitionSpeeds = Object.assign(_settings.transitionSpeeds || {}, speeds);
     saveSettings(_settings);
+    _logConfigDiff(req, 'transitionspeeds', _before, _settings, ['transitionSpeeds']);
     transitionEngine.setSpeeds(_settings.transitionSpeeds);
     return json(res, { ok: true, transitionSpeeds: _settings.transitionSpeeds });
   }
   if (meth === 'POST' && p === '/api/config/backup') {
     const b = await parseBody(req);
+    const _before = { backupSlot: _settings.backupSlot, backupMediaDirs: _settings.backupMediaDirs };
     const slot = b.backupSlot || null;
     const dirs = Array.isArray(b.backupMediaDirs) ? b.backupMediaDirs.filter(d => typeof d === 'string' && d.trim()) : [];
     _settings.backupSlot      = slot;
@@ -2294,10 +2517,12 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     playlist._backupSlot      = slot;
     playlist._backupMediaDirs = dirs;
     saveSettings(_settings);
+    _logConfigDiff(req, 'backup', _before, _settings, ['backupSlot','backupMediaDirs']);
     return json(res, { ok: true, backupSlot: slot, backupMediaDirs: dirs });
   }
   if (meth === 'POST' && p === '/api/config/idle') {
     const b = await parseBody(req);
+    const _before = { idleSource: _settings.idleSource, idleImagePath: _settings.idleImagePath };
     if (b.source) {
       masterOpts.idleSource = b.source;
       master.setIdleSource?.(b.source);
@@ -2313,6 +2538,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       _settings.idleImagePath  = b.imagePath;  // Originalnamen speichern, nicht den absoluten Pfad
     }
     saveSettings(_settings);
+    _logConfigDiff(req, 'idle', _before, _settings, ['idleSource','idleImagePath']);
     // Neustart damit Idle-Bild / -Quelle sofort wirksam wird
     if (!playlist.running) {
       await master.stop(); masterStarted = false; await ensureMaster();
@@ -2346,6 +2572,10 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   if (meth === 'POST' && p === '/api/config/paths') {
     const sess = _requireAuth(req, res, ['admin']); if (sess === false) return;
     const b = await parseBody(req);
+    const _cfgKeys = ['mediaDir','playlistsDir','grafixDir','asRunDir','asRunEnabled','channelName',
+      'durationMismatch','defaultStartTimecode','prepKeepReconcile','userLogPath','authEnabled',
+      'missingBehavior','defaultEvent'];
+    const _cfgBefore = {}; for (const k of _cfgKeys) _cfgBefore[k] = _settings[k];
     let restartHint = false;
     if (b.mediaDir     !== undefined) { _settings.mediaDir     = b.mediaDir;     MEDIA_DIR     = b.mediaDir;     restartHint = true; }
     if (b.playlistsDir !== undefined) { _settings.playlistsDir = b.playlistsDir; PLAYLISTS_DIR = b.playlistsDir; restartHint = true; }
@@ -2377,7 +2607,11 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       };
     }
     saveSettings(_settings);
-    _userLog(sess, 'config.save', '');
+    const _cfgChanges = _cfgKeys
+      .filter(k => JSON.stringify(_cfgBefore[k]) !== JSON.stringify(_settings[k]))
+      .map(k => `${k}: ${_plFmtVal(_cfgBefore[k])} → ${_plFmtVal(_settings[k])}`)
+      .join('; ');
+    _userLog(sess, 'config.save', _cfgChanges || 'keine Änderung');
     return json(res, { ok: true, restartRequired: restartHint });
   }
 
@@ -2397,6 +2631,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   if (meth === 'POST' && p === '/api/config/channelbus') {
     const sess = _requireAuth(req, res, ['admin']); if (sess === false) return;
     const b = await parseBody(req);
+    const _cbBefore = _settings.channelBus;
     _settings.channelBus = {
       enabled:    !!b.enabled,
       channelId:  b.channelId  || '',
@@ -2405,7 +2640,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       peers:      Array.isArray(b.peers) ? b.peers.map(pr => ({ host: String(pr.host||''), port: parseInt(pr.port) })) : [],
     };
     saveSettings(_settings);
-    _userLog(sess, 'config.save', 'channelbus');
+    _userLog(sess, 'config.save', `channelbus: ${_plFmtVal(_cbBefore)} → ${_plFmtVal(_settings.channelBus)}`);
     // Restart erforderlich: ChannelBus-Verbindungen werden nur beim Server-Start aufgebaut.
     return json(res, { ok: true, restartRequired: true });
   }
@@ -2771,6 +3006,26 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     }
   }
 
+  // DVE-Editor-Hilfe: grüne Fläche in einem Referenzbild finden → Box für DVE-Squeeze.
+  // Reiner Editor-Vorgang (einmaliger Aufruf), kein Sendepfad-Einfluss.
+  if (meth === 'POST' && p === '/api/grafik/detect-green') {
+    const b = await parseBody(req);
+    const file = (b.imagePath || '').trim();
+    if (!file) return json(res, { ok: false, error: 'imagePath erforderlich' }, 400);
+    const abs = resolveIdleImage(file) || (() => {
+      const a = path.join(MEDIA_DIR, file);
+      return fs.existsSync(a) ? a : null;
+    })();
+    if (!abs) return json(res, { ok: false, error: `Bild nicht gefunden: ${file} (gesucht in images/, channelbranding/, media/)` }, 404);
+    try {
+      const { detectGreenZone } = require('./lib/GreenZoneDetect');
+      const result = await detectGreenZone(abs);
+      return json(res, result);
+    } catch(e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+
   // ── Grafik Hotkeys CRUD ────────────────────────────────────────────────────
   if (meth === 'GET'  && p === '/api/grafik/hotkeys') {
     return json(res, hotkeys);
@@ -2817,15 +3072,19 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   if (meth === 'POST' && p === '/api/playlist/gap-source') {
     const b = await parseBody(req);
     if (!['black','smpte','idle','clip'].includes(b.source)) return json(res, { ok: false, error: 'invalid source' }, 400);
+    const _before = { gapSource: _settings.gapSource, gapFile: _settings.gapFile };
     playlist.opts.gapSource = b.source;
     _settings.gapSource = b.source;
     if (b.gapFile !== undefined) { playlist.opts.gapFile = b.gapFile; _settings.gapFile = b.gapFile; }
     saveSettings(_settings);
+    _logConfigDiff(req, 'gap-source', _before, _settings, ['gapSource','gapFile']);
     broadcast('state', getState());
     return json(res, { ok: true, gapSource: b.source, gapFile: playlist.opts.gapFile });
   }
   if (meth === 'POST' && p === '/api/settings') {
     const b = await parseBody(req);
+    const _settingsKeys = ['autoGap','stillSlots','maxClients','grafikLatencyMs','videoDelayMs','audioDelayMs','liveCueMode','liveCueLeadSec'];
+    const _before = {}; for (const k of _settingsKeys) _before[k] = _settings[k];
     if (b.autoGap !== undefined) {
       playlist.opts.autoGap = !!b.autoGap;
       _settings.autoGap = !!b.autoGap;
@@ -2856,6 +3115,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       playlist.opts.liveCueLeadSec = _settings.liveCueLeadSec;
     }
     saveSettings(_settings);
+    _logConfigDiff(req, 'settings', _before, _settings, _settingsKeys);
     broadcast('state', getState());
     return json(res, { ok: true });
   }
@@ -2866,7 +3126,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     return json(res, _dlSignalStatus);
   }
   if (meth === 'POST' && p === '/api/live-sources') {
-    if (!_requireAuth(req, res, ['admin'])) return;
+    const sess = _requireAuth(req, res, ['admin']); if (sess === false) return;
     const b = await parseBody(req);
     if (!Array.isArray(b.liveSources)) return json(res, { error: 'liveSources muss ein Array sein' }, 400);
     // Validierung: jede Quelle braucht id + (gstSrc | uri)
@@ -2889,6 +3149,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     _settings.liveSources = b.liveSources;
     masterOpts.liveSources = b.liveSources;
     saveSettings(_settings);
+    _userLog(sess, 'config.save', `live-sources: ${b.liveSources.length} Einträge (${b.liveSources.map(l=>l.id).join(', ')})`);
     log(`Live-Quellen aktualisiert: ${b.liveSources.length} Einträge — Pipeline wird neu aufgebaut`, 'info', 'system');
     // Echter Rebuild: master.stop()+ensureMaster() ruft build() auf derselben Instanz
     // erneut auf, das jetzt _liveSources frisch aus masterOpts liest (siehe
@@ -3163,7 +3424,7 @@ function getState() {
     slots:    { onAir: playlist._onAirSlot, idle: playlist._idleSlot },
     playlist: { running: playlist._running, paused: playlist._paused, currentIndex: playlist.currentIndex, length: playlist.playlist.length },
     playing:  _currentPlaying ? { ..._currentPlaying, elapsedMs: Date.now() - _currentPlaying.startMs } : null,
-    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null },
+    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'] },
     avSync:   master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs??0, audioMs: _settings.audioDelayMs||{} },
     grafik:   { active: activeGrafiks },
   };

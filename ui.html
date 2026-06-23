@@ -1429,6 +1429,16 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div id="cfg-avsync-result" style="font-size:10px;color:var(--dim);margin-top:6px;white-space:pre-wrap"></div>
 
       <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="saveServerSettings()" data-i18n="cfg.server.save">&#128190; Server speichern</button>
+
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:18px 0 8px">Zusatz-Ausgänge (Downconvert / Cleanfeed)</div>
+      <div style="font-size:9px;color:var(--dim);margin-bottom:8px">
+        Beliebig viele zusätzliche Netzwerk-Ausgänge — z.B. ein downconvertierter Monitoring-Stream
+        oder ein Cleanfeed (Signal ohne Grafik/Compositor, vor dem Overlay-Layer abgegriffen).
+        Jeder Ausgang läuft unabhängig und beeinflusst nicht PGM/A-V-Sync des Hauptpfads.
+      </div>
+      <div id="cfg-outputs-list" style="margin-bottom:8px"></div>
+      <button class="btn btn-s" onclick="cfgAddOutput()">+ Ausgang hinzufügen</button>
+      <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="saveOutputsSettings()">&#128190; Ausgänge speichern</button>
     </div>
 
     <!-- ── TAB: VOICEOVER ─────────────────────────────────────────────── -->
@@ -5755,7 +5765,7 @@ function openEventEditor(idx,ev){
         delayFrames:c.delayFrames, durationFrames:c.durationFrames,
         endOffset:c.endOffset, endOffsetFrames:c.endOffsetFrames,
         layer:c.layer||'overlay', _startRelEnd:c._startRelEnd, _endRelEnd:c._endRelEnd,
-        _startBeforeClip:c._startBeforeClip };
+        _startBeforeClip:c._startBeforeClip, id:c.id, dve:c.dve };
       if(c.source==='voiceover') return { type:'voiceover', file:c.file||c.voiceover?.file||'',
         preset:c.preset||c.voiceover?.preset||'AP100',
         delay:c.delay??c.voiceover?.delay??0, duration:c.duration??c.voiceover?.duration??null,
@@ -5891,6 +5901,7 @@ function cfgTab(tab){
   if(tab==='voiceover')   _loadVoiceoverTab();
   if(tab==='shortcuts')   _loadShortcutsTab();
   if(tab==='classif'){ _editClassifs = null; _renderClassifSettings(); }
+  if(tab==='server')      _loadOutputsTab();
 }
 
 // ── Live-Quellen Tab ─────────────────────────────────────────────────────────
@@ -7550,6 +7561,175 @@ async function saveServerSettings(){
   showToast('Server-Einstellungen gespeichert ✓');
 }
 
+// ── Zusatz-Ausgänge (Downconvert / Cleanfeed / DeckLink-Hardware-Sinks) ──────
+let _outputRows = [];
+let _outputDecklinkDevices = null;  // null = noch nicht gesucht; [] = gesucht, keine gefunden
+const OUTPUT_DECKLINK_MODES = ['pal-p','720p50','720p5994','1080p25','1080p2997','1080p50'];
+
+function _loadOutputsTab(){
+  _outputRows = (S.config?.extraOutputs || []).map(o => ({...o}));
+  _renderOutputsList();
+  _refreshOutputsStatus();
+}
+
+function cfgAddOutput(){
+  const n = _outputRows.length + 1;
+  _outputRows.push({ id: `out${Date.now()}_${n}`, label: `Ausgang ${n}`, enabled: false,
+    source: 'pgm', audioGroup: (S.config?.audioGroupIds||['pgm-stereo'])[0],
+    width: 0, height: 0, bitrate: 4000, speedPreset: 'veryfast', sink: 'udp', uri: '',
+    deviceNumber: null, decklinkMode: '1080p25', decklinkAudio: true });
+  _renderOutputsList();
+}
+
+function _outputsFromRows(){
+  const rows = [...document.querySelectorAll('#cfg-outputs-list .cfg-output-row')];
+  return rows.map(row => {
+    const f = sel => row.querySelector(`[data-f="${sel}"]`);
+    return {
+      id:          row.dataset.id,
+      label:       f('label')?.value.trim() || row.dataset.id,
+      enabled:     f('enabled')?.checked || false,
+      source:      f('source')?.value || 'pgm',
+      audioGroup:  f('audioGroup')?.value || 'pgm-stereo',
+      width:       parseInt(f('width')?.value) || 0,
+      height:      parseInt(f('height')?.value) || 0,
+      bitrate:     parseInt(f('bitrate')?.value) || 4000,
+      speedPreset: f('speedPreset')?.value || 'veryfast',
+      sink:        f('sink')?.value || 'udp',
+      uri:         f('uri')?.value.trim() || '',
+      deviceNumber: f('deviceNumber')?.value !== '' && f('deviceNumber')?.value != null ? parseInt(f('deviceNumber').value) : null,
+      decklinkMode: f('decklinkMode')?.value || '1080p25',
+      decklinkAudio: f('decklinkAudio') ? f('decklinkAudio').checked : true,
+    };
+  });
+}
+
+function cfgRemoveOutput(id){
+  _outputRows = _outputsFromRows().filter(o => o.id !== id);
+  _renderOutputsList();
+}
+
+// Sink-Typ-Wechsel ändert den sichtbaren Feldsatz (Netzwerk-URI vs. DeckLink-Gerät/Mode)
+// → erst aktuelle DOM-Werte sichern, dann Sink patchen, dann neu rendern.
+function _outputSinkChange(sel, val){
+  const row = sel.closest('.cfg-output-row');
+  const id  = row.dataset.id;
+  _outputRows = _outputsFromRows();
+  const o = _outputRows.find(r => r.id === id);
+  if (o) o.sink = val;
+  if (val === 'decklink' && _outputDecklinkDevices === null) _outputDiscoverDecklink();
+  _renderOutputsList();
+}
+
+async function _outputDiscoverDecklink(){
+  try { _outputDecklinkDevices = await fetch('/api/devices/sinks').then(r=>r.json()); }
+  catch { _outputDecklinkDevices = []; }
+  _renderOutputsList();
+}
+
+function _renderOutputsList(){
+  const el = document.getElementById('cfg-outputs-list');
+  if (!el) return;
+  const groups = S.config?.audioGroupIds || ['pgm-stereo'];
+  if (!_outputRows.length) { el.innerHTML = '<div style="font-size:10px;color:var(--dim);padding:6px 0">Keine Zusatz-Ausgänge konfiguriert.</div>'; return; }
+  el.innerHTML = _outputRows.map(o => {
+    const isDecklink = o.sink === 'decklink';
+    const decklinkFields = `
+        <label style="font-size:9px;color:var(--dim)">DeckLink-Gerät
+          <select data-f="deviceNumber" style="font-size:10px">
+            ${_outputDecklinkDevices === null ? `<option value="">… suchen</option>` :
+              !_outputDecklinkDevices.length ? `<option value="">keine gefunden</option>` :
+              _outputDecklinkDevices.filter(d=>d.videoSink).map(d=>`<option value="${d.deviceNumber}"${o.deviceNumber===d.deviceNumber?' selected':''}>DeckLink ${d.deviceNumber} (${d.name||''})</option>`).join('')}
+          </select>
+        </label>
+        <button class="btn btn-s" onclick="_outputDiscoverDecklink()" title="DeckLink-Ausgänge neu suchen">🔍</button>
+        <label style="font-size:9px;color:var(--dim)">Modus
+          <select data-f="decklinkMode" style="font-size:10px">
+            ${OUTPUT_DECKLINK_MODES.map(m=>`<option value="${m}"${o.decklinkMode===m?' selected':''}>${m}</option>`).join('')}
+          </select>
+        </label>
+        <label style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:3px;white-space:nowrap;margin-top:12px">
+          <input type="checkbox" data-f="decklinkAudio" ${o.decklinkAudio!==false?'checked':''} style="accent-color:var(--green)"> Audio mitsenden
+        </label>`;
+    const networkFields = `
+        <label style="font-size:9px;color:var(--dim)">Breite (0=Original)
+          <input type="number" data-f="width" value="${o.width||0}" min="0" max="3840" step="2" style="width:70px;font-family:var(--mono);font-size:10px">
+        </label>
+        <label style="font-size:9px;color:var(--dim)">Höhe
+          <input type="number" data-f="height" value="${o.height||0}" min="0" max="2160" step="2" style="width:70px;font-family:var(--mono);font-size:10px">
+        </label>
+        <label style="font-size:9px;color:var(--dim)">Bitrate (kbit/s)
+          <input type="number" data-f="bitrate" value="${o.bitrate||4000}" min="200" max="50000" step="100" style="width:80px;font-family:var(--mono);font-size:10px">
+        </label>
+        <label style="font-size:9px;color:var(--dim)">Encoder-Preset
+          <select data-f="speedPreset" style="font-size:10px">
+            ${['ultrafast','superfast','veryfast','faster','fast','medium'].map(p=>`<option value="${p}"${o.speedPreset===p?' selected':''}>${p}</option>`).join('')}
+          </select>
+        </label>
+        <label style="font-size:9px;color:var(--dim);flex:1;min-width:200px">Ziel (URI/Pfad)
+          <input type="text" data-f="uri" value="${(o.uri||'').replace(/"/g,'&quot;')}"
+            placeholder="${o.sink==='file'?'/pfad/datei.mkv':o.sink==='udp'?'udp://239.0.0.1:5000':o.sink==='rtmp'?'rtmp://host/app/stream':'srt://host:9000'}"
+            style="width:100%;font-family:var(--mono);font-size:10px">
+        </label>`;
+    return `
+    <div class="cfg-output-row" data-id="${o.id}" style="border:1px solid var(--border);border-radius:4px;padding:8px;margin-bottom:6px;background:var(--bg3)">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <input type="text" data-f="label" value="${(o.label||'').replace(/"/g,'&quot;')}" placeholder="Bezeichnung" style="flex:1;font-size:11px">
+        <label style="display:flex;align-items:center;gap:3px;font-size:10px;white-space:nowrap">
+          <input type="checkbox" data-f="enabled" ${o.enabled?'checked':''} style="accent-color:var(--green)"> Autostart
+        </label>
+        <span id="cfg-output-status-${o.id}" style="font-size:9px;color:var(--dim);white-space:nowrap">—</span>
+        <button class="btn btn-s" onclick="apiOutputStart('${o.id}')" title="Starten">&#9654;</button>
+        <button class="btn btn-s" onclick="apiOutputStop('${o.id}')" title="Stoppen">&#9632;</button>
+        <button class="btn btn-s" style="color:var(--red)" onclick="cfgRemoveOutput('${o.id}')" title="Entfernen">&#10005;</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:9px;color:var(--dim)">Quelle
+          <select data-f="source" style="font-size:10px">
+            <option value="pgm"${o.source!=='clean'?' selected':''}>Programm (PGM, inkl. Grafik)</option>
+            <option value="clean"${o.source==='clean'?' selected':''}>Cleanfeed (ohne Grafik)</option>
+          </select>
+        </label>
+        <label style="font-size:9px;color:var(--dim)">Audiogruppe
+          <select data-f="audioGroup" style="font-size:10px">
+            ${groups.map(g=>`<option value="${g}"${o.audioGroup===g?' selected':''}>${g}</option>`).join('')}
+          </select>
+        </label>
+        <label style="font-size:9px;color:var(--dim)">Sink
+          <select data-f="sink" onchange="_outputSinkChange(this,this.value)" style="font-size:10px">
+            ${['udp','srt','rtmp','file','decklink'].map(s=>`<option value="${s}"${o.sink===s?' selected':''}>${s==='decklink'?'DeckLink (SDI/HDMI-Hardware)':s.toUpperCase()}</option>`).join('')}
+          </select>
+        </label>
+        ${isDecklink ? decklinkFields : networkFields}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function saveOutputsSettings(){
+  const outputs = _outputsFromRows();
+  await api('POST', '/api/outputs/settings', { outputs });
+  if (S.config) S.config.extraOutputs = outputs;
+  _outputRows = outputs;
+  showToast('Zusatz-Ausgänge gespeichert ✓');
+  _refreshOutputsStatus();
+}
+
+async function apiOutputStart(id){ await saveOutputsSettings(); await api('POST', '/api/outputs/start', { id }); setTimeout(_refreshOutputsStatus, 400); }
+async function apiOutputStop(id){ await api('POST', '/api/outputs/stop', { id }); setTimeout(_refreshOutputsStatus, 400); }
+
+async function _refreshOutputsStatus(){
+  try {
+    const r = await apiFetch('/api/outputs/status'); const status = await r?.json();
+    if (!status) return;
+    for (const [id, s] of Object.entries(status)) {
+      const el = document.getElementById(`cfg-output-status-${id}`);
+      if (el) el.textContent = s.running ? `● läuft (${Math.round((s.durationMs||0)/1000)}s)` : '○ gestoppt';
+      if (el) el.style.color = s.running ? 'var(--green)' : 'var(--dim)';
+    }
+  } catch {}
+}
+
 // ── A/V-Sync Helfer ──────────────────────────────────────────────────────────
 function _renderAudioDelayFields(groups, audioDelayMs = {}) {
   const cont = document.getElementById('cfg-audio-delays');
@@ -7864,7 +8044,7 @@ function _mapGrafikChild(g) {
     delayFrames:g.delayFrames, durationFrames:g.durationFrames,
     endOffset:g.endOffset, endOffsetFrames:g.endOffsetFrames,
     layer:g.layer||'overlay', _startRelEnd:g._startRelEnd, _endRelEnd:g._endRelEnd,
-    _startBeforeClip:g._startBeforeClip };
+    _startBeforeClip:g._startBeforeClip, id:g.id, dve:g.dve };
   if(g.type==='record') return { source:'record', record:{
     slot:g.slot||'rec1', videoSource:g.videoSource||'pgm',
     delay:g.delay??0, duration:g.duration??null, endOffset:g.endOffset??null,
@@ -8076,6 +8256,127 @@ function emGrafikDataField(i,key,val){
   if(!S._editGrafik[i]) return;
   S._editGrafik[i].data = S._editGrafik[i].data||{};
   S._editGrafik[i].data[key]=val;
+}
+
+// ── DVE/Squeeze (Position & Größe von Bild-/Grafik-Children) ────────────────
+// g.dve = { x,y,w,h (0..1, normalisiert), fit, zone, zoneFrom } — siehe GrafixEngine.scheduleChildEvents
+function emGrafikDveToggle(i, enabled){
+  const g = S._editGrafik[i]; if(!g) return;
+  g.dve = enabled ? { x:0.65, y:0.10, w:0.30, h:0.30, fit:'contain' } : undefined;
+  _renderGrafikList();
+}
+function emGrafikDveMode(i, mode){
+  const g = S._editGrafik[i]; if(!g || !g.dve) return;
+  if (mode === 'zone') { g.dve = { zone:'box', zoneFrom:'', fit:g.dve.fit||'contain' }; }
+  else if (mode === 'green') { g.dve = { x:g.dve.x??0.65, y:g.dve.y??0.10, w:g.dve.w??0.30, h:g.dve.h??0.30, fit:g.dve.fit||'contain', greenRef:g.dve.greenRef||'' }; }
+  else { const {zone,zoneFrom,greenRef,...rest} = g.dve; g.dve = { x:0.65, y:0.10, w:0.30, h:0.30, fit:'contain', ...rest }; }
+  _renderGrafikList();
+}
+function emGrafikDveField(i, key, val){
+  const g = S._editGrafik[i]; if(!g || !g.dve) return;
+  g.dve[key] = (key==='x'||key==='y'||key==='w'||key==='h') ? (parseFloat(val)||0)/100 : val;
+}
+function emGrafikDveSetTarget(i, val){
+  const g = S._editGrafik[i]; if(!g || !g.dve) return;
+  g.dve.target = val;
+  if (val === 'video' && g.dve.chromaKey == null) g.dve.chromaKey = true;  // sinnvoller Default
+  _renderGrafikList();
+}
+async function emGrafikDveDetectGreen(i){
+  const g = S._editGrafik[i]; if(!g || !g.dve) return;
+  // Kein eigenes Referenzbild angegeben → gleiches Bild wie das angezeigte (g.src)
+  // verwenden, falls Bild-Child. Erspart doppelte Pfadangabe für den Normalfall
+  // (Greenscreen-Fläche ist im selben Bild, das auch gesqueezt/gezeigt wird).
+  const ref = (g.dve.greenRef||'').trim() || (g.type === 'image' ? (g.src||'').trim() : '');
+  if(!ref){ showToast('⚠ Erst ein Referenzbild angeben (oder bei Bild-Children: Bild oben auswählen)'); return; }
+  const statusEl = document.getElementById(`em-dve-green-status-${i}`);
+  if(statusEl) statusEl.textContent = '… suche grüne Fläche …';
+  try {
+    const r = await api('POST', '/api/grafik/detect-green', { imagePath: ref });
+    if(!r?.ok){ if(statusEl) statusEl.textContent = `⚠ ${r?.error||'nicht gefunden'}`; return; }
+    g.dve.x = r.box.x; g.dve.y = r.box.y; g.dve.w = r.box.w; g.dve.h = r.box.h;
+    if(statusEl) statusEl.textContent = r.warning ? `⚠ ${r.warning}` : `✓ Box übernommen (${Math.round(r.box.w*100)}%×${Math.round(r.box.h*100)}%)`;
+    _renderGrafikList();
+  } catch(e) { if(statusEl) statusEl.textContent = `⚠ ${e.message}`; }
+}
+function _dveBlock(g, i, isImage){
+  const dve = g.dve || null;
+  const mode = dve?.zone != null ? 'zone' : (dve?.greenRef != null ? 'green' : 'box');
+  const target = dve?.target === 'video' ? 'video' : 'image';
+  const pct = v => Math.round((v ?? 0) * 100);
+  const boxFieldsHtml = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px;margin-bottom:4px">
+      ${dve ? ['x','y','w','h'].map(k=>`<label style="font-size:8px;color:var(--dim)">${k.toUpperCase()} %
+        <input type="number" min="0" max="100" step="1" value="${pct(dve[k])}"
+          oninput="emGrafikDveField(${i},'${k}',this.value)"
+          style="width:100%;font-family:var(--mono);font-size:10px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px"></label>`).join('') : ''}
+    </div>`;
+  return `<div style="margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">
+    <label style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:4px;margin-bottom:4px;cursor:pointer">
+      <input type="checkbox" ${dve?'checked':''} onchange="emGrafikDveToggle(${i},this.checked)" style="width:auto;margin:0">
+      🔲 DVE / Squeeze (Position &amp; Größe)
+    </label>
+    ${dve ? `
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;flex-wrap:wrap">
+        <select onchange="emGrafikDveSetTarget(${i},this.value)" style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px">
+          <option value="image"${target==='image'?' selected':''}>Bild/Grafik squeezen (Video bleibt Vollbild)</option>
+          <option value="video"${target==='video'?' selected':''}>Video squeezen (Bild/Grafik wird Vollbild-Rahmen)</option>
+        </select>
+      </div>
+      <div style="font-size:8px;color:var(--dim);margin-bottom:4px">
+        ${target==='video'
+          ? 'Clip/Live-Quelle wird in die Box gesqueezt; dieses Child liegt als Vollbild-Rahmen darüber (Box-Bereich im Bild idealerweise transparent — siehe Chroma-Key unten).'
+          : 'Dieses Child wird in die Box gesqueezt und über dem unveränderten Vollbild-Clip/Live angezeigt.'}
+      </div>
+      ${isImage ? `
+        <label style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:4px;margin-bottom:4px;cursor:pointer">
+          <input type="checkbox" ${dve.chromaKey?'checked':''} onchange="emGrafikDveField(${i},'chromaKey',this.checked)" style="width:auto;margin:0">
+          🟩 Grün im Bild transparent machen (Chroma-Key)
+        </label>
+      ` : ''}
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;flex-wrap:wrap">
+        <select onchange="emGrafikDveMode(${i},this.value)" style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px">
+          <option value="box"${mode==='box'?' selected':''}>Statische Box (x/y/w/h)</option>
+          <option value="green"${mode==='green'?' selected':''}>Grün-Erkennung in Referenzbild</option>
+          <option value="zone"${mode==='zone'?' selected':''}>Zone aus Sibling-Template</option>
+        </select>
+        <select onchange="emGrafikDveField(${i},'fit',this.value)" style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px">
+          ${['contain','cover','fill'].map(f=>`<option value="${f}"${(dve.fit||'contain')===f?' selected':''}>fit: ${f}</option>`).join('')}
+        </select>
+      </div>
+      ${mode==='box' ? `
+        ${boxFieldsHtml}
+        <div style="font-size:8px;color:var(--dim);margin-bottom:4px">Normalisiert auf Frame-Auflösung — 0/0/100/100 = Vollbild.</div>
+      ` : mode==='green' ? `
+        <div style="display:flex;gap:4px;align-items:center;margin-bottom:4px">
+          <input type="text" value="${(dve.greenRef||'').replace(/"/g,'&quot;')}"
+            placeholder="${isImage ? `leer = gleiches Bild (${(g.src||'(noch keins gewählt)').split('/').pop()})` : 'bild.png / pfad/zu/bild.jpg'}"
+            oninput="emGrafikDveField(${i},'greenRef',this.value)"
+            style="flex:1;font-family:var(--mono);font-size:10px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px">
+          <button class="btn" style="font-size:10px;padding:2px 5px" onclick="openImagePickerFor(f=>{emGrafikDveField(${i},'greenRef',f);_renderGrafikList()})">📁</button>
+          <button class="btn" style="font-size:9px;padding:2px 6px" onclick="emGrafikDveDetectGreen(${i})">🔍 Erkennen</button>
+        </div>
+        <div id="em-dve-green-status-${i}" style="font-size:8px;color:var(--dim);margin-bottom:4px">${isImage ? 'Leer lassen, um im oben gewählten Bild selbst zu suchen — oder eigenes Referenzbild angeben.' : 'Referenzbild mit grüner Fläche wählen,'} dann "Erkennen" — Box wird automatisch übernommen.</div>
+        ${boxFieldsHtml}
+      ` : `
+        <div style="display:flex;gap:6px;margin-bottom:4px;flex-wrap:wrap">
+          <label style="font-size:8px;color:var(--dim);flex:1;min-width:100px">Zone-Name
+            <input type="text" value="${(dve.zone||'').replace(/"/g,'&quot;')}" placeholder="z.B. box"
+              oninput="emGrafikDveField(${i},'zone',this.value)"
+              style="width:100%;font-family:var(--mono);font-size:10px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px"></label>
+          <label style="font-size:8px;color:var(--dim);flex:1;min-width:100px">Von Child-ID (leer = auto: erstes Grafik-Sibling)
+            <input type="text" value="${(dve.zoneFrom||'').replace(/"/g,'&quot;')}" placeholder="z.B. lt1"
+              oninput="emGrafikDveField(${i},'zoneFrom',this.value)"
+              style="width:100%;font-family:var(--mono);font-size:10px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px"></label>
+        </div>
+        <div style="font-size:8px;color:var(--dim);margin-bottom:4px">Liest [data-dve-zone="…"] aus einem gleichzeitig geplanten oGraf/HTML-Sibling (z.B. Template "dve-lower-third").</div>
+      `}
+      <label style="font-size:8px;color:var(--dim)">Child-ID (für DVE-Zone-Referenz anderer Children)
+        <input type="text" value="${(g.id||'').replace(/"/g,'&quot;')}" placeholder="optional, z.B. lt1"
+          oninput="emGrafikField(${i},'id',this.value)"
+          style="width:140px;font-family:var(--mono);font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:2px;margin-left:4px"></label>
+    ` : ''}
+  </div>`;
 }
 
 // Playlist-Variable Picker für Grafik-Panel (manuelle Anzeige)
@@ -8477,6 +8778,7 @@ function _renderGrafikList(){
           <button class="ib" style="color:var(--red)" onclick="emRemoveGrafik(${i})">✕</button>
         </div>
         ${timingBlock}
+        ${_dveBlock(g, i, true)}
       </div>`;
     }
 
@@ -8650,6 +8952,7 @@ function _renderGrafikList(){
         </div>
       </div>
       ${timingBlock}
+      ${_dveBlock(g, i, false)}
     </div>`;
   }).join('');
 }

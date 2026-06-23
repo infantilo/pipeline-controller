@@ -33,6 +33,8 @@ Pipeline Controller is a complete **broadcast playout system** built on the open
 - 🌍 **Bilingual UI** (English / German) with light/dark mode
 - 📺 **Multi-channel supervisor** — run several independent channels/playlists per host (e.g. a main channel + a sign-language variant), each with its own data dir/port, with a central dashboard
 - 🔗 **ChannelBus cross-channel triggers** — send NEXT/NEXT_LIVE/JUMP/CUT commands between channels (or hosts), including playlist-item-bound trigger children with frame-accurate pre-roll
+- 🔲 **DVE / Squeeze** — squeeze the program/live video into a positioned box (or squeeze an image/oGraf overlay over full-screen video), with green-screen auto-detection and chroma-key transparency for frame graphics
+- 📤 **Additional outputs** — any number of extra downconverted network outputs (RTMP/SRT/UDP/file) or DeckLink SDI/HDMI hardware sinks, independent of the main program path
 
 ---
 
@@ -267,6 +269,8 @@ pipeline-controller/
 │   ├── GrafixEngine.js
 │   ├── VoiceoverEngine.js
 │   ├── ChannelBus.js       # Cross-channel/cross-host trigger bus
+│   ├── OutputEngine.js     # Additional downconvert/Cleanfeed/DeckLink outputs
+│   ├── GreenZoneDetect.js  # Green-screen box detection + chroma-key transparency
 │   └── ...
 ├── plugins/                # Plugin system
 │   ├── broadcast-controller/
@@ -296,6 +300,8 @@ pipeline-controller/
 - 🔊 [Audio configuration](./HANDBUCH.html#audio-config)
 - 🎨 [Creating oGraf templates](./HANDBUCH.html#ograf-templates)
 - 🔠 [oGraf playlist variables](./HANDBUCH.html#ograf-playlist-vars)
+- 🔲 [DVE / Squeeze](./HANDBUCH.html#dve-squeeze)
+- 📤 [Additional outputs (Downconvert / Cleanfeed / DeckLink)](./HANDBUCH.html#zusatz-ausgaenge)
 - 🧩 [Asset Panel & auto-return](./HANDBUCH.html#asset-panel)
 - ⏱️ [Counter Strip](./HANDBUCH.html#counter-strip)
 - 🕐 [Daylight Saving Time behavior](./HANDBUCH.html#dst)

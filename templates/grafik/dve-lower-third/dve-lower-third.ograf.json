@@ -1,0 +1,28 @@
+{
+  "$schema": "https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json",
+  "id": "dve-lower-third",
+  "version": "1.0.0",
+  "name": "DVE Lower Third (Squeeze-Box)",
+  "description": "Lower-Third mit ausgewiesener DVE-Zone (data-dve-zone=\"box\"). Ein gleichzeitig geplantes Bild/Squeeze-Child kann seine Position/Größe von dieser Zone übernehmen (child.dve.zone=\"box\").",
+  "author": { "name": "PipelineController" },
+  "main": "dve-lower-third.js",
+  "designWidth": 1920,
+  "designHeight": 1080,
+  "supportsRealTime": true,
+  "supportsNonRealTime": false,
+  "stepCount": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "name": { "type": "string", "title": "Name", "default": "Studio Gast" },
+      "title": { "type": "string", "title": "Untertitel", "default": "" },
+      "accentColor": { "type": "string", "title": "Akzentfarbe", "default": "#ff8c00", "gddType": "color-rrggbb", "pattern": "^#[0-9a-f]{6}$" },
+      "boxSide": { "type": "string", "title": "Box-Seite", "enum": ["left", "right"], "default": "left" }
+    },
+    "required": ["name"]
+  },
+  "renderRequirements": [
+    { "resolution": { "width": { "ideal": 1920 }, "height": { "ideal": 1080 } }, "frameRate": { "ideal": 25 } }
+  ]
+}

@@ -264,6 +264,7 @@
   <a href="#shortcuts">Tastaturkürzel</a>
   <a href="#user-management">User Management</a>
   <a href="#audio-config">Audio-Konfiguration</a>
+  <a href="#zusatz-ausgaenge">Zusatz-Ausgänge</a>
   <a href="#umgebungsvariablen">Umgebungsvariablen</a>
 
   <div class="nav-section">Bedienung</div>
@@ -289,6 +290,7 @@
   <a href="#ograf-hotkeys">Hotkeys</a>
   <a href="#ograf-playlist">Als Playlist-Event</a>
   <a href="#ograf-playlist-vars">Playlist-Variablen</a>
+  <a href="#dve-squeeze">DVE / Squeeze</a>
 
   <div class="nav-section">Medien &amp; Bibliothek</div>
   <a href="#bibliothek">Medien-Bibliothek</a>
@@ -959,6 +961,49 @@ sudo journalctl -u pipeline-controller -f   <span class="comment"># Logs verfolg
 </section>
 
 <!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="zusatz-ausgaenge">
+<h2>Zusatz-Ausgänge (Downconvert / Cleanfeed / DeckLink)</h2>
+<p>Im Server-Tab der Einstellungen ("Zusatz-Ausgänge") lässt sich eine beliebige Anzahl zusätzlicher Ausgänge konfigurieren — unabhängig vom Hauptprogramm-Pfad (eigene gst-kit-Pipeline pro Ausgang, kein Einfluss auf PGM/A-V-Sync). Jeder Ausgang zapft denselben internen Kanal an, den auch die Aufzeichnung nutzt:</p>
+<table>
+  <tr><th>Quelle (<code>source</code>)</th><th>Kanal intern</th><th>Bedeutung</th></tr>
+  <tr><td><code>pgm</code></td><td><code>rec_pgm_v</code></td><td>Programmbild inkl. Grafik/Branding</td></tr>
+  <tr><td><code>clean</code></td><td><code>rec_clean_v</code></td><td>Cleanfeed — Signal vor Grafik/Compositor</td></tr>
+</table>
+
+<h3>Sink-Typen</h3>
+<table>
+  <tr><th>Sink</th><th>Beschreibung</th></tr>
+  <tr><td><code>udp</code> / <code>srt</code> / <code>rtmp</code></td><td>Netzwerk-Stream, H.264-encodiert (<code>width</code>/<code>height</code> = 0 lässt die Originalauflösung; <code>bitrate</code> in kbit/s; <code>speedPreset</code> = x264enc-Preset)</td></tr>
+  <tr><td><code>file</code></td><td>Lokale Matroska-Datei</td></tr>
+  <tr><td><code>decklink</code></td><td>Blackmagic-DeckLink-Hardware-Ausgang (SDI/HDMI) — <strong>kein Encoding</strong>, direkt <code>decklinkvideosink</code>/<code>decklinkaudiosink</code></td></tr>
+</table>
+
+<h3>DeckLink-Ausgang</h3>
+<p>Geräte per <strong>🔍</strong>-Button suchen (nutzt denselben Discovery-Mechanismus wie der Haupt-Programmausgang, <code>/api/devices/sinks</code>). <code>decklinkvideosink</code> ist modusgebunden — feste Auflösung/Framerate je Modus, kein freies <code>width</code>/<code>height</code>. Nur <strong>progressive</strong> Modi werden angeboten:</p>
+<table>
+  <tr><th>Modus</th><th>Auflösung</th><th>Framerate</th></tr>
+  <tr><td><code>pal-p</code></td><td>720×576</td><td>50p</td></tr>
+  <tr><td><code>720p50</code></td><td>1280×720</td><td>50p</td></tr>
+  <tr><td><code>720p5994</code></td><td>1280×720</td><td>59.94p</td></tr>
+  <tr><td><code>1080p25</code></td><td>1920×1080</td><td>25p</td></tr>
+  <tr><td><code>1080p2997</code></td><td>1920×1080</td><td>29.97p</td></tr>
+  <tr><td><code>1080p50</code></td><td>1920×1080</td><td>50p</td></tr>
+</table>
+<div class="callout callout-info">
+  Interlaced Modi (<code>ntsc</code>, <code>pal</code>, <code>1080i50</code>, …) sind bewusst nicht angeboten: <code>decklinkvideosink</code> verlangt dafür je Modus exakte <code>pixel-aspect-ratio</code>/Format-Kombinationen, die nicht pauschal robust zu treffen sind. Für klassische interlaced-SDI-Ausgabe wird stattdessen der Haupt-Programmausgang (Einstellungen → Video, eigene Auto-Detect-Logik) verwendet.
+</div>
+
+<h3>API</h3>
+<table>
+  <tr><th>Endpoint</th><th>Beschreibung</th></tr>
+  <tr><td><code>POST /api/outputs/settings</code></td><td>Konfiguration speichern (<code>{ outputs: [...] }</code>) — aktiviert automatisch alle <code>enabled:true</code>-Ausgänge</td></tr>
+  <tr><td><code>POST /api/outputs/start</code> / <code>/stop</code></td><td>Einzelnen Ausgang per <code>id</code> starten/stoppen</td></tr>
+  <tr><td><code>POST /api/outputs/stop-all</code></td><td>Alle Zusatz-Ausgänge stoppen</td></tr>
+  <tr><td><code>GET /api/outputs/status</code></td><td>Laufstatus, Laufzeit, Fehler je Ausgang</td></tr>
+</table>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
 <section id="umgebungsvariablen">
 <h2>Umgebungsvariablen</h2>
 <table>
@@ -1566,6 +1611,37 @@ GET /api/grafik/status</code></pre>
 
 <div class="callout callout-info">
   <strong>Auflösungszeitpunkt:</strong> Variablen werden zum Einblende-Zeitpunkt aufgelöst — nach dem konfigurierten <em>Delay</em>. Ein Child-Event das 30s nach Clip-Start erscheint, berechnet die verbleibende Zeit korrekt ab dem Einblendemoment.
+</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="dve-squeeze">
+<h2>DVE / Squeeze</h2>
+<p>Bild- und HTML/oGraf-Child-Events können eine <strong>DVE-Box</strong> (Position &amp; Größe, normalisiert 0–1) zugewiesen bekommen. Aktivierbar im Event-Editor unter jedem Bild- bzw. HTML-Child ("🔲 DVE / Squeeze"). Keine Rotation — nur GPU-günstiges Verschieben/Skalieren.</p>
+
+<h3>Zwei Modi (<code>dve.target</code>)</h3>
+<table>
+  <tr><th>Modus</th><th>Verhalten</th></tr>
+  <tr><td><code>image</code> (Standard)</td><td>Das Child (Bild/Grafik) wird in die Box gesqueezt und über dem <strong>unveränderten Vollbild</strong>-Clip/Live angezeigt — klassisches kleines Overlay/Bug.</td></tr>
+  <tr><td><code>video</code></td><td>Das <strong>Programm-/Live-Video</strong> selbst wird in die Box gesqueezt (über <code>MasterPipeline.setDveSqueeze()</code>, wirkt auf den fg-Pfad vor dem Compositor — A/V-Sync unverändert). Das Child wird stattdessen <strong>vollbild als Rahmen</strong> angezeigt und liegt über dem gesqueezten Video (Compositor-Zorder: Video &lt; Grafik). Typischer Fall: ein Studio-Rahmen-Bild mit einem grünen Loch, in dem das Live-Bild squeezt erscheint.</td></tr>
+</table>
+
+<h3>Drei Wege zur Box (<code>dve.x/y/w/h</code>)</h3>
+<table>
+  <tr><th>Modus</th><th>Beschreibung</th></tr>
+  <tr><td><strong>Statische Box</strong></td><td>x/y/w/h manuell in % eingeben.</td></tr>
+  <tr><td><strong>Grün-Erkennung</strong></td><td>Ein Referenzbild (<code>dve.greenRef</code> — leer = dasselbe Bild wie <code>src</code>) wird nach einer zusammenhängenden grünen Fläche durchsucht (<code>lib/GreenZoneDetect.js</code>, Connected-Components mit Mindestflächen-Filter gegen JPEG-Rauschen). "🔍 Erkennen" übernimmt die gefundene Box. Mehrere Flächen → Warnung, größte wird verwendet.</td></tr>
+  <tr><td><strong>Zone aus Sibling-Template</strong></td><td>Liest <code>[data-dve-zone="…"]</code> aus einem gleichzeitig geplanten HTML/oGraf-Sibling-Child (per <code>dve.zoneFrom</code> = dessen Child-ID referenziert, sonst automatisch das erste Grafik-Sibling). Eigene Konvention — kein oGraf-Standard. Beispiel-Template: <code>templates/grafik/dve-lower-third/</code>.</td></tr>
+</table>
+
+<h3>Chroma-Key (<code>dve.chromaKey</code>)</h3>
+<p>Macht grüne Pixel im angezeigten Bild vor der Anzeige transparent (eigene Pipeline: <code>filesrc ! decodebin ! videoconvert ! appsink</code> dekodiert, Pixel mit G-Kanal klar dominant über R/B werden auf Alpha=0 gesetzt, <code>appsrc ! pngenc ! appsink</code> encodiert zurück zu PNG). Ergebnis wird nach Pfad+mtime gecacht (<code>/tmp/pc_chromakey/</code>). Haupteinsatz: <code>target:'video'</code> mit einem Rahmenbild, dessen grüne Fläche zum "Loch" für das gesqueezte Video wird.</p>
+
+<h3>Pre-Cue</h3>
+<p>Bild-Children werden — wie HTML/oGraf-Templates — vor dem eigentlichen Anzeigezeitpunkt unsichtbar vorgeladen (inkl. Chroma-Key-Verarbeitung, falls aktiviert). Ohne Pre-Cue würde bei <code>target:'video'</code> der sofort wirkende Video-Squeeze dem (sonst erst nach Dekodier-/Chroma-Key-Latenz sichtbaren) Bild zeitlich vorauslaufen.</p>
+
+<div class="callout callout-info">
+  <strong>Hold-Events (<code>endType:'manual'</code>):</strong> Children mit <code>endOffset</code> ("X Sekunden vor Ende") werden bei Hold NICHT relativ zur ursprünglich geplanten Dauer berechnet — sie bleiben aktiv, bis der Operator tatsächlich weiterschaltet.
 </div>
 </section>
 
