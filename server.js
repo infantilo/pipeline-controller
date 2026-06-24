@@ -6,6 +6,30 @@
 process.env.UV_THREADPOOL_SIZE = '16';
 process.env.GST_GL_API = 'none';
 
+// ── DMF/MXL Plugin-Pfade (GST_PLUGIN_PATH/LD_LIBRARY_PATH) müssen wie GST_DEBUG
+// VOR dem ersten require('gst-kit') gesetzt sein — gst_init() scannt Plugin-Pfade
+// nur beim Start. env/mxl.env wird von scripts/install-mxl.sh erzeugt; per `bash -c
+// source` statt eigenem Parser geladen, damit ${VAR:-}-Erweiterungen darin korrekt
+// aufgelöst werden.
+(function applyMxlEnvEarly() {
+  const fs   = require('fs');
+  const path = require('path');
+  const envPath = path.join(process.env.PC_DATA_DIR || __dirname, 'env', 'mxl.env');
+  if (!fs.existsSync(envPath)) return;
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('bash', ['-c', `set -a; source "${envPath}" >/dev/null 2>&1; env`], { encoding: 'utf8' });
+    for (const line of out.split('\n')) {
+      const i = line.indexOf('=');
+      if (i <= 0) continue;
+      const key = line.slice(0, i);
+      if (['GST_PLUGIN_PATH', 'LD_LIBRARY_PATH', 'MXL_DOMAIN', 'MXL_INFO_BIN', 'PATH'].includes(key)) {
+        process.env[key] = line.slice(i + 1);
+      }
+    }
+  } catch (e) { console.warn(`[mxl] env/mxl.env konnte nicht geladen werden: ${e.message}`); }
+})();
+
 // ── GStreamer debug filter muss VOR dem ersten require('gst-kit') gesetzt sein,
 // da gst_init() beim Laden des nativen Addons aufgerufen wird.
 (function applyGstDebugEarly() {
@@ -609,6 +633,16 @@ function _onPlayingCheckAsset(d) {
 // HLS:  souphttpsrc → hlsdemux → decoder
 // UDP:  udpsrc → tsdemux → decoder
 // Allgemein: uridecodebin (für HTTP-progressive, Dateien, etc.)
+// "mxl://<domain>?video=<flow-uuid>&audio=<flow-uuid>" — eigene Konvention (nicht die
+// offizielle MXL-URI-Spec), siehe lib/MxlSource.js. Domain = lokales Shared-Memory-
+// Verzeichnis (z.B. /dev/shm/mxl), Flow-UUIDs aus GET /api/mxl/flows.
+function _parseMxlUri(uri) {
+  const m = /^mxl:\/\/(.+?)(?:\?(.*))?$/i.exec(uri);
+  if (!m) return null;
+  const qs = new URLSearchParams(m[2] || '');
+  return { domain: m[1], videoFlowId: qs.get('video'), audioFlowId: qs.get('audio') };
+}
+
 function _buildUriLiveSrc(uri, latencyMs = 200) {
   if (!uri) return null;
   if (/^rtsp:\/\//i.test(uri)) {
@@ -620,6 +654,10 @@ function _buildUriLiveSrc(uri, latencyMs = 200) {
   }
   if (/^srt:\/\//i.test(uri)) {
     return `srtsrc uri="${uri}" ! decodebin ! videoconvert`;
+  }
+  if (/^mxl:\/\//i.test(uri)) {
+    const m = _parseMxlUri(uri);
+    return m?.videoFlowId ? `mxlsrc video-flow-id=${m.videoFlowId} domain=${m.domain} ! videoconvert` : null;
   }
   if (/^udp:\/\//i.test(uri)) {
     const m = uri.match(/^udp:\/\/([^:/?]+):(\d+)/i);
@@ -640,6 +678,10 @@ function _buildUriLiveAudioSrc(uri, latencyMs = 200) {
   }
   if (/^srt:\/\//i.test(uri)) {
     return `srtsrc uri="${uri}" ! decodebin ! audioconvert ! audioresample`;
+  }
+  if (/^mxl:\/\//i.test(uri)) {
+    const m = _parseMxlUri(uri);
+    return m?.audioFlowId ? `mxlsrc audio-flow-id=${m.audioFlowId} domain=${m.domain} ! audioconvert ! audioresample` : null;
   }
   if (/^udp:\/\//i.test(uri)) {
     const m = uri.match(/^udp:\/\/([^:/?]+):(\d+)/i);
@@ -3121,6 +3163,13 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   }
   if (meth === 'GET' && p === '/api/live-sources') {
     return json(res, { liveSources: _settings.liveSources || [] });
+  }
+  if (meth === 'GET' && p === '/api/mxl/flows') {
+    const domain = url.searchParams.get('domain') || _settings.mxlDomain || '/dev/shm/mxl';
+    try {
+      const groups = await require('./lib/MxlSource').listFlows(domain);
+      return json(res, { domain, groups });
+    } catch(e) { return json(res, { error: e.message }, 500); }
   }
   if (meth === 'GET' && p === '/api/live/signal-status') {
     return json(res, _dlSignalStatus);

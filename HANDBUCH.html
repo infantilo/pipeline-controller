@@ -291,6 +291,7 @@
   <a href="#ograf-playlist">Als Playlist-Event</a>
   <a href="#ograf-playlist-vars">Playlist-Variablen</a>
   <a href="#dve-squeeze">DVE / Squeeze</a>
+  <a href="#dmf-mxl">DMF / MXL Live-Quellen</a>
 
   <div class="nav-section">Medien &amp; Bibliothek</div>
   <a href="#bibliothek">Medien-Bibliothek</a>
@@ -1642,6 +1643,34 @@ GET /api/grafik/status</code></pre>
 
 <div class="callout callout-info">
   <strong>Hold-Events (<code>endType:'manual'</code>):</strong> Children mit <code>endOffset</code> ("X Sekunden vor Ende") werden bei Hold NICHT relativ zur ursprünglich geplanten Dauer berechnet — sie bleiben aktiv, bis der Operator tatsächlich weiterschaltet.
+</div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="dmf-mxl">
+<h2>DMF / MXL Live-Quellen</h2>
+<p>Unterstützung für die <strong>EBU/AMWA DMF Media eXchange Layer (MXL)</strong> — Open-Source-SDK für Shared-Memory-Medienaustausch in software-definierter Produktion (<a href="https://github.com/dmf-mxl/mxl" target="_blank">github.com/dmf-mxl/mxl</a>). Läuft über das echte GStreamer-Plugin <code>gst-mxl-rs</code> (Elemente <code>mxlsrc</code>/<code>mxlsink</code>) — keine Eigenentwicklung, kein Fake-Element.</p>
+
+<h3>Installation</h3>
+<pre><code>bash scripts/install-mxl.sh</code></pre>
+<p>Klont/baut <code>libmxl</code> (CMake) + <code>gst-mxl-rs</code> (Cargo) aus den offiziellen Quellen und schreibt <code>env/mxl.env</code> (<code>GST_PLUGIN_PATH</code>, <code>LD_LIBRARY_PATH</code>, <code>MXL_DOMAIN</code>, <code>MXL_INFO_BIN</code>). <code>server.js</code> lädt diese Datei automatisch beim Start, <strong>vor</strong> der GStreamer-Initialisierung — kein manuelles Sourcen nötig.</p>
+
+<h3>Architektur</h3>
+<p>MXL-Flows leben in einer <strong>Domain</strong> (Shared-Memory-Verzeichnis, üblich <code>/dev/shm/mxl</code>). Jede Flow hat eine UUID + Label. Pipeline Controller behandelt einen MXL-Feed wie jede andere Live-Quelle (RTSP/SRT/UDP) — über das bestehende generische <code>gstSrc</code>-Konzept, kein Sonderpfad in <code>MasterPipeline.js</code> nötig. Eigenes URI-Schema (projektintern, <strong>nicht</strong> die offizielle MXL-URI-Spec):</p>
+<pre><code>mxl://&lt;domain-pfad&gt;?video=&lt;flow-uuid&gt;&amp;audio=&lt;flow-uuid&gt;</code></pre>
+<p>Wird automatisch zu <code>mxlsrc video-flow-id=… domain=… ! videoconvert</code> (bzw. <code>audio-flow-id</code>) aufgelöst. MXL-Quellen laufen immer als <strong>Feeder-Pipeline</strong> (<code>keepAlive:false</code>, wie RTSP) — nicht eingebettet in die Master-Pipeline, damit ein wegfallender Flow-Writer den Sendeweg nicht stört.</p>
+
+<h3>Feed-Auswahl (UI)</h3>
+<ol>
+  <li>UI → <strong>Einstellungen → Live-Quellen</strong> → Zeile anlegen</li>
+  <li><strong>📡 MXL-Feeds…</strong> klicken, Domain angeben (Default <code>/dev/shm/mxl</code>)</li>
+  <li>Feed aus der Liste wählen (per <code>mxl-info -d &lt;domain&gt; -l</code> ermittelt) — URI/<code>gstSrc</code> werden automatisch gesetzt</li>
+</ol>
+<p>Verfügbare Feeds lassen sich auch direkt abfragen:</p>
+<pre><code>GET /api/mxl/flows?domain=/dev/shm/mxl</code></pre>
+
+<div class="callout callout-warn">
+  <strong>Scope:</strong> Diese Integration deckt die <strong>Datenebene</strong> (MXL) lokal pro Host ab. Facility-weites Discovery/Routing über mehrere Hosts/Vendoren (AMWA NMOS IS-04/IS-05, Teil der vollen DMF-Architektur) ist nicht enthalten.
 </div>
 </section>
 

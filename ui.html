@@ -5976,7 +5976,10 @@ function _renderLiveList(){
         </select>
         <input style="flex:1;font-size:9px;font-family:var(--mono)" placeholder="inputId (Decklink-Eingang für BC)" value="${_esc(ls.inputId||'')}" oninput="_liveRows[${i}].inputId=this.value">
       </div>
-      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box" placeholder="URI (rtsp://... / srt://... / udp://...)" value="${_esc(ls.uri||'')}" oninput="_liveRows[${i}].uri=this.value;if(!_liveRows[${i}].gstSrc)_liveRows[${i}].keepAlive=false;">
+      <div style="display:flex;gap:4px">
+        <input style="flex:1;font-size:10px;font-family:var(--mono);box-sizing:border-box" placeholder="URI (rtsp://... / srt://... / udp://... / mxl://...)" value="${_esc(ls.uri||'')}" oninput="_liveRows[${i}].uri=this.value;if(!_liveRows[${i}].gstSrc)_liveRows[${i}].keepAlive=false;">
+        <button class="btn" style="font-size:9px;padding:1px 6px;white-space:nowrap" onclick="mxlPickFeed(${i})" title="DMF/MXL: verfügbare Feeds aus einer Domain auflisten">📡 MXL-Feeds…</button>
+      </div>
       <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box;${ls.uri&&!ls.gstSrc?'color:var(--dim)':''}" placeholder="${ls.uri&&!ls.gstSrc?_esc(_gstSrcFromUri(ls.uri)||'wird automatisch aus URI generiert'):'gstSrc (z.B. decklinkvideosrc device-number=0 — leer = aus URI)'}" value="${_esc(ls.gstSrc||'')}" oninput="_liveRows[${i}].gstSrc=this.value">
       ${isDL?`<div style="display:flex;gap:6px;align-items:center;font-size:9px">
         <span style="color:var(--dim);width:72px;flex-shrink:0">Video-Format</span>
@@ -6016,17 +6019,44 @@ function _renderLiveList(){
 
 function _esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;');}
 
+function _parseMxlUri(uri){
+  const m=/^mxl:\/\/(.+?)(?:\?(.*))?$/i.exec(uri); if(!m) return null;
+  const qs=new URLSearchParams(m[2]||''); return {domain:m[1],videoFlowId:qs.get('video'),audioFlowId:qs.get('audio')};
+}
 function _gstSrcFromUri(uri){
   if(!uri) return '';
   const u=uri.trim();
   if(/^rtsp:\/\//i.test(u))  return `rtspsrc location="${u}" latency=200 ! decodebin ! videoconvert`;
   if(/^rtsps:\/\//i.test(u)) return `rtspsrc location="${u}" latency=200 tls-validation-flags=0 ! decodebin ! videoconvert`;
   if(/^srt:\/\//i.test(u))   return `srtsrc uri="${u}" ! decodebin ! videoconvert`;
+  if(/^mxl:\/\//i.test(u)){
+    const m=_parseMxlUri(u); return m?.videoFlowId?`mxlsrc video-flow-id=${m.videoFlowId} domain=${m.domain} ! videoconvert`:'';
+  }
   if(/^udp:\/\//i.test(u)){
     const m=u.match(/^udp:\/\/([^:/?]+):(\d+)/i);
     return `udpsrc address="${m?.[1]||'0.0.0.0'}" port=${m?.[2]||'1234'} ! tsdemux ! decodebin ! videoconvert`;
   }
   return `uridecodebin uri="${u}" name=dec dec. ! videoconvert`;
+}
+
+// DMF/MXL: Feeds einer Domain auflisten (GET /api/mxl/flows) und URI für Zeile i füllen.
+async function mxlPickFeed(i){
+  const domain=await _prompt('MXL-Domain (Shared-Memory-Verzeichnis):', _liveRows[i].mxlDomain||'/dev/shm/mxl');
+  if(!domain) return;
+  let groups;
+  try{ groups=(await fetch('/api/mxl/flows?domain='+encodeURIComponent(domain)).then(r=>r.json())).groups||[]; }
+  catch(e){ alert('MXL-Feeds: '+e.message); return; }
+  if(!groups.length){ alert('Keine Flows in "'+domain+'" gefunden.'); return; }
+  const list=groups.map((g,n)=>`${n+1}) ${g.group}`+
+    (g.video?` [video: ${g.video.label}]`:'')+(g.audio?` [audio: ${g.audio.label}]`:'')).join('\n');
+  const sel=parseInt(await _prompt('Feed wählen:\n'+list, '1'), 10);
+  const g=groups[sel-1]; if(!g) return;
+  const qs=[]; if(g.video) qs.push('video='+g.video.id); if(g.audio) qs.push('audio='+g.audio.id);
+  if(!qs.length){ alert('Gewählter Feed hat keine video/audio-Flows.'); return; }
+  _liveRows[i].uri=`mxl://${domain}?${qs.join('&')}`;
+  _liveRows[i].mxlDomain=domain;
+  _liveRows[i].keepAlive=false;  // MXL-Flow kann verschwinden (Writer stoppt) → nicht in Master einbetten
+  _renderLiveList();
 }
 
 function liveAddRow(){
