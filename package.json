@@ -1,6 +1,6 @@
 {
   "name": "pipeline-controller",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "GStreamer Broadcast Playout System — Channel-in-a-Box",
   "main": "server.js",
   "scripts": {
