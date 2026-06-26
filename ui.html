@@ -364,6 +364,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
   <button class="btn" id="btn-preview" onclick="togglePreview()" data-i18n-title="btn.preview" title="Vorschau" style="padding:2px 5px;font-size:12px">📺</button>
   <button class="btn" id="btn-log" onclick="toggleLog()" data-i18n-title="btn.log" title="Log" style="padding:2px 5px;font-size:12px">📋</button>
   <button class="btn" id="btn-theme" onclick="toggleTheme()" data-i18n-title="btn.theme" title="Hell/Dunkel" style="padding:2px 5px;font-size:12px">🌙</button>
+  <button class="btn" id="btn-streamdeck" onclick="StreamDeck?.toggleConnect()" title="Stream Deck verbinden (WebHID, Chrome/Edge)" style="padding:2px 5px;font-size:12px;opacity:0.5">🎛</button>
   <div class="sep-v"></div>
   <button class="btn" id="btn-plugins" onclick="openPlugins()" title="Plugins" style="padding:2px 5px;font-size:12px">🔌</button>
   <button class="btn" id="btn-settings" onclick="openSettings()" data-i18n-title="btn.settings" title="Einstellungen" style="padding:2px 5px;font-size:12px">⚙</button>
@@ -1298,15 +1299,24 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div id="cfg-fc-available" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px"></div>
       <div class="two-col" style="margin-top:4px">
         <div class="fld">
-          <label title="Lautstärke-Schwellwert (dBFS) unter dem Surround als stumm gilt">Stille-Schwelle (dBFS)</label>
+          <label title="Lautstärke-Schwellwert (dBFS) unter dem eine Gruppe als stumm gilt">Stille-Schwelle (dBFS)</label>
           <input type="number" id="cfg-audio-silence-threshold" value="-55" min="-80" max="-10" step="1" style="font-family:var(--mono)">
         </div>
         <div class="fld">
-          <label title="Wie lange Surround stumm sein muss bevor der Fallback ausgelöst wird">Stille-Timeout (s)</label>
+          <label title="Wie lange eine Gruppe stumm sein muss bevor der Fallback ausgelöst wird">Stille-Timeout (s)</label>
           <input type="number" id="cfg-audio-silence-timeout" value="3" min="1" max="30" step="1" style="font-family:var(--mono)">
         </div>
       </div>
-      <button class="btn btn-p" style="font-size:10px;margin-top:4px" onclick="saveAudioResilience()">💾 Resilienz speichern</button>
+
+      <div style="font-size:9px;font-weight:600;margin:8px 0 3px">Track-Fallback Regeln</div>
+      <div style="font-size:9px;color:var(--dim);margin-bottom:5px;line-height:1.5">
+        Wenn eine Gruppe stumm ist und die Fallback-Quelle aktiv ist, wird nur die Matrix dieser einen Gruppe gepatcht — kein Preset-Wechsel, alle anderen Gruppen bleiben unverändert.<br>
+        <span style="color:var(--yellow)">▲mix / ▼mix</span> = automatischer Up-/Downmix mit gewählter Methode.
+      </div>
+      <div id="cfg-track-fallbacks" style="margin-bottom:4px"></div>
+      <button class="btn" style="font-size:9px;padding:2px 7px" onclick="_addTrackFallbackRule()">＋ Regel</button>
+
+      <button class="btn btn-p" style="font-size:10px;margin-top:8px;display:block" onclick="saveAudioResilience()">💾 Resilienz speichern</button>
 
       <div class="sep"></div>
       <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.audio.output">Audio-Output</div>
@@ -2577,6 +2587,10 @@ function _connectSSE(){
         for (const [k,v] of Object.entries(d)) { if (v.durationMs != null && !v.startedAt) v.startedAt = now - v.durationMs; }
         S.recordStatus=d; _updateRecordBadge();
       }).catch(()=>{});
+      fetch('/api/plugins', { headers: _authHeaders() }).then(r=>r.json()).then(plugins=>{
+        _plugins = plugins;
+        plugins.forEach(p => _onPluginStatus(p));
+      }).catch(()=>{});
     }, 300);
   });
   sse.addEventListener('error',()=>{
@@ -2626,6 +2640,7 @@ function _connectSSE(){
       _renderSwitcherGrid();
     }
     updateAll();renderPl();
+    window.StreamDeck?.scheduleRender();
   });
   sse.addEventListener('library',e=>{
     S.library=JSON.parse(e.data);
@@ -2664,6 +2679,7 @@ function _connectSSE(){
 sse.addEventListener('grafik',e=>{
     const d=JSON.parse(e.data);
     _applyGrafikEvent(d);
+    window.StreamDeck?.scheduleRender();
   });
   sse.addEventListener('hotkeys',e=>{
     _hotkeys=JSON.parse(e.data);
@@ -2709,6 +2725,7 @@ sse.addEventListener('grafik',e=>{
     renderPl();
     updateBigCounter();
     if(_cols.avail) loadAvailability();
+    window.StreamDeck?.scheduleRender();
   });
   sse.addEventListener('playlist-current',e=>{
     const d=JSON.parse(e.data);
@@ -2981,6 +2998,7 @@ sse.addEventListener('grafik',e=>{
   sse.addEventListener('plugin-status', e => {
     try { _onPluginStatus(JSON.parse(e.data)); } catch {}
     _liveHintsCache = null; // invalidate autocomplete cache on any plugin config/status change
+    window.StreamDeck?.scheduleRender();
   });
   sse.addEventListener('plugin-notify', e => {
     try {
@@ -3023,6 +3041,7 @@ sse.addEventListener('grafik',e=>{
     S.assets = JSON.parse(e.data);
     if (!document.getElementById('sec-asset')?.classList.contains('collapsed')) _renderAssetPanel();
     if (document.getElementById('asset-editor-list-modal')?.classList.contains('show')) _renderAssetEditorList();
+    window.StreamDeck?.scheduleRender();
   });
   sse.addEventListener('still-state', e => {
     _stillState = JSON.parse(e.data);
@@ -6505,8 +6524,9 @@ async function mxlDomainProbe() {
 }
 
 // ── Audio-Resilienz Fallback-Chain Builder ────────────────────────────────
-let _gFallbackChain = [];  // state for global settings chain
+let _gFallbackChain  = [];  // state for global settings chain
 let _emFallbackChain = []; // state for per-event chain in editor
+let _trackFallbacks  = [];  // state for per-track silence fallback rules
 
 function _allPresetIds() {
   return Object.keys(S.audioConfig?.presets || {});
@@ -6611,8 +6631,10 @@ async function _loadAudioTab(){
   // Audio-Resilienz-Einstellungen laden
   try {
     const r=await fetch('/api/config/audio-resilience').then(r=>r.json());
-    _gFallbackChain = r.audioPresetFallbackChain || [];
+    _gFallbackChain  = r.audioPresetFallbackChain || [];
+    _trackFallbacks  = r.audioTrackFallbacks || [];
     _renderGlobalFallbackChain();
+    _renderTrackFallbacks();
     const th=document.getElementById('cfg-audio-silence-threshold');
     if(th) th.value=String(r.audioSilenceThresholdDb??-55);
     const to=document.getElementById('cfg-audio-silence-timeout');
@@ -6625,6 +6647,7 @@ function renderAudioConfig(){
   _renderGroupsList();
   _renderR128List();
   _renderPresetsList();
+  _renderTrackFallbacks();
 }
 
 const AUDIO_SINK_OPTS = [
@@ -12195,17 +12218,73 @@ async function saveAudioSink() {
 }
 
 async function saveAudioResilience() {
-  const chain = _gFallbackChain.slice();
+  const chain     = _gFallbackChain.slice();
   const threshold = parseFloat(document.getElementById('cfg-audio-silence-threshold')?.value ?? -55);
   const timeout   = parseFloat(document.getElementById('cfg-audio-silence-timeout')?.value ?? 3);
   const r = await apiFetch('/api/config/audio-resilience', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audioPresetFallbackChain: chain, audioSilenceThresholdDb: threshold, audioSilenceTimeoutSec: timeout }),
+    body: JSON.stringify({
+      audioPresetFallbackChain: chain,
+      audioSilenceThresholdDb:  threshold,
+      audioSilenceTimeoutSec:   timeout,
+      audioTrackFallbacks:      _trackFallbacks.slice(),
+    }),
   });
   const d = await r?.json();
   if (d?.ok) showToast('Audio-Resilienz gespeichert ✓');
   else showToast('⚠ ' + (d?.error || 'Fehler'));
+}
+
+function _renderTrackFallbacks() {
+  const el = document.getElementById('cfg-track-fallbacks');
+  if (!el) return;
+  const groups = (S.audioConfig?.groups || []);
+
+  const groupOpts = groups.map(g =>
+    `<option value="${g.id}">${g.label || g.id} (${g.channels}ch)</option>`
+  ).join('');
+
+  const mixOpts = [
+    ['loro', 'LoRo (L→L, R→R)'],
+    ['ltrt', 'LtRt (Phantomcenter)'],
+    ['sum',  'Sum (gemischt)'],
+  ].map(([v, lbl]) => `<option value="${v}">${lbl}</option>`).join('');
+
+  if (!_trackFallbacks.length) {
+    el.innerHTML = '<div style="font-size:9px;color:var(--dim);padding:4px 0">Keine Regeln — ＋ Regel hinzufügen</div>';
+    return;
+  }
+
+  el.innerHTML = _trackFallbacks.map((rule, i) => {
+    const wg  = groups.find(g => g.id === rule.watchGroup);
+    const fbg = groups.find(g => g.id === rule.fallbackGroup);
+    const chDiff = wg && fbg ? wg.channels - fbg.channels : 0;
+    const mixHint = chDiff !== 0
+      ? `<span title="${chDiff < 0 ? `Downmix ${fbg.channels}→${wg.channels}ch` : `Upmix ${fbg.channels}→${wg.channels}ch`}" style="font-size:9px;color:var(--yellow)">${chDiff < 0 ? '▼mix' : '▲mix'}</span>` : '';
+
+    const gOpts = (sel) => groupOpts.replace(`value="${sel}"`, `value="${sel}" selected`);
+    const mOpts = mixOpts.replace(`value="${rule.mixMethod || 'loro'}"`, `value="${rule.mixMethod || 'loro'}" selected`);
+
+    return `<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;flex-wrap:wrap">
+      <select style="font-size:9px;min-width:110px" onchange="_trackFallbacks[${i}].watchGroup=this.value;_renderTrackFallbacks()">
+        <option value="">— Gruppe —</option>${gOpts(rule.watchGroup)}
+      </select>
+      <span style="font-size:9px;color:var(--dim)">stumm →</span>
+      <select style="font-size:9px;min-width:110px" onchange="_trackFallbacks[${i}].fallbackGroup=this.value;_renderTrackFallbacks()">
+        <option value="">— Quelle —</option>${gOpts(rule.fallbackGroup)}
+      </select>${mixHint}
+      <select style="font-size:9px;min-width:80px" title="Up-/Downmix-Methode" onchange="_trackFallbacks[${i}].mixMethod=this.value">
+        ${mOpts}
+      </select>
+      <button class="btn btn-r" style="font-size:9px;padding:1px 5px" onclick="_trackFallbacks.splice(${i},1);_renderTrackFallbacks()">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function _addTrackFallbackRule() {
+  _trackFallbacks.push({ watchGroup: '', fallbackGroup: '', preset: '' });
+  _renderTrackFallbacks();
 }
 
 // ── Search / filter helpers ────────────────────────────────────────────────
@@ -12414,6 +12493,8 @@ function _scte35UpdatePanel(d) {
     last.textContent = `Letzter Cue: ${lc.dir}${lc.dur ? ` (${lc.dur}s)` : ''} — vor ${ago}s`;
     last.style.display = '';
   }
+  window._scte35State = { inBreak: !!sd.inBreak, target: sd.target, pid: sd.pid, lastCue: sd.lastCue };
+  window.StreamDeck?.scheduleRender();
 }
 
 async function scte35ManualCue(cueType) {
@@ -13577,6 +13658,8 @@ function _prompt(msg, defaultVal=''){
   <div id="emoji-picker-grid"></div>
   <button id="emoji-picker-clear" onclick="_emojiPickerClear()">✕ Löschen</button>
 </div>
+
+<script src="/streamdeck.js" defer></script>
 
 </body>
 </html>

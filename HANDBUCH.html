@@ -280,7 +280,8 @@
   <div class="nav-section">Audio</div>
   <a href="#audio-gruppen">Audio-Gruppen</a>
   <a href="#audio-presets">Presets &amp; Routing</a>
-  <a href="#audio-resilience">Audio-Resilienz</a>
+  <a href="#audio-resilience">Audio-Resilienz (Preset-Fallback)</a>
+  <a href="#audio-track-fallback">Audio Track-Fallback</a>
   <a href="#clock">Clock-Provider</a>
   <a href="#dst">Sommerzeit / DST</a>
 
@@ -306,6 +307,9 @@
   <a href="#plugin-snmp">SNMP Monitor</a>
   <a href="#plugin-subtitle">Subtitle FAB</a>
   <a href="#plugin-entwicklung">Eigene Plugins</a>
+
+  <div class="nav-section">Hardware-Integration</div>
+  <a href="#streamdeck">Stream Deck WebHID</a>
 
   <div class="nav-section">Referenz</div>
   <a href="#api">REST-API</a>
@@ -1371,12 +1375,91 @@ Content-Type: application/json
 {
   <span class="key">"audioPresetFallbackChain"</span>: [<span class="str">"stereo-main"</span>, <span class="str">"pgm-stereo"</span>],
   <span class="key">"audioSilenceThresholdDb"</span>: <span class="num">-55</span>,
-  <span class="key">"audioSilenceTimeoutSec"</span>: <span class="num">3</span>
+  <span class="key">"audioSilenceTimeoutSec"</span>: <span class="num">3</span>,
+  <span class="key">"audioTrackFallbacks"</span>: [
+    { <span class="key">"watchGroup"</span>: <span class="str">"surround"</span>, <span class="key">"fallbackGroup"</span>: <span class="str">"stereo"</span>, <span class="key">"mixMethod"</span>: <span class="str">"loro"</span> }
+  ]
 }</code></pre>
 
 <div class="callout callout-info">
   <strong>Hinweis:</strong> Der statische Check erfolgt auf Basis der Metadaten in der Medienbibliothek (<code>library.json</code>). Für Dateien, die noch nicht gescannt wurden, greift nur der Laufzeit-Mechanismus.
 </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="audio-track-fallback">
+<h2>Audio Track-Fallback (Gruppen-Matrix-Patch)</h2>
+<span class="badge badge-blue">v1.3.0</span>
+
+<p>Der Track-Fallback ergänzt den Preset-Fallback um eine feinere Ebene: Wenn eine einzelne Audio-Gruppe (z.B. 5.1-Surround) stumm ist, aber eine andere Gruppe (z.B. Stereo-Programm) aktives Signal führt, wird <strong>nur die Matrix dieser einen Gruppe</strong> per GStreamer-Hot-Patch umgeleitet — ohne Preset-Wechsel, ohne Unterbrechung, ohne Einfluss auf andere Gruppen.</p>
+
+<h3>Unterschied zum Preset-Fallback</h3>
+<table>
+  <tr><th></th><th>Preset-Fallback</th><th>Track-Fallback</th></tr>
+  <tr><td>Wirkungsbereich</td><td>Alle Gruppen gleichzeitig (ganzes Preset wird ersetzt)</td><td>Nur die stumme Gruppe (Matrix-Patch an einem GStreamer-Element)</td></tr>
+  <tr><td>Auslöser</td><td>Kanalanzahl-Mismatch beim Pre-Cue oder Stille während Playback</td><td>Stille in der konfigurierten <em>watchGroup</em></td></tr>
+  <tr><td>Wiederherstellung</td><td>Neuer Preset-Switch wenn Surround zurückkommt</td><td>Original-Matrix der watchGroup wird wiederhergestellt</td></tr>
+  <tr><td>Up-/Downmix</td><td>Durch Preset-Routing definiert</td><td>Automatisch (LoRo / LtRt / Sum) je nach Kanal-Differenz</td></tr>
+</table>
+
+<h3>Konfiguration (Einstellungen → Audio → Audio-Resilienz → Track-Fallback Regeln)</h3>
+<p>Jede Regel besteht aus drei Feldern:</p>
+<div class="schema-field">
+  <div class="schema-key">watchGroup</div>
+  <div class="schema-type">string (Gruppen-ID)</div>
+  <div class="schema-desc">Die zu überwachende Gruppe. Wenn diese Gruppe stumm ist (&lt; Schwellwert) und die Fallback-Quelle aktiv ist, wird die Matrix gepatcht.</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">fallbackGroup</div>
+  <div class="schema-type">string (Gruppen-ID)</div>
+  <div class="schema-desc">Die Gruppe, deren Audiosignal in die watchGroup geleitet wird. Wird nur verwendet, wenn diese Gruppe selbst <em>nicht</em> stumm ist.</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">mixMethod</div>
+  <div class="schema-type">loro | ltrt | sum</div>
+  <div class="schema-desc">
+    Methode für automatischen Up-/Downmix wenn Kanal-Anzahl der Gruppen unterschiedlich ist:<br>
+    <strong>loro</strong> — Left-only/Right-only: L→L, R→R, andere Kanäle 0 (Standard, keine Phasenfehler)<br>
+    <strong>ltrt</strong> — Left-total/Right-total: Phantomcenter wird auf L+R summiert<br>
+    <strong>sum</strong> — alle Quellkanäle gleichgewichtig summiert<br>
+    Wenn Kanal-Anzahl gleich: Matrix wird direkt übernommen (kein Mix erforderlich).
+  </div>
+</div>
+
+<h3>Anzeige im UI</h3>
+<p>Im UI erscheint bei Kanalanzahl-Unterschied ein Hinweis:</p>
+<ul>
+  <li><span style="color:#eab308;font-weight:bold">▲mix</span> — Upmix (Fallback hat weniger Kanäle als watchGroup, z.B. Stereo → 5.1)</li>
+  <li><span style="color:#eab308;font-weight:bold">▼mix</span> — Downmix (Fallback hat mehr Kanäle als watchGroup)</li>
+</ul>
+
+<h3>Technischer Ablauf</h3>
+<ol>
+  <li>Der Server prüft alle aktiven Regeln im Takt der Audio-Level-Messung.</li>
+  <li>Wenn <code>watchGroup.rmsDbAvg ≤ Schwellwert</code> und <code>fallbackGroup.rmsDbAvg &gt; Schwellwert</code> für länger als den konfigurierten Timeout:
+    <ul>
+      <li>Der GStreamer-Element-Name wird berechnet: <code>amx_{slotId}_{watchGroupId}</code></li>
+      <li>Die neue Routing-Matrix wird via <code>AudioRouter.computeCrossGroupMatrix()</code> berechnet (inkl. Up-/Downmix)</li>
+      <li>Das Element wird per <code>el.setElementProperty('matrix', matrix)</code> live gepatcht (kein Pipeline-Neustart)</li>
+    </ul>
+  </li>
+  <li>Wenn <code>watchGroup</code> wieder Signal führt: Original-Matrix aus dem aktiven Preset wird wiederhergestellt.</li>
+  <li>Bei Wechsel des Playlist-Events wird der Zustand zurückgesetzt.</li>
+</ol>
+
+<div class="callout callout-warn">
+  <strong>Voraussetzung:</strong> Der Playlist-Player muss ein <code>audiomixmatrix</code>-Element für die watchGroup haben (d.h. ein Playlist-Event mit einem Audio-Preset muss gerade aktiv sein). Bei Live-Quellen ohne Playlist-Kontext greift der Track-Fallback nicht.
+</div>
+
+<h3>SSE-Events</h3>
+<pre><code><span class="comment">// Fallback aktiviert:</span>
+{ <span class="key">"type"</span>: <span class="str">"audio-resilience-fallback"</span>,
+  <span class="key">"watchGroup"</span>: <span class="str">"surround"</span>, <span class="key">"fallbackGroup"</span>: <span class="str">"stereo"</span>,
+  <span class="key">"mixMethod"</span>: <span class="str">"loro"</span>, <span class="key">"eventId"</span>: <span class="str">"ev-42"</span> }
+
+<span class="comment">// Wiederhergestellt:</span>
+{ <span class="key">"type"</span>: <span class="str">"audio-resilience-restored"</span>,
+  <span class="key">"watchGroupId"</span>: <span class="str">"surround"</span>, <span class="key">"eventId"</span>: <span class="str">"ev-42"</span> }</code></pre>
 </section>
 
 <!-- ─────────────────────────────────────────────────────────────────────────── -->
@@ -2370,6 +2453,116 @@ exports.destroy = <span class="kw">async function</span>() {
 </table>
 
 <p>Felder können mit <code>condition: 'feldname=wert'</code> bedingt angezeigt werden.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="streamdeck">
+<h2>Stream Deck WebHID</h2>
+<span class="badge badge-blue">v1.3.0</span>
+<span class="badge badge-purple">Chrome / Edge 89+</span>
+
+<p>Pipeline Controller unterstützt <strong>Elgato Stream Deck</strong>-Geräte direkt aus dem Browser — ohne Treiber, ohne Middleware. Die Integration nutzt die <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebHID_API" target="_blank">WebHID-API</a> und ist damit auf Chrome und Edge (≥ 89) beschränkt.</p>
+
+<div class="callout callout-warn">
+  <strong>Wichtig:</strong> Die offizielle Elgato Stream Deck Software muss geschlossen sein, da sie das HID-Gerät exklusiv hält. Sobald die Software beendet ist, kann Pipeline Controller direkt verbinden.
+</div>
+
+<h3>Verbindung herstellen</h3>
+<ol>
+  <li>Stream Deck per USB anschließen</li>
+  <li>Elgato Stream Deck Software beenden</li>
+  <li>Im Browser: Toolbar-Button <strong>🎛</strong> (neben dem Hell/Dunkel-Button) klicken</li>
+  <li>Im Browser-Dialog das Gerät auswählen und <em>Verbinden</em> klicken</li>
+</ol>
+<p>Das Gerät ist verbunden, wenn der 🎛-Button farbig leuchtet. Nach USB-Wiedereinstecken verbindet sich Pipeline Controller automatisch neu, sofern der Browser dem Gerät vertraut (nach einmaligem manuellen Verbinden gespeichert).</p>
+
+<h3>Unterstützte Geräte</h3>
+<table>
+  <tr><th>Modell</th><th>Raster</th><th>Bildformat</th><th>Anmerkung</th></tr>
+  <tr><td>Stream Deck MK.2</td><td>5×3</td><td>72×72 JPEG</td><td>Empfohlen</td></tr>
+  <tr><td>Stream Deck XL</td><td>8×4</td><td>96×96 JPEG</td><td>Mehr Inhalt pro Seite</td></tr>
+  <tr><td>Stream Deck +</td><td>4×4 + Dials</td><td>120×120 JPEG</td><td>Dials werden nicht genutzt</td></tr>
+  <tr><td>Stream Deck Mini</td><td>3×2</td><td>80×80 BMP</td><td>Nur Basis-Steuerung (wenig Platz)</td></tr>
+</table>
+
+<h3>Seitenlayout</h3>
+<p>Das Raster ist in drei Zonen aufgeteilt:</p>
+<ul>
+  <li><strong>Oberste Reihe — Menü:</strong> Navigation zwischen Seiten. Enthält den ← Zurück-Button wenn Unterseiten aktiv sind.</li>
+  <li><strong>Mittlere Reihen — Inhalt:</strong> Seitenspezifische Buttons (1 Reihe bei MK.2, 2 Reihen bei XL).</li>
+  <li><strong>Unterste Reihe — Playlist:</strong> Immer sichtbar. ⏮ Prev / ▶ Play|⏸ Stop / ⏭ Next / 🔴 Next Live + aktuell gespielter Event.</li>
+</ul>
+
+<h3>Seiten</h3>
+
+<h4>🏠 Home</h4>
+<p>Übersicht aller verfügbaren Seiten als Schnellnavigation. Zeigt Status-Kurzinfos: Playlist-Zustand, Anzahl On-Air-Grafiken, SCTE-35-Break-Status, aktives Branding.</p>
+
+<h4>🎬 Assets</h4>
+<p>Kombiniert Live-Quellen und Asset-Bibliothek:</p>
+<ul>
+  <li><strong>Live-Quellen</strong> als Schnellschaltknöpfe — On-Air-Quelle mit rotem Indikator</li>
+  <li><strong>Assets</strong> aus der Medienbibliothek, seitenweise blätterbar (◀ / ▶)</li>
+  <li>On-Air-Asset zeigt roten Indikator + laufenden Counter</li>
+</ul>
+<p>Beim MK.2 (nur 1 Inhaltsreihe): Unterseite 0 = Live-Quellen, Unterseiten 1+ = Asset-Pages.</p>
+
+<h4>📺 Grafik</h4>
+<p>Ograf/oGraf-Steuerung:</p>
+<ul>
+  <li>On-Air-Grafiken erscheinen als Buttons — Tap = sofort <em>Take Out</em></li>
+  <li>Template-Browser (beim XL in eigener Reihe) zur Vorauswahl</li>
+  <li>Fest belegte Action-Buttons: <strong>▶ Take</strong> / <strong>⏹ Takeout</strong> / <strong>⏩ Continue</strong></li>
+</ul>
+
+<h4>📡 SCTE-35</h4>
+<p>Erscheint im Menü nur, wenn das SCTE-35-Plugin aktiviert ist. Zeigt Break-Status (🔴 / 🟢) und bietet direkte Cue-Buttons: <strong>Cue OUT</strong> / <strong>Cue IN</strong> / <strong>Null</strong>. Die Duration kann direkt vom Gerät per Prompt gesetzt werden.</p>
+
+<h4>🎨 Branding</h4>
+<p>Zeigt das aktive Branding und die verfügbaren Branding-Dateien. Tap auf eine Datei aktiviert sie; Tap auf <em>Aus</em> deaktiviert Branding.</p>
+
+<h3>Plugin-Erweiterung</h3>
+<p>Jedes Plugin (oder externes Skript) kann eigene Stream-Deck-Seiten registrieren:</p>
+<pre><code><span class="comment">// Eigene Seite registrieren</span>
+StreamDeck.registerPage({
+  id:      <span class="str">'my-plugin'</span>,
+  name:    <span class="str">'My Plugin'</span>,
+  icon:    <span class="str">'⚡'</span>,
+  color:   <span class="str">'#7c3aed'</span>,
+
+  <span class="comment">// Optional: Seite nur im Menü anzeigen wenn Bedingung erfüllt</span>
+  condition: () => window._plugins?.find(p => p.id === <span class="str">'my-plugin'</span> && p.enabled),
+
+  <span class="comment">// Layout-Funktion — gibt Array von Reihen zurück</span>
+  getLayout({ cols, contentRows, sub, nav, nextSub, prevSub }) {
+    <span class="comment">// Reihe aufbauen: Array von ButtonDef-Objekten</span>
+    const row = Array.from({ length: cols }, () => ({ bg: <span class="str">'#000'</span> }));
+    row[<span class="num">0</span>] = {
+      icon:     <span class="str">'⚡'</span>,
+      label:    <span class="str">'Aktion'</span>,
+      sublabel: <span class="str">'Details'</span>,
+      bg:       <span class="str">'#1e293b'</span>,
+      ind:      <span class="str">'onair'</span>,    <span class="comment">// Indikator-Farbe: onair|cued|live|play</span>
+      action:   () => myAction(),
+    };
+    return [row];  <span class="comment">// contentRows Reihen zurückgeben</span>
+  }
+});
+
+<span class="comment">// Seite entfernen (z.B. wenn Plugin deaktiviert)</span>
+StreamDeck.unregisterPage(<span class="str">'my-plugin'</span>);
+
+<span class="comment">// Render nach State-Änderung anfordern</span>
+StreamDeck.scheduleRender();</code></pre>
+
+<h3>Technische Details</h3>
+<ul>
+  <li><strong>Protokoll:</strong> HID Output Reports (Report-ID 0x02). Bilder werden in 1015-Byte-Chunks gesendet mit 8-Byte-Header (Button-Index, Paket-Nummer, Last-Flag, Payload-Länge).</li>
+  <li><strong>Bildgenerierung:</strong> Canvas-basiert (HTML5 <code>&lt;canvas&gt;</code>). JPEG-Modelle (MK.2, XL, +) als Blob; BMP-Modelle (Mini) als rohe Pixel-Daten mit BMP-Header.</li>
+  <li><strong>Dirty-Tracking:</strong> Jeder Button-Slot hat einen Fingerprint (Icon + Label + Sublabel + Hintergrundfarbe + Indikator). Nur geänderte Buttons werden neu gesendet.</li>
+  <li><strong>Render-Debounce:</strong> 100 ms. Zusätzlich periodisches Refresh alle 1,5 s für Counter-Updates.</li>
+  <li><strong>Auto-Reconnect:</strong> Via <code>navigator.hid</code> connect/disconnect Events. Nach Wiederanstecken wird automatisch verbunden (sofern bereits einmal manuell genehmigt).</li>
+</ul>
 </section>
 
 <!-- ─────────────────────────────────────────────────────────────────────────── -->

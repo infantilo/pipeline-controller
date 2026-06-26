@@ -1008,60 +1008,132 @@ function _revalidateAudioPresets() {
 
 // Runtime silence-based fallback: track audio levels per group
 const _audioLevelCache = {};   // groupId → { rmsDbAvg: number, ts: number }
-const _silenceState    = {};   // groupId → { silentSince: number | null, fallbackTriggered: bool }
+const _silenceState    = {};   // stateKey → { silentSince: number | null, fallbackTriggered: bool }
 
 function _checkAudioSilenceFallback() {
   if (!playlist?._running) return;
   const ev = playlist?.playlist?.[playlist?.currentIndex];
   if (!ev) return;
-  const preset = ev.audioPreset || ev.audioConfig?.preset;
-  if (!preset) return;
-  const threshDb     = _settings.audioSilenceThresholdDb ?? -55;
-  const timeoutSec   = _settings.audioSilenceTimeoutSec  ?? 3;
-  const fallbackChain = (ev.audioPresetFallback && ev.audioPresetFallback.length)
-    ? ev.audioPresetFallback : (_settings.audioPresetFallbackChain || []);
-  if (!fallbackChain.length) return;
 
-  // Find a surround group (channels > 2) — that's the one we're watching for silence
-  const surroundGroup = audioGroupConfig?.groups?.find(g => g.channels > 2);
-  if (!surroundGroup) return;
-  const sId = surroundGroup.id;
-  const sLevel = _audioLevelCache[sId];
-  if (!sLevel) return;
-  const surroundSilent = sLevel.rmsDbAvg <= threshDb;
+  const threshDb   = _settings.audioSilenceThresholdDb ?? -55;
+  const timeoutSec = _settings.audioSilenceTimeoutSec  ?? 3;
+  const rules      = _settings.audioTrackFallbacks || [];
+  if (!rules.length) return;
 
-  // Reference: find any stereo group
-  const stereoGroup = audioGroupConfig?.groups?.find(g => g.channels === 2);
-  const stLevel = stereoGroup ? _audioLevelCache[stereoGroup.id] : null;
-  const stereoActive = stLevel && stLevel.rmsDbAvg > threshDb;
+  for (const rule of rules) {
+    const watchLevel = _audioLevelCache[rule.watchGroup];
+    const fbLevel    = _audioLevelCache[rule.fallbackGroup];
+    if (!watchLevel || !fbLevel) continue;
 
-  const st = (_silenceState[sId] = _silenceState[sId] || {});
-  if (surroundSilent && stereoActive) {
-    if (!st.silentSince) st.silentSince = Date.now();
-    if (!st.fallbackTriggered && (Date.now() - st.silentSince) >= timeoutSec * 1000) {
-      _triggerAudioSilenceFallback(ev, preset, fallbackChain, surroundGroup.channels);
-      st.fallbackTriggered = true;
+    const watchSilent = watchLevel.rmsDbAvg <= threshDb;
+    const fbActive    = fbLevel.rmsDbAvg > threshDb;
+
+    const stKey = `${rule.watchGroup}:${rule.fallbackGroup}`;
+    const st    = (_silenceState[stKey] = _silenceState[stKey] || {});
+
+    // Wenn das Event wechselt, State zurücksetzen (neues Clip, frische Matrix)
+    if (st.triggeredForEventId && st.triggeredForEventId !== ev.id) {
+      st.fallbackTriggered     = false;
+      st.triggeredForEventId   = null;
+      st.silentSince           = null;
     }
-  } else {
-    st.silentSince = null;
-    st.fallbackTriggered = false;
+
+    if (watchSilent && fbActive) {
+      if (!st.silentSince) st.silentSince = Date.now();
+      if (!st.fallbackTriggered && (Date.now() - st.silentSince) >= timeoutSec * 1000) {
+        if (_patchGroupMatrix(ev, rule)) {
+          st.fallbackTriggered   = true;
+          st.triggeredForEventId = ev.id;
+        }
+      }
+    } else {
+      st.silentSince = null;
+      if (!watchSilent && st.fallbackTriggered && st.triggeredForEventId === ev.id) {
+        // Watch-Gruppe hat sich erholt → Original-Matrix wiederherstellen
+        _restoreGroupMatrix(ev, rule.watchGroup);
+        st.fallbackTriggered   = false;
+        st.triggeredForEventId = null;
+      }
+    }
   }
 }
 
-function _triggerAudioSilenceFallback(ev, currentPreset, chain, surroundChannels) {
-  const stereoChannels = 2;
-  const fallback = chain.find(fb => (_presetMinChannels(fb) || 0) <= stereoChannels);
-  if (!fallback) {
-    log(`Audio-Resilienz: kein kompatibler Fallback-Preset gefunden (Kette: ${chain.join(', ')})`, 'warn', 'playlist');
-    return;
+/** Patcht nur die audiomixmatrix des stummen watchGroup-Elements im laufenden Player. */
+function _patchGroupMatrix(ev, rule) {
+  if (!audioGroupConfig) return false;
+  const presetId = ev.audioPreset || ev.audioConfig?.preset;
+  const preset   = presetId ? audioGroupConfig.getPreset(presetId) : null;
+  if (!preset?.routes) {
+    log(`Audio-Resilienz: kein routes-Preset "${presetId}" für Matrix-Patch`, 'warn', 'playlist');
+    return false;
   }
-  log(`Audio-Resilienz: Surround stumm, Stereo aktiv → Preset "${currentPreset}" → "${fallback}"`, 'warn', 'playlist');
-  // Hot-swap the preset on the currently playing event and on-air player
-  ev.audioPreset = fallback;
-  if (ev.audioConfig) ev.audioConfig.preset = fallback;
-  broadcast('audio-resilience-fallback', { from: currentPreset, to: fallback, eventId: ev.id });
-  broadcast('playlist', _enrichPlaylist(playlist.playlist));
-  playlist.changeOnAirPreset?.(fallback).catch(() => {});
+  const mixMethod = rule.mixMethod || 'loro';
+  const { el, inCh } = _getGroupMatrixElement(rule.watchGroup) || {};
+  if (!el) return false;
+
+  const matrix = AudioRouter.computeCrossGroupMatrix(
+    audioGroupConfig, preset, inCh, rule.watchGroup, rule.fallbackGroup, mixMethod
+  );
+  if (!matrix) {
+    log(`Audio-Resilienz: computeCrossGroupMatrix für "${rule.watchGroup}"←"${rule.fallbackGroup}" fehlgeschlagen`, 'warn', 'playlist');
+    return false;
+  }
+
+  try {
+    el.setElementProperty('matrix', matrix);
+    log(`Audio-Resilienz: "${rule.watchGroup}" stumm, "${rule.fallbackGroup}" aktiv → Matrix-Patch (${mixMethod})`, 'warn', 'playlist');
+    broadcast('audio-resilience-fallback', {
+      watchGroup: rule.watchGroup, fallbackGroup: rule.fallbackGroup,
+      mixMethod, eventId: ev.id,
+    });
+    return true;
+  } catch (e) {
+    log(`Audio-Resilienz: Matrix-Patch fehlgeschlagen: ${e.message}`, 'warn', 'playlist');
+    return false;
+  }
+}
+
+/** Stellt die Original-Matrix von watchGroup aus dem aktuellen Preset wieder her. */
+function _restoreGroupMatrix(ev, watchGroupId) {
+  if (!audioGroupConfig) return;
+  const presetId = ev.audioPreset || ev.audioConfig?.preset;
+  const preset   = presetId ? audioGroupConfig.getPreset(presetId) : null;
+  if (!preset) return;
+
+  const { el, inCh, slotId } = _getGroupMatrixElement(watchGroupId) || {};
+  if (!el) return;
+
+  const updates = AudioRouter.computeMatrixUpdates(audioGroupConfig, preset, inCh, slotId);
+  const elemName = `amx_${slotId}_${watchGroupId.replace(/-/g, '_')}`;
+  const matrix   = updates.get(elemName);
+  if (!matrix) return;
+
+  try {
+    el.setElementProperty('matrix', matrix);
+    log(`Audio-Resilienz: "${watchGroupId}" erholt → Original-Matrix wiederhergestellt`, 'info', 'playlist');
+    broadcast('audio-resilience-restored', { watchGroupId, eventId: ev.id });
+  } catch (e) {
+    log(`Audio-Resilienz: Matrix-Restore fehlgeschlagen: ${e.message}`, 'warn', 'playlist');
+  }
+}
+
+/** Gibt GStreamer-Element und in-channels für eine Gruppe im aktiven Player zurück. */
+function _getGroupMatrixElement(groupId) {
+  const slotId = playlist?._onAirSlot;
+  const player = slotId ? playlist?.players?.[slotId] : null;
+  if (!player?.aPipeline || !player.playing) return null;
+
+  const elemName = `amx_${slotId}_${groupId.replace(/-/g, '_')}`;
+  const el = player.aPipeline.getElementByName(elemName);
+  if (!el) return null;
+
+  let inCh;
+  try {
+    const prop = el.getElementProperty('in-channels');
+    inCh = (prop !== null && typeof prop === 'object' && 'value' in prop) ? prop.value : prop;
+  } catch { return null; }
+
+  return { el, inCh, slotId };
 }
 
 function _enrichLibrary(items) {
@@ -2115,6 +2187,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
 
   // Static UI
   if (p === '/' || p === '/index.html') return serveFile(res, path.join(__dirname, 'ui.html'), 'text/html');
+  if (p === '/streamdeck.js') return serveFile(res, path.join(__dirname, 'streamdeck.js'), 'application/javascript');
 
   // Preview
   if (p === '/preview') {
@@ -2843,6 +2916,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       audioPresetFallbackChain: _settings.audioPresetFallbackChain || [],
       audioSilenceThresholdDb:  _settings.audioSilenceThresholdDb  ?? -55,
       audioSilenceTimeoutSec:   _settings.audioSilenceTimeoutSec   ?? 3,
+      audioTrackFallbacks:      _settings.audioTrackFallbacks      || [],
     });
   }
   if (meth === 'POST' && p === '/api/config/audio-resilience') {
@@ -2852,6 +2926,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       audioPresetFallbackChain: _settings.audioPresetFallbackChain,
       audioSilenceThresholdDb:  _settings.audioSilenceThresholdDb,
       audioSilenceTimeoutSec:   _settings.audioSilenceTimeoutSec,
+      audioTrackFallbacks:      _settings.audioTrackFallbacks,
     };
     if (Array.isArray(b.audioPresetFallbackChain)) {
       _settings.audioPresetFallbackChain = b.audioPresetFallbackChain.filter(v => typeof v === 'string' && v.trim());
@@ -2859,8 +2934,21 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     }
     if (b.audioSilenceThresholdDb != null) _settings.audioSilenceThresholdDb = parseFloat(b.audioSilenceThresholdDb);
     if (b.audioSilenceTimeoutSec  != null) _settings.audioSilenceTimeoutSec  = parseFloat(b.audioSilenceTimeoutSec);
+    if (Array.isArray(b.audioTrackFallbacks)) {
+      _settings.audioTrackFallbacks = b.audioTrackFallbacks.filter(r =>
+        r && typeof r.watchGroup === 'string' && r.watchGroup.trim() &&
+             typeof r.fallbackGroup === 'string' && r.fallbackGroup.trim()
+      ).map(r => ({
+        watchGroup:    r.watchGroup.trim(),
+        fallbackGroup: r.fallbackGroup.trim(),
+        mixMethod:     ['loro','ltrt','sum'].includes(r.mixMethod) ? r.mixMethod : 'loro',
+      }));
+      // Reset all silence states so changed rules start fresh
+      Object.keys(_silenceState).forEach(k => delete _silenceState[k]);
+    }
     saveSettings(_settings);
-    _logConfigDiff(req, 'audio-resilience', _before, _settings, ['audioPresetFallbackChain','audioSilenceThresholdDb','audioSilenceTimeoutSec']);
+    _logConfigDiff(req, 'audio-resilience', _before, _settings,
+      ['audioPresetFallbackChain','audioSilenceThresholdDb','audioSilenceTimeoutSec','audioTrackFallbacks']);
     if (_revalidateAudioPresets()) broadcast('playlist', _enrichPlaylist(playlist.playlist));
     return json(res, { ok: true });
   }

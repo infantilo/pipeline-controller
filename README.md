@@ -39,6 +39,8 @@ Pipeline Controller is a complete **broadcast playout system** built on the open
 - 📺 **SCTE-35 splice cue generator** — generate SCTE-35 `splice_insert`/`splice_null` as MPEG-TS/UDP, triggered by playlist events, classification (`commercial`/`promo`), `block_start`/`block_end` events, or manual cue from the UI
 - ⚠️ **Transition timing validation** — automatic warnings when clips are too short for configured crossfade/fade transitions (🔀⚠ badge on playlist event + toast in editor)
 - 🔇 **Audio Preset Resilience** — automatic fallback when a clip has fewer audio channels than the selected preset requires: static pre-cue check (before playout) and live EBU-silence detection (during playout, hot-swap without interruption). Global fallback chain + optional per-event override, both configurable via an interactive drag-and-drop chip builder in the UI
+- 🔀 **Per-Track Audio Silence Fallback** — when a specific audio group (e.g. 5.1 surround) is detected silent while a fallback group (e.g. stereo program) carries signal, only that group's routing matrix is hot-patched without affecting other groups. Automatic up-/downmix (LoRo / LtRt / sum) when channel counts differ. Restores to the original preset matrix when audio returns
+- 🎛️ **Stream Deck WebHID** — direct hardware button surface control from the browser (Chrome/Edge, no drivers needed). Fully dynamic pages for playlist control, live source switching, asset playback, oGraf take/takeout, SCTE-35 cues, and branding selection. Plugin-extensible: any plugin can register its own Stream Deck page
 
 ---
 
