@@ -280,6 +280,7 @@
   <div class="nav-section">Audio</div>
   <a href="#audio-gruppen">Audio-Gruppen</a>
   <a href="#audio-presets">Presets &amp; Routing</a>
+  <a href="#audio-resilience">Audio-Resilienz</a>
   <a href="#clock">Clock-Provider</a>
   <a href="#dst">Sommerzeit / DST</a>
 
@@ -1314,6 +1315,68 @@ Master-Pipeline
   { <span class="key">"condition"</span>: <span class="str">"channels >= 6"</span>, <span class="key">"preset"</span>: <span class="str">"51-direkt"</span> },
   { <span class="key">"condition"</span>: <span class="str">"filename contains 'DE'"</span>, <span class="key">"preset"</span>: <span class="str">"stereo"</span> }
 ]</code></pre>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="audio-resilience">
+<h2>Audio-Resilienz (Preset-Fallback)</h2>
+<span class="badge badge-blue">v1.2.0</span>
+
+<p>Audio-Resilienz verhindert stille Ausgaben, wenn ein Playlist-Event ein Audio-Preset verlangt, das mehr Audiokanäle voraussetzt als die Mediendatei tatsächlich enthält — z.B. ein 5.1-Preset auf einer Stereo-Datei.</p>
+
+<h3>Funktionsweise</h3>
+<p>Es gibt zwei Erkennungsmechanismen, die parallel aktiv sind:</p>
+<ol>
+  <li><strong>Statische Vorab-Prüfung (Pre-Cue):</strong> Beim Einlesen der Datei analysiert der Server die Kanal-Anzahl (aus den Bibliotheks-Metadaten). Reicht die Datei nicht für das gewählte Preset, wird automatisch auf das erste kompatible Preset in der konfigurierten Fallback-Kette umgeschaltet — noch bevor das Event on-air geht. Im Playlist-Event erscheint ein <strong>🔇⚠</strong>-Badge.</li>
+  <li><strong>Dynamische Laufzeit-Erkennung (EBU-Stille):</strong> Während der Wiedergabe wird das RMS-Pegel jeder Audio-Gruppe überwacht. Surround-Gruppen (mehr als 2 Kanäle), die dauerhaft unter dem konfigurierten Schwellwert liegen, während eine Stereo-Referenzgruppe aktives Signal führt, lösen nach dem konfigurierten Timeout einen Hot-Swap des Presets aus — ohne Unterbrechung der Wiedergabe.</li>
+</ol>
+
+<h3>Globale Fallback-Kette (Einstellungen → Audio)</h3>
+<p>Die Fallback-Kette definiert die Priorität der Ausweich-Presets. Das System prüft die Presets von oben nach unten und wählt das erste, dessen Mindest-Kanal-Anforderung von der Datei erfüllt wird.</p>
+
+<p><strong>UI:</strong> Im Einstellungs-Tab <em>Audio → Audio-Resilienz</em> werden alle konfigurierten Presets als klickbare Chips angezeigt. Klick auf ein verfügbares Preset fügt es ans Ende der Kette an. Die Kette selbst zeigt Presets als Chips mit ↑ / ↓ (Priorität ändern) und ✕ (entfernen).</p>
+
+<h3>Per-Event-Fallback (Event-Editor)</h3>
+<p>Jedes Playlist-Event kann optional eine eigene Fallback-Kette definieren — z.B. für Clips, die bekanntermaßen kein Surround haben. Im Event-Editor im Abschnitt <em>Audio-Preset</em> erscheint derselbe Chip-Builder unter <em>Preset-Fallback (leer = global)</em>. Eine leere Liste bedeutet: globale Einstellung verwenden.</p>
+
+<pre><code><span class="comment">// Beispiel-Event mit expliziter Fallback-Kette (JSON)</span>
+{
+  <span class="key">"file"</span>: <span class="str">"news_stereo.mxf"</span>,
+  <span class="key">"audioPreset"</span>: <span class="str">"51-direkt"</span>,
+  <span class="key">"audioPresetFallback"</span>: [<span class="str">"stereo-main"</span>, <span class="str">"pgm-stereo"</span>]
+}</code></pre>
+
+<h3>Konfiguration (Einstellungen → Audio → Audio-Resilienz)</h3>
+<div class="schema-field">
+  <div class="schema-key">audioPresetFallbackChain</div>
+  <div class="schema-type">string[]</div>
+  <div class="schema-desc">Globale Fallback-Kette: geordnete Liste von Preset-IDs. Wird auch als JSON gespeichert: <code>["stereo-main", "pgm-stereo"]</code>. Im UI per Chip-Builder konfigurierbar.</div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">audioSilenceThresholdDb</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Lautstärke-Schwellwert in dBFS. Surround-Gruppen unter diesem Wert gelten als stumm. <span class="schema-default">Standard: −55 dBFS</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">audioSilenceTimeoutSec</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Wie lange (Sekunden) Surround dauerhaft stumm sein muss, bevor der Laufzeit-Fallback ausgelöst wird. <span class="schema-default">Standard: 3 s</span></div>
+</div>
+
+<h3>REST-Endpunkt</h3>
+<pre><code>GET  /api/config/audio-resilience
+POST /api/config/audio-resilience
+Content-Type: application/json
+
+{
+  <span class="key">"audioPresetFallbackChain"</span>: [<span class="str">"stereo-main"</span>, <span class="str">"pgm-stereo"</span>],
+  <span class="key">"audioSilenceThresholdDb"</span>: <span class="num">-55</span>,
+  <span class="key">"audioSilenceTimeoutSec"</span>: <span class="num">3</span>
+}</code></pre>
+
+<div class="callout callout-info">
+  <strong>Hinweis:</strong> Der statische Check erfolgt auf Basis der Metadaten in der Medienbibliothek (<code>library.json</code>). Für Dateien, die noch nicht gescannt wurden, greift nur der Laufzeit-Mechanismus.
+</div>
 </section>
 
 <!-- ─────────────────────────────────────────────────────────────────────────── -->

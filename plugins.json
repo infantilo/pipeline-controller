@@ -19,7 +19,7 @@
     "enabled": false
   },
   "broadcast-controller": {
-    "enabled": true
+    "enabled": false
   },
   "marina-sync": {
     "config": {
@@ -30,5 +30,8 @@
       "pollIntervalSec": 60
     },
     "enabled": false
+  },
+  "scte35": {
+    "enabled": true
   }
 }

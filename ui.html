@@ -1096,9 +1096,10 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         </select>
       </div>
       <div id="em-preset-desc" style="font-size:9px;color:var(--dim);margin:-4px 0 4px;padding:0 2px;min-height:12px;white-space:pre-wrap"></div>
-      <div class="fld" style="margin-top:4px">
-        <label title="Komma-getrennte Preset-IDs als Fallback wenn Datei zu wenige Audiokanäle hat (leer = Global-Einstellung)">Preset-Fallback (Resilienz)</label>
-        <input type="text" id="em-audio-fallback" style="font-family:var(--mono);font-size:10px" placeholder="z.B. stereo-main, pgm-stereo (leer = global)">
+      <div style="margin-top:6px">
+        <div style="font-size:9px;font-weight:600;margin-bottom:2px" title="Preset-Fallback wenn Datei zu wenige Audiokanäle hat — leer = globale Einstellung wird verwendet">Preset-Fallback <span style="font-weight:normal;color:var(--dim)">(leer = global)</span></div>
+        <div id="em-fc-chain" style="min-height:22px;background:var(--bg2);border:1px solid var(--brd);border-radius:3px;padding:3px 5px;display:flex;flex-wrap:wrap;gap:3px;align-items:center;margin-bottom:3px"></div>
+        <div id="em-fc-available" style="display:flex;flex-wrap:wrap;gap:3px"></div>
       </div>
     </div>
   </div><!-- /em-panel-content -->
@@ -1290,13 +1291,11 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div class="sep"></div>
       <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 6px">🔇 Audio-Resilienz (Preset-Fallback)</div>
       <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
-        Wenn ein Event-Preset mehr Audiokanäle benötigt als die Datei hat, wird automatisch auf das erste kompatible Preset in dieser Liste gewechselt.<br>
-        <b>Reihenfolge:</b> zuerst = bevorzugter Fallback. Komma-getrennte Preset-IDs.
+        Wenn ein Event-Preset mehr Audiokanäle benötigt als die Datei hat, wird automatisch auf das erste kompatible Preset in dieser Liste gewechselt. Reihenfolge: oben = bevorzugter Fallback.
       </div>
-      <div class="fld">
-        <label>Globale Fallback-Kette</label>
-        <input type="text" id="cfg-audio-fallback-chain" style="font-family:var(--mono);font-size:10px" placeholder="z.B. stereo-main, pgm-stereo">
-      </div>
+      <div style="font-size:9px;font-weight:600;margin-bottom:3px">Kette <span style="font-weight:normal;color:var(--dim)">(Priorität ↓ — Presets anklicken zum Hinzufügen)</span></div>
+      <div id="cfg-fc-chain" style="min-height:28px;background:var(--bg2);border:1px solid var(--brd);border-radius:3px;padding:4px 6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:5px"></div>
+      <div id="cfg-fc-available" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px"></div>
       <div class="two-col" style="margin-top:4px">
         <div class="fld">
           <label title="Lautstärke-Schwellwert (dBFS) unter dem Surround als stumm gilt">Stille-Schwelle (dBFS)</label>
@@ -5817,8 +5816,9 @@ function openEventEditor(idx,ev){
   const presetSel=document.getElementById('em-audio-preset');
   if(presetSel) presetSel.value=e.audioPreset||'';
   _showPresetDesc();
-  const fbInput=document.getElementById('em-audio-fallback');
-  if(fbInput) fbInput.value=Array.isArray(e.audioPresetFallback)?e.audioPresetFallback.join(', '):(e.audioPresetFallback||'');
+  _emFallbackChain = Array.isArray(e.audioPresetFallback) ? [...e.audioPresetFallback]
+    : (e.audioPresetFallback ? String(e.audioPresetFallback).split(',').map(s=>s.trim()).filter(Boolean) : []);
+  _renderEmFallbackChain();
   document.getElementById('em-transition').value=e.transition||'cut';
   document.getElementById('em-speed').value=e.transitionSpeed||'fast';
   _applyXfadeAvailability();
@@ -6504,6 +6504,93 @@ async function mxlDomainProbe() {
   }
 }
 
+// ── Audio-Resilienz Fallback-Chain Builder ────────────────────────────────
+let _gFallbackChain = [];  // state for global settings chain
+let _emFallbackChain = []; // state for per-event chain in editor
+
+function _allPresetIds() {
+  return Object.keys(S.audioConfig?.presets || {});
+}
+
+function _fcChip(id, onClick, title) {
+  const s = document.createElement('span');
+  s.style.cssText = 'display:inline-flex;align-items:center;gap:2px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:3px;font-size:9px;font-family:var(--mono);white-space:nowrap';
+  s.title = title || '';
+  const lbl = document.createElement('span');
+  lbl.textContent = id;
+  s.appendChild(lbl);
+  if (onClick) { s.style.cursor = 'pointer'; s.addEventListener('click', onClick); }
+  return s;
+}
+
+function _fcAvailChip(id, onClick) {
+  const s = document.createElement('span');
+  s.style.cssText = 'display:inline-flex;align-items:center;gap:2px;background:var(--bg3);border:1px solid var(--brd);color:var(--fg);padding:2px 6px;border-radius:3px;font-size:9px;font-family:var(--mono);cursor:pointer;white-space:nowrap';
+  s.title = 'Zum Fallback hinzufügen';
+  s.textContent = '+ ' + id;
+  s.addEventListener('click', onClick);
+  return s;
+}
+
+function _fcBtn(text, title, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = text;
+  b.title = title;
+  b.style.cssText = 'background:rgba(0,0,0,.25);border:none;color:#fff;padding:0 3px;border-radius:2px;font-size:9px;cursor:pointer;line-height:1.4';
+  b.addEventListener('click', e => { e.stopPropagation(); onClick(); });
+  return b;
+}
+
+function _renderFallbackChainInto(chainEl, availEl, chain, setChain) {
+  if (!chainEl || !availEl) return;
+  chainEl.innerHTML = '';
+  if (chain.length === 0) {
+    const empty = document.createElement('span');
+    empty.style.cssText = 'color:var(--dim);font-size:9px;font-style:italic';
+    empty.textContent = 'Leer — kein Fallback';
+    chainEl.appendChild(empty);
+  } else {
+    chain.forEach((pid, i) => {
+      const chip = _fcChip(pid, null, 'Preset in Fallback-Kette');
+      if (i > 0) chip.appendChild(_fcBtn('↑', 'Nach oben', () => { const a=[...chain]; [a[i-1],a[i]]=[a[i],a[i-1]]; setChain(a); }));
+      if (i < chain.length - 1) chip.appendChild(_fcBtn('↓', 'Nach unten', () => { const a=[...chain]; [a[i],a[i+1]]=[a[i+1],a[i]]; setChain(a); }));
+      chip.appendChild(_fcBtn('✕', 'Entfernen', () => setChain(chain.filter((_,j)=>j!==i))));
+      chainEl.appendChild(chip);
+    });
+  }
+  availEl.innerHTML = '';
+  const avail = _allPresetIds().filter(id => !chain.includes(id));
+  if (avail.length === 0) {
+    const none = document.createElement('span');
+    none.style.cssText = 'color:var(--dim);font-size:9px;font-style:italic';
+    none.textContent = 'Alle Presets bereits in Kette';
+    availEl.appendChild(none);
+  } else {
+    avail.forEach(pid => {
+      availEl.appendChild(_fcAvailChip(pid, () => setChain([...chain, pid])));
+    });
+  }
+}
+
+function _renderGlobalFallbackChain() {
+  _renderFallbackChainInto(
+    document.getElementById('cfg-fc-chain'),
+    document.getElementById('cfg-fc-available'),
+    _gFallbackChain,
+    newChain => { _gFallbackChain = newChain; _renderGlobalFallbackChain(); }
+  );
+}
+
+function _renderEmFallbackChain() {
+  _renderFallbackChainInto(
+    document.getElementById('em-fc-chain'),
+    document.getElementById('em-fc-available'),
+    _emFallbackChain,
+    newChain => { _emFallbackChain = newChain; _renderEmFallbackChain(); }
+  );
+}
+
 async function _loadAudioTab(){
   // Dolby E Status prüfen
   try {
@@ -6524,8 +6611,8 @@ async function _loadAudioTab(){
   // Audio-Resilienz-Einstellungen laden
   try {
     const r=await fetch('/api/config/audio-resilience').then(r=>r.json());
-    const fc=document.getElementById('cfg-audio-fallback-chain');
-    if(fc) fc.value=(r.audioPresetFallbackChain||[]).join(', ');
+    _gFallbackChain = r.audioPresetFallbackChain || [];
+    _renderGlobalFallbackChain();
     const th=document.getElementById('cfg-audio-silence-threshold');
     if(th) th.value=String(r.audioSilenceThresholdDb??-55);
     const to=document.getElementById('cfg-audio-silence-timeout');
@@ -8604,7 +8691,7 @@ async function _saveEventInner(){
     transition: (!_canUseXfade() && document.getElementById('em-transition').value === 'xfade') ? 'cut' : document.getElementById('em-transition').value,
     transitionSpeed:document.getElementById('em-speed').value,
     audioPreset: document.getElementById('em-audio-preset')?.value || null,
-    audioPresetFallback: (()=>{const v=document.getElementById('em-audio-fallback')?.value?.trim();return v?v.split(',').map(s=>s.trim()).filter(Boolean):undefined;})(),
+    audioPresetFallback: _emFallbackChain.length ? _emFallbackChain.slice() : undefined,
     // Legacy-Feld bleibt für Kompatibilität
     audioConfig:{pgm:'pgm-de',secondary:'dup-pgm'},
     branding:document.getElementById('em-branding').value||null,
@@ -12108,8 +12195,7 @@ async function saveAudioSink() {
 }
 
 async function saveAudioResilience() {
-  const chainVal = document.getElementById('cfg-audio-fallback-chain')?.value?.trim() || '';
-  const chain    = chainVal ? chainVal.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const chain = _gFallbackChain.slice();
   const threshold = parseFloat(document.getElementById('cfg-audio-silence-threshold')?.value ?? -55);
   const timeout   = parseFloat(document.getElementById('cfg-audio-silence-timeout')?.value ?? 3);
   const r = await apiFetch('/api/config/audio-resilience', {

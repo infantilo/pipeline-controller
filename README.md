@@ -38,6 +38,7 @@ Pipeline Controller is a complete **broadcast playout system** built on the open
 - 📡 **DMF/MXL live sources** — EBU/AMWA Media eXchange Layer shared-memory flows as live sources (real `mxlsrc`/`mxlsink` GStreamer plugin), with in-UI feed discovery/selection
 - 📺 **SCTE-35 splice cue generator** — generate SCTE-35 `splice_insert`/`splice_null` as MPEG-TS/UDP, triggered by playlist events, classification (`commercial`/`promo`), `block_start`/`block_end` events, or manual cue from the UI
 - ⚠️ **Transition timing validation** — automatic warnings when clips are too short for configured crossfade/fade transitions (🔀⚠ badge on playlist event + toast in editor)
+- 🔇 **Audio Preset Resilience** — automatic fallback when a clip has fewer audio channels than the selected preset requires: static pre-cue check (before playout) and live EBU-silence detection (during playout, hot-swap without interruption). Global fallback chain + optional per-event override, both configurable via an interactive drag-and-drop chip builder in the UI
 
 ---
 
@@ -314,6 +315,7 @@ pipeline-controller/
 - 📤 [Additional outputs (Downconvert / Cleanfeed / DeckLink)](./HANDBUCH.html#zusatz-ausgaenge)
 - 📡 [DMF/MXL live sources](./HANDBUCH.html#dmf-mxl)
 - 📺 [SCTE-35 cue generator plugin](./HANDBUCH.html#plugin-scte35)
+- 🔇 [Audio Preset Resilience (fallback chain)](./HANDBUCH.html#audio-resilience)
 - 🧩 [Asset Panel & auto-return](./HANDBUCH.html#asset-panel)
 - ⏱️ [Counter Strip](./HANDBUCH.html#counter-strip)
 - 🕐 [Daylight Saving Time behavior](./HANDBUCH.html#dst)
