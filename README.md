@@ -36,6 +36,8 @@ Pipeline Controller is a complete **broadcast playout system** built on the open
 - 🔲 **DVE / Squeeze** — squeeze the program/live video into a positioned box (or squeeze an image/oGraf overlay over full-screen video), with green-screen auto-detection and chroma-key transparency for frame graphics
 - 📤 **Additional outputs** — any number of extra downconverted network outputs (RTMP/SRT/UDP/file) or DeckLink SDI/HDMI hardware sinks, independent of the main program path
 - 📡 **DMF/MXL live sources** — EBU/AMWA Media eXchange Layer shared-memory flows as live sources (real `mxlsrc`/`mxlsink` GStreamer plugin), with in-UI feed discovery/selection
+- 📺 **SCTE-35 splice cue generator** — generate SCTE-35 `splice_insert`/`splice_null` as MPEG-TS/UDP, triggered by playlist events, classification (`commercial`/`promo`), `block_start`/`block_end` events, or manual cue from the UI
+- ⚠️ **Transition timing validation** — automatic warnings when clips are too short for configured crossfade/fade transitions (🔀⚠ badge on playlist event + toast in editor)
 
 ---
 
@@ -47,8 +49,8 @@ Native Node.js installation — no AppImage required:
 
 ```bash
 # On a target machine: download & install
-tar -xzf PipelineController-1.0.0.tar.gz
-cd PipelineController-1.0.0
+tar -xzf PipelineController-1.0.1.tar.gz
+cd PipelineController-1.0.1
 bash install.sh          # ⚠️ never with sudo!
 
 # Start
@@ -179,6 +181,7 @@ Plugins run in **isolated worker threads** — a plugin crash has **no impact** 
 |---|---|---|
 | 📁 **File Transfer Manager** | Automatic FTP/FTPS/local transfer & cache management | ✅ enabled |
 | 🎛️ **Broadcast Controller** | Control external routers (SW-P-08, EVS Cerebrum, HTTP, TCP) | disabled |
+| 📺 **SCTE-35 Cue Generator** | Generate SCTE-35 splice cues as MPEG-TS/UDP from playlist events, classifications, or manual trigger | disabled |
 | 🛥️ **Marina Sync** | Auto-sync playlist from Pebble Beach Marina (`.mpl` watchfolder, on-air resume) | disabled |
 | 📡 **SNMP Monitor** | Monitor broadcast devices via SNMP v1/v2c/v3 | disabled |
 | 💬 **Subtitle FAB** | Live subtitle control via FAB Subtitle Server | disabled |
@@ -274,10 +277,12 @@ pipeline-controller/
 │   ├── GreenZoneDetect.js  # Green-screen box detection + chroma-key transparency
 │   ├── MxlSource.js        # DMF/MXL flow discovery (mxl-info wrapper)
 │   └── ...
+├── releases/               # Build artifacts (AppImage, tar.gz) — git-ignored, distributed via GitHub Releases
 ├── plugins/                # Plugin system
 │   ├── broadcast-controller/
 │   ├── file-transfer-manager/
 │   ├── marina-sync/
+│   ├── scte35/
 │   └── ...
 ├── scripts/
 │   └── install-mxl.sh      # Builds libmxl + gst-mxl-rs (mxlsrc/mxlsink) from source
@@ -308,6 +313,7 @@ pipeline-controller/
 - 🔲 [DVE / Squeeze](./HANDBUCH.html#dve-squeeze)
 - 📤 [Additional outputs (Downconvert / Cleanfeed / DeckLink)](./HANDBUCH.html#zusatz-ausgaenge)
 - 📡 [DMF/MXL live sources](./HANDBUCH.html#dmf-mxl)
+- 📺 [SCTE-35 cue generator plugin](./HANDBUCH.html#plugin-scte35)
 - 🧩 [Asset Panel & auto-return](./HANDBUCH.html#asset-panel)
 - ⏱️ [Counter Strip](./HANDBUCH.html#counter-strip)
 - 🕐 [Daylight Saving Time behavior](./HANDBUCH.html#dst)
@@ -376,4 +382,3 @@ Assets:<br>
   <sub>Broadcast Playout System · GStreamer 1.22+ · Node.js 18+ · EBU oGraf</sub><br>
   <sub>24/7 channel-in-a-box · Linux · Open-Source-based</sub>
 </p>
-```

@@ -832,6 +832,115 @@ function _revalidateDurations() {
       if (ev._durationWarning) { delete ev._durationWarning; changed = true; }
     }
   }
+  if (_revalidateTransitions()) changed = true;
+  return changed;
+}
+
+// ── Transition / Timing Validation ────────────────────────────────────────────
+// Checks all playlist events for structural timing issues caused by:
+//  - crossfade durations exceeding the clip length
+//  - double-crossfade sandwiches where both sides eat into the same clip
+//  - live precue lead time longer than the preceding clip
+//  - grafik/child events whose delay+duration exceeds the parent clip duration
+// Results are stored as ev._transitionWarning (string) or cleared (undefined).
+
+function _revalidateTransitions() {
+  const events = playlist?.playlist;
+  if (!Array.isArray(events) || events.length === 0) return false;
+
+  const SPEEDS   = Object.assign({ fast: 500, medium: 1000, slow: 2000 }, _settings.transitionSpeeds);
+  const leadMs   = (_settings.liveCueLeadSec ?? 5) * 1000;
+  const cueMode  = _settings.liveCueMode || 'timed';
+  let   changed  = false;
+
+  const NON_PLAYER = new Set(['smpte', 'black', 'image', 'block_start', 'block_end', 'comment']);
+
+  function isPlayable(ev) { return ev && !NON_PLAYER.has(ev.source); }
+  function isLive(ev) { return ev?.source === 'live' || (ev && !NON_PLAYER.has(ev.source) && !ev.file && ev.source !== 'live' && false); }
+  function effectiveDurMs(ev) {
+    if (!ev) return 0;
+    if (ev.source === 'live') return (parseFloat(ev.duration) || 5) * 1000;
+    if (ev.eom != null)       return ((parseFloat(ev.eom) || 0) + (parseFloat(ev.postroll) || 0)) * 1000;
+    if (ev.duration != null)  return ((parseFloat(ev.duration) || 0) + (parseFloat(ev.postroll) || 0)) * 1000;
+    return 0;
+  }
+  function xfadeMs(ev) {
+    if (!ev || ev.transition !== 'xfade') return 0;
+    return SPEEDS[ev.transitionSpeed || 'fast'] ?? SPEEDS.fast;
+  }
+
+  for (let i = 0; i < events.length; i++) {
+    const ev   = events[i];
+    const next = events[i + 1];
+    const prev = events[i - 1];
+
+    const issues = [];
+    const durMs  = effectiveDurMs(ev);
+
+    if (isPlayable(ev) && durMs > 0) {
+      const xfadeOut = xfadeMs(next);  // next event's crossfade eats into this clip's end
+      const xfadeIn  = xfadeMs(ev);    // this event's own crossfade-in (eats into this clip's start from viewer's pov)
+
+      // 1. Outgoing xfade longer than the clip itself
+      if (xfadeOut > 0 && durMs < xfadeOut) {
+        issues.push(`Clip (${(durMs/1000).toFixed(2)}s) kürzer als Crossfade-Überblendung zum nächsten Event (${(xfadeOut/1000).toFixed(2)}s)`);
+      }
+
+      // 2. Both incoming and outgoing crossfades together exceed the clip duration
+      //    — the two fade regions overlap, producing a visual artifact
+      if (xfadeIn > 0 && xfadeOut > 0 && (xfadeIn + xfadeOut) >= durMs) {
+        issues.push(`Crossfade-Ein (${(xfadeIn/1000).toFixed(2)}s) + Crossfade-Aus (${(xfadeOut/1000).toFixed(2)}s) überlappen sich (Clip: ${(durMs/1000).toFixed(2)}s)`);
+      } else if (xfadeIn > 0 && xfadeOut > 0 && (xfadeIn + xfadeOut) > durMs * 0.85) {
+        // Soft warning when transitions consume >85% of the clip
+        issues.push(`Crossfade-Ein + Aus verbrauchen ${Math.round((xfadeIn+xfadeOut)/durMs*100)}% der Clipdauer`);
+      }
+
+      // 3. Own crossfade-in alone exceeds the clip (edge case: very short clip, xfade > clip)
+      if (xfadeIn > 0 && !xfadeOut && durMs < xfadeIn) {
+        issues.push(`Clip (${(durMs/1000).toFixed(2)}s) kürzer als eigene Crossfade-Ein-Dauer (${(xfadeIn/1000).toFixed(2)}s)`);
+      }
+
+      // 4. Non-xfade dissolve-type transitions that have a duration (v-fade, fade-cut, cut-fade)
+      //    These use transitionSpeed but only on the outgoing side; next event applies it.
+      const dissolveTypes = ['v-fade', 'fade-cut', 'cut-fade'];
+      if (next && dissolveTypes.includes(next.transition)) {
+        const fadeMs = SPEEDS[next.transitionSpeed || 'fast'] ?? SPEEDS.fast;
+        if (durMs < fadeMs) {
+          issues.push(`Clip (${(durMs/1000).toFixed(2)}s) kürzer als Fade-Überblendung zum nächsten Event (${(fadeMs/1000).toFixed(2)}s, Typ: ${next.transition})`);
+        }
+      }
+    }
+
+    // 5. Previous clip too short for live precue of this event
+    if (ev?.source === 'live' && cueMode === 'timed' && leadMs > 0 && prev && isPlayable(prev)) {
+      const prevDurMs = effectiveDurMs(prev);
+      if (prevDurMs > 0 && prevDurMs < leadMs) {
+        const prevIssue = `Clip zu kurz (${(prevDurMs/1000).toFixed(2)}s) für Live-Vorcue von ${(leadMs/1000).toFixed(2)}s des folgenden Live-Events`;
+        const cur = events[i - 1]._transitionWarning;
+        const merged = cur ? (cur.includes(prevIssue) ? cur : cur + '\n' + prevIssue) : prevIssue;
+        if (events[i - 1]._transitionWarning !== merged) { events[i - 1]._transitionWarning = merged; changed = true; }
+      }
+    }
+
+    // 6. Child (grafik) event delay + duration exceeds parent clip duration
+    if (Array.isArray(ev.children) && ev.children.length > 0 && durMs > 0) {
+      for (const ch of ev.children) {
+        const delMs  = (parseFloat(ch.delay)    || 0) * 1000;
+        const chDurMs = (parseFloat(ch.duration) || 0) * 1000;
+        if (chDurMs > 0 && (delMs + chDurMs) > durMs + 200) {
+          issues.push(`Kind-Event "${ch.template || ch.id || '?'}" (Delay ${(delMs/1000).toFixed(2)}s + Dauer ${(chDurMs/1000).toFixed(2)}s) übersteigt Clipdauer`);
+          break;
+        }
+      }
+    }
+
+    const w = issues.length > 0 ? issues.join('\n') : undefined;
+    if (ev._transitionWarning !== w) {
+      if (w) ev._transitionWarning = w; else delete ev._transitionWarning;
+      changed = true;
+    }
+  }
+
   return changed;
 }
 
@@ -1334,6 +1443,8 @@ playlist.on('live-precue',    d  => {
   const ls = (_settings.liveSources || []).find(l => l.id === d.liveSlot);
   if (ls) master?.startLiveFeeder?.(ls).catch(e => log(`Feeder: ${e.message}`, 'warn', 'playlist'));
 });
+playlist.on('block-start',    d  => pluginHost.dispatch('playlist:block-start', d));
+playlist.on('block-end',      d  => pluginHost.dispatch('playlist:block-end',   d));
 playlist.on('backup-active',  d  => { broadcast('backup-active', d); log(`⚠ FAILOVER: ${d.fromSlot||'(file)'} → ${d.toSlot||'backup-path'} (${d.event?.file||'?'})`, 'warn', 'playlist'); });
 playlist.on('backup-unavailable', d => { broadcast('backup-unavailable', d); log(`⚠ Backup nicht verfügbar: ${d.fromSlot}`, 'warn', 'playlist'); });
 playlist.on('grafik',       d  => {
@@ -2547,6 +2658,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     saveSettings(_settings);
     _logConfigDiff(req, 'transitionspeeds', _before, _settings, ['transitionSpeeds']);
     transitionEngine.setSpeeds(_settings.transitionSpeeds);
+    if (_revalidateTransitions()) broadcast('playlist', _enrichPlaylist(playlist.playlist));
     return json(res, { ok: true, transitionSpeeds: _settings.transitionSpeeds });
   }
   if (meth === 'POST' && p === '/api/config/backup') {
@@ -3125,7 +3237,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   }
   if (meth === 'POST' && p === '/api/settings') {
     const b = await parseBody(req);
-    const _settingsKeys = ['autoGap','stillSlots','maxClients','grafikLatencyMs','videoDelayMs','audioDelayMs','liveCueMode','liveCueLeadSec'];
+    const _settingsKeys = ['autoGap','stillSlots','maxClients','grafikLatencyMs','videoDelayMs','audioDelayMs','liveCueMode','liveCueLeadSec','mxlDomain'];
     const _before = {}; for (const k of _settingsKeys) _before[k] = _settings[k];
     if (b.autoGap !== undefined) {
       playlist.opts.autoGap = !!b.autoGap;
@@ -3156,6 +3268,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       _settings.liveCueLeadSec = Math.max(0, parseFloat(b.liveCueLeadSec) || 0);
       playlist.opts.liveCueLeadSec = _settings.liveCueLeadSec;
     }
+    if (b.mxlDomain !== undefined) _settings.mxlDomain = String(b.mxlDomain).trim() || '/dev/shm/mxl';
     saveSettings(_settings);
     _logConfigDiff(req, 'settings', _before, _settings, _settingsKeys);
     broadcast('state', getState());
@@ -3163,6 +3276,15 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   }
   if (meth === 'GET' && p === '/api/live-sources') {
     return json(res, { liveSources: _settings.liveSources || [] });
+  }
+  if (meth === 'POST' && p === '/api/scte35/cue') {
+    const sess = _requireAuth(req, res, ['admin', 'operator']); if (sess === false) return;
+    const b = await parseBody(req);
+    const cueType = ['out', 'in', 'null'].includes(b.cueType) ? b.cueType : 'null';
+    const durationSec = parseFloat(b.durationSec) || 0;
+    pluginHost.dispatch('scte35:manual-cue', { cueType, durationSec });
+    _userLog(sess, 'scte35.cue', `type=${cueType} dur=${durationSec}s`);
+    return json(res, { ok: true, cueType, durationSec });
   }
   if (meth === 'GET' && p === '/api/mxl/flows') {
     const domain = url.searchParams.get('domain') || _settings.mxlDomain || '/dev/shm/mxl';
@@ -3473,7 +3595,7 @@ function getState() {
     slots:    { onAir: playlist._onAirSlot, idle: playlist._idleSlot },
     playlist: { running: playlist._running, paused: playlist._paused, currentIndex: playlist.currentIndex, length: playlist.playlist.length },
     playing:  _currentPlaying ? { ..._currentPlaying, elapsedMs: Date.now() - _currentPlaying.startMs } : null,
-    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'] },
+    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, mxlDomain: _settings.mxlDomain||'/dev/shm/mxl', extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'] },
     avSync:   master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs??0, audioMs: _settings.audioDelayMs||{} },
     grafik:   { active: activeGrafiks },
   };

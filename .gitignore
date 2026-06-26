@@ -87,6 +87,12 @@ filelist.txt
 .DS_Store
 Thumbs.db
 
+# Release artefacts (AppImage, tar.gz) — distributed via GitHub Releases, not git objects
+releases/
+
+# Build session version lock (transient, created by build scripts)
+.build-session-version
+
 # Claude Code settings (project-specific)
 .claude/
 Trace-20260601T141143.json

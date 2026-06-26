@@ -361,6 +361,14 @@
   <strong>Wichtig:</strong> Das AppImage muss <em>extrahiert</em> werden und darf <strong>nicht direkt</strong> als gemountetes AppImage gestartet werden. Der Grund: die <strong>oGraf-Grafik-Engine</strong> verwendet Puppeteer (Headless Chromium), das Zugriff auf das echte Dateisystem benötigt und im FUSE-gemounteten AppImage-Dateisystem nicht korrekt funktioniert.
 </div>
 
+<h3>AppImage erstellen (auf der Entwicklungsmaschine)</h3>
+<pre><code>./build_appimage.sh
+<span class="comment"># Version wird automatisch aus package.json erhöht (Patch-Nummer)
+# Ergebnis: releases/PipelineController-1.0.x-x86_64.AppImage
+#
+# Oder mit expliziter Version:
+APPVER=2.0.0 ./build_appimage.sh</span></code></pre>
+
 <h3>Schritt 1 – AppImage herunterladen und ausführbar machen</h3>
 <pre><code>chmod +x PipelineController-x86_64.AppImage</code></pre>
 
@@ -455,17 +463,39 @@ npm install</code></pre>
 
 <h3>Paket erstellen (auf der Entwicklungsmaschine)</h3>
 <pre><code>cd "/path/to/PIPELINE CONTROLLER"
-./create_install_package.sh 1.0.0
-<span class="comment"># Ergebnis: ../PipelineController-1.0.0.tar.gz</span></code></pre>
+./create_install_package.sh
+<span class="comment"># Version wird automatisch aus package.json erhöht (Patch-Nummer)
+# Ergebnis: releases/PipelineController-1.0.x.tar.gz
+#
+# Oder mit expliziter Version:
+APPVER=2.0.0 ./create_install_package.sh</span></code></pre>
+
+<h3>Versionierung &amp; GitHub Releases</h3>
+<ul>
+  <li>Artefakte landen in <code>releases/</code> im Projektverzeichnis (in <code>.gitignore</code> — keine Binaries in Git-Objekten)</li>
+  <li>Patch-Version wird automatisch aus <code>package.json</code> erhöht — kein manuelles Pflegen der Versionsnummer</li>
+  <li><strong>Session-Lock:</strong> Werden AppImage und Installer-Paket in derselben Sitzung (&lt; 1 Stunde) gebaut, teilen sich beide Skripte automatisch dieselbe Version — kein doppelter Increment</li>
+  <li>Nach dem Build erscheint eine interaktive Abfrage: <code>package.json</code> committen + Git-Tag <code>v{VERSION}</code> erstellen + pushen + <code>gh release create</code>-Befehl anzeigen</li>
+</ul>
+<pre><code><span class="comment"># GitHub CLI installieren (einmalig)</span>
+sudo apt install gh
+gh auth login
+
+<span class="comment"># Release hochladen (Befehl wird vom Build-Skript angezeigt)</span>
+gh release create v1.0.1 \
+  releases/PipelineController-1.0.1.tar.gz \
+  releases/PipelineController-1.0.1-x86_64.AppImage \
+  --title 'Pipeline Controller 1.0.1' \
+  --notes 'Release 1.0.1'</code></pre>
 
 <h3>Auf dem Ziel-Rechner installieren</h3>
 <pre><code><span class="comment"># 1. Paket übertragen (z.B. via scp)</span>
-scp PipelineController-1.0.0.tar.gz user@remote:~/
+scp releases/PipelineController-1.0.1.tar.gz user@remote:~/
 
 <span class="comment"># 2. Entpacken und Installer starten</span>
 ssh user@remote
-tar -xzf PipelineController-1.0.0.tar.gz
-cd PipelineController-1.0.0
+tar -xzf PipelineController-1.0.1.tar.gz
+cd PipelineController-1.0.1
 bash install.sh</code></pre>
 
 <p><strong>Wichtig:</strong> <code>install.sh</code> niemals mit <code>sudo</code> starten – PulseAudio/PipeWire läuft als normaler Benutzer.</p>
@@ -1093,10 +1123,24 @@ sudo journalctl -u pipeline-controller -f   <span class="comment"># Logs verfolg
 <table>
   <tr><th>Übergang</th><th>Beschreibung</th></tr>
   <tr><td><code>cut</code></td><td>Harter Schnitt (Standard)</td></tr>
-  <tr><td><code>v-fade</code></td><td>V-Blende: aus nach Schwarz, dann in</td></tr>
+  <tr><td><code>xfade</code></td><td>Crossfade (Überblendung): beide Clips laufen kurz gleichzeitig — Clip-Dauer muss ≥ Überblendzeit sein</td></tr>
+  <tr><td><code>v-fade</code></td><td>V-Blende: aus nach Schwarz, dann ein</td></tr>
   <tr><td><code>cut-fade</code></td><td>Schnitt rein, Blende raus</td></tr>
   <tr><td><code>fade-cut</code></td><td>Blende rein, Schnitt raus</td></tr>
 </table>
+
+<h3>Transition-Timing-Validierung</h3>
+<p>Pipeline Controller prüft automatisch, ob Clip-Dauern mit den konfigurierten Überblendzeiten kompatibel sind. Probleme werden als Badge <code>🔀⚠</code> in der Playlist angezeigt (Tooltip zeigt Details). Warnungen blockieren das Speichern nicht.</p>
+<table>
+  <tr><th>Szenario</th><th>Prüfung</th></tr>
+  <tr><td>Clip kürzer als Crossfade-Out</td><td><code>duration[i] &lt; xfadeMs</code> des Folge-Events</td></tr>
+  <tr><td>Doppel-Crossfade (Sandwich)</td><td><code>xfadeMs_in + xfadeMs_out ≥ duration[i]</code></td></tr>
+  <tr><td>Softwarnung: Übergänge verbrauchen &gt;85% des Clips</td><td>Hinweis ohne Blockierung</td></tr>
+  <tr><td>Fade-Typen (v-fade, fade-cut, cut-fade)</td><td>Wie Crossfade für ausgehende Seite</td></tr>
+  <tr><td>Live-Vorcue länger als vorheriger Clip</td><td><code>duration[prev] &lt; liveCueLeadSec</code></td></tr>
+  <tr><td>Kind-Event (Grafik) übersteigt Clipdauer</td><td><code>delay + duration &gt; parent-Clipdauer</code></td></tr>
+</table>
+<p>Im Event-Editor werden Warnungen beim Speichern als Toast angezeigt (ohne Blockierung). Die Überblendzeiten (fast / medium / slow in ms) sind unter <strong>Einstellungen → Überblendungen</strong> konfigurierbar und lösen eine Neuprüfung aller Events aus.</p>
 
 <h3>Playlist-JSON-Format</h3>
 <pre><code>[
@@ -1660,13 +1704,18 @@ GET /api/grafik/status</code></pre>
 <pre><code>mxl://&lt;domain-pfad&gt;?video=&lt;flow-uuid&gt;&amp;audio=&lt;flow-uuid&gt;</code></pre>
 <p>Wird automatisch zu <code>mxlsrc video-flow-id=… domain=… ! videoconvert</code> (bzw. <code>audio-flow-id</code>) aufgelöst. MXL-Quellen laufen immer als <strong>Feeder-Pipeline</strong> (<code>keepAlive:false</code>, wie RTSP) — nicht eingebettet in die Master-Pipeline, damit ein wegfallender Flow-Writer den Sendeweg nicht stört.</p>
 
+<h3>MXL-Domain konfigurieren</h3>
+<p>Die Standard-Domain (<code>/dev/shm/mxl</code>) ist persistent in den Einstellungen hinterlegt: UI → <strong>Einstellungen → Live → MXL-Domain</strong>. Sie wird als Standardwert beim Feed-Picker und beim API-Aufruf verwendet.</p>
+
 <h3>Feed-Auswahl (UI)</h3>
+<p>Die Live-Quellen-Verwaltung verwendet einen <strong>typgesteuerten Flow</strong> — zunächst wird der Quell-Typ gewählt, dann erscheinen die passenden Felder:</p>
 <ol>
-  <li>UI → <strong>Einstellungen → Live-Quellen</strong> → Zeile anlegen</li>
-  <li><strong>📡 MXL-Feeds…</strong> klicken, Domain angeben (Default <code>/dev/shm/mxl</code>)</li>
-  <li>Feed aus der Liste wählen (per <code>mxl-info -d &lt;domain&gt; -l</code> ermittelt) — URI/<code>gstSrc</code> werden automatisch gesetzt</li>
+  <li>UI → <strong>Einstellungen → Live-Quellen</strong> → Typ <strong>MXL</strong> wählen</li>
+  <li>Domain eingeben (Vorbelegt aus Einstellungen) → <strong>Feeds laden</strong></li>
+  <li>Feed aus der Inline-Liste wählen — URI und ID werden automatisch gesetzt</li>
 </ol>
-<p>Verfügbare Feeds lassen sich auch direkt abfragen:</p>
+<p>Weitere Quell-Typen: <strong>DeckLink/SDI</strong> (automatische Geräte-Erkennung), <strong>Netzwerk</strong> (RTSP/SRT/UDP mit Auto-Hint), <strong>Manuell</strong> (freier GStreamer-Pipeline-String).</p>
+<p>Verfügbare MXL-Feeds lassen sich auch direkt abfragen:</p>
 <pre><code>GET /api/mxl/flows?domain=/dev/shm/mxl</code></pre>
 
 <div class="callout callout-warn">
@@ -1747,6 +1796,10 @@ MEDIA_DIR=/mnt/san/broadcast/media node server.js</code></pre>
   <tr><td><code>player:cued</code></td><td>Player hat Clip vorgeladen (~5s vor On-Air)</td></tr>
   <tr><td><code>player:stopped</code></td><td>Player wurde gestoppt</td></tr>
   <tr><td><code>live:precue</code></td><td>Live-Event in der Playlist kurz vor On-Air</td></tr>
+  <tr><td><code>playlist:started</code></td><td>Playlist-Wiedergabe gestartet</td></tr>
+  <tr><td><code>playlist:ended</code></td><td>Playlist-Wiedergabe beendet</td></tr>
+  <tr><td><code>playlist:block-start</code></td><td>Block-Event (<code>block_start</code>) erreicht — enthält <code>event</code> + <code>blockDur</code> (Sekunden)</td></tr>
+  <tr><td><code>playlist:block-end</code></td><td>Block-Ende (<code>block_end</code>) erreicht</td></tr>
   <tr><td><code>system:shutdown</code></td><td>Server wird heruntergefahren (Cleanup)</td></tr>
 </table>
 </section>
@@ -1973,6 +2026,103 @@ MEDIA_DIR=/mnt/san/broadcast/media node server.js</code></pre>
 </div>
 
 <p>Plugin im Plugin-Manager aktivieren: ⚙ Einstellungen → Plugins → Subtitle FAB → Aktivieren.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+<section id="plugin-scte35">
+<h2>Plugin: SCTE-35 Cue Generator</h2>
+<span class="badge badge-blue">v1.1.0</span>
+<span class="badge badge-yellow">Standard: deaktiviert</span>
+
+<p>Erzeugt <strong>SCTE-35 splice_info_section</strong>-Nachrichten (MPEG-TS 188-Byte, UDP) basierend auf Playlist-Events, Classifications und Block-Events. Standard-Einsatz: Werbepausen-Signalisierung für externe SCTE-35-Inserter oder direkt in MPEG-TS-Ausgaben.</p>
+
+<h3>Auslöser</h3>
+<table>
+  <tr><th>Auslöser</th><th>Aktion</th><th>Konfiguration</th></tr>
+  <tr><td>Live-Event in Playlist</td><td>Cue-Out</td><td><code>cueOutOnLive: true</code></td></tr>
+  <tr><td>Clip-Event (Rückkehr aus Break)</td><td>Cue-In</td><td><code>cueInOnClip: true</code></td></tr>
+  <tr><td>Event-Classification (z.B. <code>commercial</code>)</td><td>Cue-Out / Cue-In</td><td><code>cueOutClassifications: "commercial,promo"</code></td></tr>
+  <tr><td><code>block_start</code> / <code>block_end</code></td><td>Cue-Out (wenn Classification passt) / Cue-In</td><td><code>cueOutOnBlock: true</code></td></tr>
+  <tr><td>Manuell über UI oder REST</td><td>CUE OUT / CUE IN / NULL</td><td>immer aktiv</td></tr>
+</table>
+
+<h3>Konfiguration</h3>
+<div class="schema-field">
+  <div class="schema-key">outputHost</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">Ziel-Host für UDP-Ausgabe. <span class="schema-default">Standard: 127.0.0.1</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">outputPort</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">UDP-Port. <span class="schema-default">Standard: 5500</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">pid</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">MPEG-TS PID für SCTE-35-Pakete. <span class="schema-default">Standard: 500</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">cueOutOnLive</div>
+  <div class="schema-type">boolean</div>
+  <div class="schema-desc">Automatisch Cue-Out senden wenn ein Live-Event on-air geht. <span class="schema-default">Standard: true</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">cueInOnClip</div>
+  <div class="schema-type">boolean</div>
+  <div class="schema-desc">Automatisch Cue-In senden wenn ein Clip-Event nach einem Break on-air geht. <span class="schema-default">Standard: true</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">cueOutClassifications</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">Komma-getrennte Liste von Event-Classifications die Cue-Out auslösen (z.B. <code>commercial,promo</code>). <span class="schema-default">Standard: commercial</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">cueInClassifications</div>
+  <div class="schema-type">string</div>
+  <div class="schema-desc">Komma-getrennte Classifications die Cue-In auslösen. Leer = alle anderen Classifications. <span class="schema-default">Standard: leer</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">cueOutOnBlock</div>
+  <div class="schema-type">boolean</div>
+  <div class="schema-desc">Cue-Out bei <code>block_start</code> (wenn Classification passt), Cue-In automatisch bei <code>block_end</code>. <span class="schema-default">Standard: true</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">prerollMs</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Pre-Roll in Millisekunden: Cue wird N ms vor Event-Start gesendet (erfordert Polling-Scan). <span class="schema-default">Standard: 0</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">durationSec</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Break-Dauer für Cue-Out in Sekunden (0 = offen/keine Duration). <span class="schema-default">Standard: 0</span></div>
+</div>
+<div class="schema-field">
+  <div class="schema-key">keepaliveHz</div>
+  <div class="schema-type">number</div>
+  <div class="schema-desc">Frequenz für Keepalive <code>splice_null</code>-Pakete in Hz (0 = deaktiviert). <span class="schema-default">Standard: 1</span></div>
+</div>
+
+<h3>Manuelles Auslösen (REST)</h3>
+<pre><code>POST /api/scte35/cue
+Content-Type: application/json
+
+{ <span class="key">"cueType"</span>: <span class="str">"out"</span>, <span class="key">"durationSec"</span>: <span class="num">30</span> }   <span class="comment">// Cue-Out mit 30s Break-Dauer</span>
+{ <span class="key">"cueType"</span>: <span class="str">"in"</span> }                         <span class="comment">// Cue-In</span>
+{ <span class="key">"cueType"</span>: <span class="str">"null"</span> }                        <span class="comment">// splice_null (Keepalive)</span></code></pre>
+
+<h3>UI-Panel</h3>
+<p>Das SCTE-35-Panel erscheint in der Sidebar (📺 SCTE-35) und zeigt Verbindungsziel, Break-Status (🔴 im Break / 🟢 normal), letzten Cue mit Zeitstempel, und Paket-Statistik. CUE OUT / CUE IN / NULL können jederzeit manuell ausgelöst werden.</p>
+
+<h3>Klassifikations-basiertes Splicing</h3>
+<p>Wird einem Playlist-Event die Classification <code>commercial</code> (oder eine andere konfigurierte Classification) zugeordnet, sendet das Plugin automatisch Cue-Out wenn das Event on-air geht. Bei der Rückkehr zu einem normalen Clip folgt Cue-In. Werbeblöcke lassen sich damit vollständig automatisch spliced werden.</p>
+
+<h3>Block-basiertes Splicing</h3>
+<p>Bei aktiviertem <code>cueOutOnBlock</code> wird beim Eintreten eines <code>block_start</code>-Events geprüft, ob das Block-Event selbst oder seine Child-Events eine Cue-Out-Classification tragen. Die Blockdauer (<code>blockDur</code>) wird als SCTE-35 Break-Duration verwendet. Bei <code>block_end</code> folgt automatisch Cue-In.</p>
+
+<div class="callout callout-info">
+  <strong>SCTE-104:</strong> SCTE-104 ist ein TCP-Steuerprotokoll für externe Inserter-Geräte (kein Embedding-Format). Die direkte Einbettung in DeckLink-SDI-Streams via VANC erfordert proprietäre DeckLink-SDK-Integration. Für den Standardfall (externer Inserter mit UDP-MPEG-TS-Input) ist das SCTE-35-Plugin die empfohlene Lösung.
+</div>
 </section>
 
 <!-- ─────────────────────────────────────────────────────────────────────────── -->

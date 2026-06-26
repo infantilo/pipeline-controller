@@ -11,11 +11,38 @@ set -euo pipefail
 
 # ── Konfiguration ─────────────────────────────────────────────────────────────
 APPNAME="PipelineController"
-APPVER="${APPVER:-1.0.0}"
 ARCH="x86_64"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(dirname "${SCRIPT_DIR}")"
+
+# ── Versionierung ─────────────────────────────────────────────────────────────
+# Priorität: APPVER env-var → Session-Lock → auto-increment aus package.json
+# Session-Lock: wenn eine andere Build-Script-Instanz in <1h die Version schon
+# erhöht hat, wird dieselbe Version verwendet (kein doppelter Increment).
+_PKG_JSON="${SCRIPT_DIR}/package.json"
+_VER_LOCK="${SCRIPT_DIR}/.build-session-version"
+if [[ -n "${APPVER:-}" ]]; then
+    : # Explicit override — use as-is
+elif [[ -f "${_VER_LOCK}" ]] && [[ $(( $(date +%s) - $(stat -c %Y "${_VER_LOCK}") )) -lt 3600 ]]; then
+    APPVER="$(cat "${_VER_LOCK}")"
+    echo "[build] Session-Version wiederverwendet: ${APPVER}"
+else
+    _cur="$(node -p "require('${_PKG_JSON}').version" 2>/dev/null || echo "1.0.0")"
+    IFS='.' read -r _maj _min _pat <<< "$_cur"
+    APPVER="${_maj}.${_min}.$(( _pat + 1 ))"
+    node -e "
+      const fs=require('fs'), p=JSON.parse(fs.readFileSync('${_PKG_JSON}','utf8'));
+      p.version='${APPVER}';
+      fs.writeFileSync('${_PKG_JSON}',JSON.stringify(p,null,2)+'\n');
+    "
+    echo "$APPVER" > "${_VER_LOCK}"
+    echo "[build] Version erhöht: ${_cur} → ${APPVER}"
+fi
+
+# Releases-Verzeichnis (git-ignoriert; Artefakte werden via GitHub Releases verteilt)
+RELEASES_DIR="${SCRIPT_DIR}/releases"
+mkdir -p "${RELEASES_DIR}"
 
 # Build artefacts live OUTSIDE the project directory
 BUILD_DIR="${PARENT_DIR}/build_appimage_tmp"
@@ -146,6 +173,30 @@ copy_libs() {
     rm -f "$seen_file" "$queue_file"
 }
 
+# ── Build-Modus ───────────────────────────────────────────────────────────────
+# CLEAN_BUILD=1 (Standard): Media, Bilder, Marina-Ordner, Playlisten ausschließen;
+#   von templates/grafik nur 02700111 und dve-lower-third einbinden.
+# CLEAN_BUILD=0: Alles einschließen.
+# Env-Var überschreibt die Abfrage: CLEAN_BUILD=0 ./build_appimage.sh
+if [[ -z "${CLEAN_BUILD:-}" ]]; then
+    echo ""
+    echo "┌─────────────────────────────────────────────────────────┐"
+    echo "│  Build-Modus                                             │"
+    echo "├─────────────────────────────────────────────────────────┤"
+    echo "│  [J] CLEAN  — kein media/, keine images/, kein marina/, │"
+    echo "│              keine playlists/, Grafik-Templates nur:    │"
+    echo "│              02700111 + dve-lower-third                  │"
+    echo "│  [n] VOLL   — alles einschließen                         │"
+    echo "└─────────────────────────────────────────────────────────┘"
+    read -r -p "  Auswahl [J/n]: " _BUILD_ANS
+    if [[ "${_BUILD_ANS,,}" == "n" ]]; then
+        CLEAN_BUILD=0
+    else
+        CLEAN_BUILD=1
+    fi
+fi
+log "Build-Modus: $([[ ${CLEAN_BUILD} -eq 1 ]] && echo "CLEAN" || echo "VOLL")"
+
 # ── Aufräumen & Vorbereiten ───────────────────────────────────────────────────
 log "Aufräumen: ${BUILD_DIR}"
 rm -rf "$BUILD_DIR"
@@ -191,10 +242,21 @@ copy_libs "$APP_LIB" "$NODE_BIN"
 log "App-Quellen: ${SCRIPT_DIR}"
 (
     cd "${SCRIPT_DIR}"
+    _CLEAN_EXCLUDES=()
+    if [[ "${CLEAN_BUILD:-1}" == "1" ]]; then
+        _CLEAN_EXCLUDES=(
+            '--exclude=./media'
+            '--exclude=./images'
+            '--exclude=./marina'
+            '--exclude=./playlists'
+            '--exclude=./templates/grafik'
+        )
+    fi
     tar --create \
         --exclude='./node_modules' \
         --exclude='./build_appimage_tmp' \
         --exclude='./.git' \
+        --exclude='./releases' \
         --exclude='./*.AppImage' \
         --exclude='./asrun' \
         --exclude='./recordings' \
@@ -203,10 +265,25 @@ log "App-Quellen: ${SCRIPT_DIR}"
         --exclude='./gst_audio.log' \
         --exclude='./*.zip' \
         --exclude='./*.deb' \
+        "${_CLEAN_EXCLUDES[@]}" \
         . \
     | tar --extract --directory="${APP_SRC}"
 )
 mkdir -p "${APP_SRC}/asrun"
+
+# Clean-Modus: nur die zwei erlaubten Grafik-Templates einbinden
+if [[ "${CLEAN_BUILD:-1}" == "1" ]]; then
+    mkdir -p "${APP_SRC}/templates/grafik"
+    for _tmpl in "02700111" "dve-lower-third"; do
+        _tmpl_src="${SCRIPT_DIR}/templates/grafik/${_tmpl}"
+        if [[ -d "${_tmpl_src}" ]]; then
+            cp -r "${_tmpl_src}" "${APP_SRC}/templates/grafik/${_tmpl}"
+            log "Grafik-Template eingebunden: ${_tmpl}"
+        else
+            warn "Grafik-Template nicht gefunden: ${_tmpl}"
+        fi
+    done
+fi
 
 # ── 3. node_modules ──────────────────────────────────────────────────────────
 log "node_modules: ${NODE_MODULES_SRC}"
@@ -560,7 +637,7 @@ JS
 
 # ── 13. AppImage bauen ────────────────────────────────────────────────────────
 log "AppImage wird gebaut..."
-OUTPUT="${PARENT_DIR}/${APPNAME}-${APPVER}-${ARCH}.AppImage"
+OUTPUT="${RELEASES_DIR}/${APPNAME}-${APPVER}-${ARCH}.AppImage"
 
 ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGETOOL" --verbose "$APPDIR" "$OUTPUT" 2>&1
 
@@ -571,3 +648,45 @@ log "Temp-Dir: ${BUILD_DIR} (kann gelöscht werden)"
 log "Start:    ${APPNAME}-${APPVER}-${ARCH}.AppImage"
 log "Konfig:   ~/.local/share/pipeline-controller/"
 log "─────────────────────────────────────────────────"
+
+# ── Git-Tag & GitHub Release ──────────────────────────────────────────────────
+_GIT_DIR="${SCRIPT_DIR}"
+_TAG="v${APPVER}"
+echo ""
+echo "┌─────────────────────────────────────────────────────────────┐"
+echo "│  Release-Tag                                                 │"
+echo "├─────────────────────────────────────────────────────────────┤"
+printf "│  Git-Tag %-51s │\n" "${_TAG} erstellen + package.json committen?"
+echo "│  (Nur sinnvoll wenn kein weiteres Build-Artefakt folgt)     │"
+echo "└─────────────────────────────────────────────────────────────┘"
+read -r -p "  Git-Tag + Commit erstellen? [J/n]: " _TAG_ANS
+if [[ "${_TAG_ANS,,}" != "n" ]]; then
+    # Commit package.json version bump (staged only if modified)
+    if git -C "${_GIT_DIR}" diff --quiet HEAD -- package.json 2>/dev/null; then
+        log "package.json bereits committed — kein Commit nötig"
+    else
+        git -C "${_GIT_DIR}" add package.json
+        git -C "${_GIT_DIR}" commit -m "chore: release ${_TAG}"
+        log "package.json committed"
+    fi
+    # Create annotated tag
+    if git -C "${_GIT_DIR}" tag --list | grep -qx "${_TAG}"; then
+        log "Tag ${_TAG} existiert bereits — übersprungen"
+    else
+        git -C "${_GIT_DIR}" tag -a "${_TAG}" -m "Release ${_TAG}"
+        log "Tag ${_TAG} erstellt"
+    fi
+    read -r -p "  Tag + Commit pushen? [J/n]: " _PUSH_ANS
+    if [[ "${_PUSH_ANS,,}" != "n" ]]; then
+        git -C "${_GIT_DIR}" push
+        git -C "${_GIT_DIR}" push origin "${_TAG}"
+        log "Gepusht"
+    fi
+    echo ""
+    log "GitHub Release erstellen (nach 'gh auth login'):"
+    echo "  gh release create ${_TAG} \\"
+    echo "    '${OUTPUT}' \\"
+    echo "    --title '${APPNAME} ${APPVER}' \\"
+    echo "    --notes 'Release ${APPVER}'"
+fi
+rm -f "${_VER_LOCK}"

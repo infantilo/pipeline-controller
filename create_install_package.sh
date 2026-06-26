@@ -17,18 +17,70 @@
 set -euo pipefail
 
 APPNAME="PipelineController"
-APPVER="${1:-${APPVER:-1.0.0}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(dirname "${SCRIPT_DIR}")"
-PKG_NAME="${APPNAME}-${APPVER}"
-STAGING_DIR="${PARENT_DIR}/${PKG_NAME}"
-OUTPUT_TGZ="${PARENT_DIR}/${PKG_NAME}.tar.gz"
 
 log() { echo "[pkg] $*"; }
 err() { echo "[ERR] $*" >&2; exit 1; }
 
+# ── Versionierung ─────────────────────────────────────────────────────────────
+# Priorität: positionaler Arg > APPVER env-var > Session-Lock > auto-increment
+_PKG_JSON="${SCRIPT_DIR}/package.json"
+_VER_LOCK="${SCRIPT_DIR}/.build-session-version"
+if [[ -n "${1:-}" ]]; then
+    APPVER="${1}"
+elif [[ -n "${APPVER:-}" ]]; then
+    : # Explicit override — use as-is
+elif [[ -f "${_VER_LOCK}" ]] && [[ $(( $(date +%s) - $(stat -c %Y "${_VER_LOCK}") )) -lt 3600 ]]; then
+    APPVER="$(cat "${_VER_LOCK}")"
+    log "Session-Version wiederverwendet: ${APPVER}"
+else
+    _cur="$(node -p "require('${_PKG_JSON}').version" 2>/dev/null || echo "1.0.0")"
+    IFS='.' read -r _maj _min _pat <<< "$_cur"
+    APPVER="${_maj}.${_min}.$(( _pat + 1 ))"
+    node -e "
+      const fs=require('fs'), p=JSON.parse(fs.readFileSync('${_PKG_JSON}','utf8'));
+      p.version='${APPVER}';
+      fs.writeFileSync('${_PKG_JSON}',JSON.stringify(p,null,2)+'\n');
+    "
+    echo "$APPVER" > "${_VER_LOCK}"
+    log "Version erhöht: ${_cur} → ${APPVER}"
+fi
+
+# Releases-Verzeichnis (git-ignoriert; Artefakte werden via GitHub Releases verteilt)
+RELEASES_DIR="${SCRIPT_DIR}/releases"
+mkdir -p "${RELEASES_DIR}"
+
+PKG_NAME="${APPNAME}-${APPVER}"
+STAGING_DIR="${PARENT_DIR}/${PKG_NAME}"
+OUTPUT_TGZ="${RELEASES_DIR}/${PKG_NAME}.tar.gz"
+
 command -v tar &>/dev/null || err "tar nicht gefunden"
+
+# ── Paket-Modus ───────────────────────────────────────────────────────────────
+# CLEAN_BUILD=1 (Standard): Media, Bilder, Marina-Ordner, Playlisten ausschließen;
+#   von templates/grafik nur 02700111 und dve-lower-third einbinden.
+# CLEAN_BUILD=0: Alles einschließen.
+# Env-Var überschreibt die Abfrage: CLEAN_BUILD=0 ./create_install_package.sh
+if [[ -z "${CLEAN_BUILD:-}" ]]; then
+    echo ""
+    echo "┌─────────────────────────────────────────────────────────┐"
+    echo "│  Paket-Modus                                             │"
+    echo "├─────────────────────────────────────────────────────────┤"
+    echo "│  [J] CLEAN  — kein media/, keine images/, kein marina/, │"
+    echo "│              keine playlists/, Grafik-Templates nur:    │"
+    echo "│              02700111 + dve-lower-third                  │"
+    echo "│  [n] VOLL   — alles einschließen                         │"
+    echo "└─────────────────────────────────────────────────────────┘"
+    read -r -p "  Auswahl [J/n]: " _BUILD_ANS
+    if [[ "${_BUILD_ANS,,}" == "n" ]]; then
+        CLEAN_BUILD=0
+    else
+        CLEAN_BUILD=1
+    fi
+fi
+log "Paket-Modus: $([[ ${CLEAN_BUILD} -eq 1 ]] && echo "CLEAN" || echo "VOLL")"
 
 # ── Staging vorbereiten ────────────────────────────────────────────────────────
 log "Staging: ${STAGING_DIR}"
@@ -38,9 +90,23 @@ mkdir -p "${STAGING_DIR}/src"
 # ── Quellen kopieren (nur relevante Dateien) ───────────────────────────────────
 log "Kopiere Anwendungsquellen …"
 
+# Clean-Modus-Ausschlüsse vorbereiten
+_RSYNC_CLEAN_ARGS=()
+if [[ "${CLEAN_BUILD:-1}" == "1" ]]; then
+    _RSYNC_CLEAN_ARGS=(
+        '--exclude=media/'
+        '--exclude=recordings/'
+        '--exclude=images/'
+        '--exclude=marina/'
+        '--exclude=playlists/'
+        '--exclude=templates/grafik/'
+    )
+fi
+
 rsync -a \
          --exclude='node_modules' \
          --exclude='build_appimage_tmp' \
+         --exclude='releases' \
          --exclude='*.AppImage' \
          --exclude='*.log' \
          --exclude='*.deb' \
@@ -56,6 +122,8 @@ rsync -a \
          --exclude='*.ts'  --exclude='*.TS'  \
          --exclude='*.mpeg' --exclude='*.mpg' \
          --exclude='*.avi'  --exclude='*.AVI' \
+         --exclude='*.wav'  --exclude='*.WAV' \
+         "${_RSYNC_CLEAN_ARGS[@]}" \
          "${SCRIPT_DIR}/" "${STAGING_DIR}/src/" 2>/dev/null || {
   # rsync nicht verfügbar — cp fallback
   cp -r "${SCRIPT_DIR}/." "${STAGING_DIR}/src/"
@@ -67,10 +135,18 @@ rsync -a \
          "${STAGING_DIR}/src/filelist.txt" 2>/dev/null || true
   find "${STAGING_DIR}/src" -maxdepth 1 -name "*.AppImage" -delete 2>/dev/null || true
   find "${STAGING_DIR}/src" -maxdepth 1 -name "*.deb"      -delete 2>/dev/null || true
-  # Video-Dateien aus Media/Recordings löschen
-  for ext in mxf MXF mp4 MP4 mov MOV mkv MKV ts TS mpeg mpg avi AVI; do
+  # Video/Audio-Dateien löschen
+  for ext in mxf MXF mp4 MP4 mov MOV mkv MKV ts TS mpeg mpg avi AVI wav WAV; do
     find "${STAGING_DIR}/src" -name "*.${ext}" -delete 2>/dev/null || true
   done
+  if [[ "${CLEAN_BUILD:-1}" == "1" ]]; then
+    rm -rf "${STAGING_DIR}/src/media" \
+           "${STAGING_DIR}/src/recordings" \
+           "${STAGING_DIR}/src/images" \
+           "${STAGING_DIR}/src/marina" \
+           "${STAGING_DIR}/src/playlists" \
+           "${STAGING_DIR}/src/templates/grafik" 2>/dev/null || true
+  fi
 }
 
 # Laufzeitverzeichnisse sicherstellen (falls leer und daher nicht kopiert)
@@ -78,6 +154,20 @@ mkdir -p "${STAGING_DIR}/src/media" \
          "${STAGING_DIR}/src/recordings" \
          "${STAGING_DIR}/src/playlists" \
          "${STAGING_DIR}/src/asrun"
+
+# Clean-Modus: nur die zwei erlaubten Grafik-Templates einbinden
+if [[ "${CLEAN_BUILD:-1}" == "1" ]]; then
+    mkdir -p "${STAGING_DIR}/src/templates/grafik"
+    for _tmpl in "02700111" "dve-lower-third"; do
+        _tmpl_src="${SCRIPT_DIR}/templates/grafik/${_tmpl}"
+        if [[ -d "${_tmpl_src}" ]]; then
+            cp -r "${_tmpl_src}" "${STAGING_DIR}/src/templates/grafik/${_tmpl}"
+            log "Grafik-Template eingebunden: ${_tmpl}"
+        else
+            warn "Grafik-Template nicht gefunden: ${_tmpl}"
+        fi
+    done
+fi
 
 # ── GStreamer .deb in Paket-Root kopieren (ermöglicht Offline-Installation) ────
 for deb in "${SCRIPT_DIR}"/gstreamer1.0-plugins-bad_*.deb; do
@@ -448,3 +538,42 @@ log "  tar -xzf $(basename "${OUTPUT_TGZ}")"
 log "  cd ${PKG_NAME}"
 log "  bash install.sh"
 log "──────────────────────────────────────────────────────"
+
+# ── Git-Tag & GitHub Release ──────────────────────────────────────────────────
+_TAG="v${APPVER}"
+echo ""
+echo "┌─────────────────────────────────────────────────────────────┐"
+echo "│  Release-Tag                                                 │"
+echo "├─────────────────────────────────────────────────────────────┤"
+printf "│  Git-Tag %-51s │\n" "${_TAG} erstellen + package.json committen?"
+echo "│  (Nur sinnvoll wenn kein weiteres Build-Artefakt folgt)     │"
+echo "└─────────────────────────────────────────────────────────────┘"
+read -r -p "  Git-Tag + Commit erstellen? [J/n]: " _TAG_ANS
+if [[ "${_TAG_ANS,,}" != "n" ]]; then
+    if git -C "${SCRIPT_DIR}" diff --quiet HEAD -- package.json 2>/dev/null; then
+        log "package.json bereits committed — kein Commit nötig"
+    else
+        git -C "${SCRIPT_DIR}" add package.json
+        git -C "${SCRIPT_DIR}" commit -m "chore: release ${_TAG}"
+        log "package.json committed"
+    fi
+    if git -C "${SCRIPT_DIR}" tag --list | grep -qx "${_TAG}"; then
+        log "Tag ${_TAG} existiert bereits — übersprungen"
+    else
+        git -C "${SCRIPT_DIR}" tag -a "${_TAG}" -m "Release ${_TAG}"
+        log "Tag ${_TAG} erstellt"
+    fi
+    read -r -p "  Tag + Commit pushen? [J/n]: " _PUSH_ANS
+    if [[ "${_PUSH_ANS,,}" != "n" ]]; then
+        git -C "${SCRIPT_DIR}" push
+        git -C "${SCRIPT_DIR}" push origin "${_TAG}"
+        log "Gepusht"
+    fi
+    echo ""
+    log "GitHub Release erstellen (nach 'gh auth login'):"
+    echo "  gh release create ${_TAG} \\"
+    echo "    '${OUTPUT_TGZ}' \\"
+    echo "    --title '${APPNAME} ${APPVER}' \\"
+    echo "    --notes 'Release ${APPVER}'"
+fi
+rm -f "${_VER_LOCK}"

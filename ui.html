@@ -629,6 +629,52 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
     </div><!-- /hotkey-section-wrap -->
     <div id="hotkey-section-placeholder" style="display:none"></div>
 
+    <!-- ── SCTE-35 Section (nur wenn Plugin aktiv) ── -->
+    <div id="scte35-section-wrap" style="display:none">
+    <div class="sec-hdr" onclick="toggleSection('sec-scte35',this)" data-key="sec-scte35">
+      <span class="sec-arrow">▼</span>
+      <span class="sec-hdr-title">📺 SCTE-35</span>
+      <span id="scte35-hdr-status" style="margin-left:auto;font-size:9px;color:var(--dim)"></span>
+    </div>
+    <div class="sec-body collapsed" id="sec-scte35">
+      <div style="padding:5px 0;display:grid;gap:5px">
+        <!-- Status -->
+        <div id="scte35-status-bar" style="font-size:9px;color:var(--dim);background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:3px 6px;display:flex;gap:6px;align-items:center">
+          <span id="scte35-inbreak-dot" style="font-size:10px">⚫</span>
+          <span id="scte35-status-text">—</span>
+          <span id="scte35-target" style="margin-left:auto;font-family:var(--mono);opacity:.6;font-size:8px"></span>
+        </div>
+        <!-- Manual Cue Buttons -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">
+          <button class="btn btn-r" style="font-size:10px;padding:5px 2px;display:flex;flex-direction:column;align-items:center;gap:1px"
+            onclick="scte35ManualCue('out')" title="Manueller Cue-Out (Werbung-Start)">
+            <span style="font-size:12px">⬛</span>
+            <span>CUE OUT</span>
+          </button>
+          <button class="btn btn-g" style="font-size:10px;padding:5px 2px;display:flex;flex-direction:column;align-items:center;gap:1px"
+            onclick="scte35ManualCue('in')" title="Manueller Cue-In (Werbung-Ende)">
+            <span style="font-size:12px">▶</span>
+            <span>CUE IN</span>
+          </button>
+          <button class="btn" style="font-size:10px;padding:5px 2px;display:flex;flex-direction:column;align-items:center;gap:1px"
+            onclick="scte35ManualCue('null')" title="splice_null (Keepalive / Heartbeat)">
+            <span style="font-size:12px">◯</span>
+            <span>NULL</span>
+          </button>
+        </div>
+        <!-- Optional duration for manual cue-out -->
+        <div style="display:flex;gap:4px;align-items:center;font-size:9px;color:var(--dim)">
+          <span>Dauer:</span>
+          <input type="number" id="scte35-manual-dur" min="0" max="3600" value="0" step="0.5"
+            style="width:60px;font-size:9px;padding:1px 3px;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:2px">
+          <span>s (0 = offen)</span>
+        </div>
+        <!-- Last cue info -->
+        <div id="scte35-last-cue" style="font-size:8px;font-family:var(--mono);color:var(--dim);padding:2px 0;display:none"></div>
+      </div>
+    </div>
+    </div><!-- /scte35-section-wrap -->
+
     <!-- ── ASSET / VIDEO MIXER Section ── -->
     <div id="asset-section-wrap">
     <div class="sec-hdr" data-key="sec-asset" style="cursor:pointer" onclick="toggleSection('sec-asset',this)">
@@ -1849,17 +1895,36 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 
     <!-- ── TAB: LIVE-QUELLEN ──────────────────────────────────────────── -->
     <div id="cfg-panel-live" style="display:none">
-      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.live.heading">Live-Quellen (GStreamer Eingänge)</div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px" data-i18n="cfg.live.heading">Live-Quellen</div>
       <div style="font-size:9px;color:var(--dim);line-height:1.5;margin-bottom:8px">
-        Jede Live-Quelle wird als eigener isel-Pad in der Master-Pipeline eingebunden.<br>
-        <b style="color:var(--yellow)">Neustart der Pipeline nach Änderungen erforderlich.</b><br>
-        Beispiel gstSrc: <code style="font-family:var(--mono)">decklinkvideosrc device-number=0 mode=1080p25</code><br>
-        oder für Inter-Process: <code style="font-family:var(--mono)">intervideosrc channel=meinkanal timeout=2000000000 do-timestamp=true</code>
+        Eingänge in die Master-Pipeline. <b style="color:var(--yellow)">⚠ Pipeline-Neustart nach Änderungen.</b>
       </div>
-      <div id="live-src-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px"></div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
-        <button class="btn btn-g" style="font-size:10px" onclick="liveAddRow()" data-i18n="cfg.live.addSource">＋ Live-Quelle hinzufügen</button>
-        <button class="btn" style="font-size:10px" onclick="liveDiscoverDecklink()" title="DeckLink-Geräte per gst-device-monitor suchen und als Einträge hinzufügen">🔍 DeckLink autodiscover</button>
+      <div id="live-src-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+      <!-- Type picker -->
+      <div style="margin-bottom:6px">
+        <div style="font-size:9px;color:var(--dim);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Quelle hinzufügen:</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
+          <button class="btn" onclick="liveAddType('decklink')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:16px">🎥</span>
+            <span style="font-size:9px;font-weight:700">DeckLink</span>
+            <span style="font-size:8px;color:var(--dim)">SDI / HDMI</span>
+          </button>
+          <button class="btn" onclick="liveAddType('network')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:16px">📡</span>
+            <span style="font-size:9px;font-weight:700">Netzwerk</span>
+            <span style="font-size:8px;color:var(--dim)">RTSP / SRT / UDP</span>
+          </button>
+          <button class="btn" onclick="liveAddType('mxl')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:16px">🔗</span>
+            <span style="font-size:9px;font-weight:700">DMF / MXL</span>
+            <span style="font-size:8px;color:var(--dim)">Shared Memory</span>
+          </button>
+          <button class="btn" onclick="liveAddType('manual')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:16px">🔧</span>
+            <span style="font-size:9px;font-weight:700">Manuell</span>
+            <span style="font-size:8px;color:var(--dim)">GStreamer-String</span>
+          </button>
+        </div>
       </div>
       <div class="sep"></div>
       <div style="display:flex;gap:6px;justify-content:flex-end">
@@ -1891,6 +1956,24 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <button id="cfg-rtsp-stop-btn" class="btn btn-r" style="font-size:10px;display:none" onclick="rtspTestStop()">■ Stoppen</button>
         <code id="cfg-rtsp-test-url" style="font-size:9px;font-family:var(--mono);color:var(--accent2);padding:2px 4px;background:var(--bg3);border-radius:3px;display:none"></code>
       </div>
+      <div class="sep"></div>
+      <!-- ── DMF/MXL ── -->
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">📡 DMF/MXL</div>
+      <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
+        EBU/AMWA Media eXchange Layer — Shared-Memory Live-Transport.<br>
+        Flows werden per <code style="font-family:var(--mono)">mxl://&lt;domain&gt;?video=&lt;uuid&gt;</code> als URI in Live-Quellen eingetragen.
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-bottom:8px;font-size:11px">
+        <label>Standard-Domain</label>
+        <input type="text" id="cfg-mxl-domain" placeholder="/dev/shm/mxl"
+               style="font-size:11px;padding:2px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:3px;font-family:var(--mono)">
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+        <button class="btn btn-p" style="font-size:10px" onclick="mxlDomainSave()">💾 Speichern</button>
+        <button class="btn" style="font-size:10px" onclick="mxlDomainProbe()">🔍 Flows anzeigen</button>
+        <span id="cfg-mxl-status" style="font-size:9px;color:var(--dim)"></span>
+      </div>
+      <div id="cfg-mxl-flows" style="display:none;font-size:9px;font-family:var(--mono);background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:6px;max-height:120px;overflow-y:auto;white-space:pre;line-height:1.6"></div>
     </div>
 
     <!-- ── TAB: SHORTCUTS ─────────────────────────────────────────── -->
@@ -5027,6 +5110,7 @@ function renderPl(){
       :_lsLabel?`<span style="color:var(--yellow)">📡 ${_lsLabel}</span>${_dlBadge}`
       :`${e.file||e.source||'—'}${_ftmBadgeHtml(e.file)}`;
     const durWarnBadge = e._durationWarning ? `<span style="font-size:8px;color:var(--yellow);margin-left:4px" title="${e._durationWarning}">⏱</span>` : '';
+    const trWarnBadge  = e._transitionWarning ? `<span style="font-size:8px;color:var(--yellow);margin-left:4px" title="${e._transitionWarning.replace(/"/g,'&quot;')}">🔀⚠</span>` : '';
     const classifBadge = _classifBadge(e.classification);
     const subtitleBadge = e.subtitle?.file ? `<span style="font-size:8px;color:#60a5fa;margin-left:3px" title="Subtitle: ${e.subtitle.file}">SUB</span>` : '';
 
@@ -5063,7 +5147,7 @@ function renderPl(){
     cells.push(`<span class="pl-cell" style="text-align:center;font-size:11px">${SRC_ICON[e.source]||_liveSourceIcon(e.source)||'?'}</span>`);
     if(C.classif) cells.push(`<span class="pl-cell" style="overflow:hidden;padding:0 2px" title="${e.classification||''}">${classifBadge||'<span style="color:rgba(128,128,128,.3);font-size:8px">·</span>'}</span>`);
     if(C.title)   cells.push(`<div class="pl-cell" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:10px">${e.title?`<span style="font-weight:600;color:var(--accent)">${e.title}</span>`:'<span style="color:rgba(128,128,128,.3)">—</span>'}</div>`);
-    if(C.file||!C.title) cells.push(`<div class="pl-cell-file"><div class="pl-file">${mainLabel}${durWarnBadge}${subtitleBadge}${gapHtml}</div></div>`);
+    if(C.file||!C.title) cells.push(`<div class="pl-cell-file"><div class="pl-file">${mainLabel}${durWarnBadge}${trWarnBadge}${subtitleBadge}${gapHtml}</div></div>`);
     if(C.status)   cells.push(`<span class="pl-cell" style="text-align:center">${statusHtml}</span>`);
     if(C.audio)    cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono)">${e.audioPreset||e.audioConfig?.preset||e.audioConfig?.pgm||''}</span>`);
     if(C.branding) cells.push(`<span class="pl-cell" style="text-align:center;font-size:9px" title="${e.branding||''}">${e.branding?'🏷':''}</span>`);
@@ -5620,8 +5704,9 @@ function _pickServerFields(sv){
   const out={};
   if(sv.eom !== undefined) out.eom = sv.eom;
   if(sv.som !== undefined) out.som = sv.som;
-  // Always sync _durationWarning (server is authoritative; absent = cleared)
-  out._durationWarning = sv._durationWarning || undefined;
+  // Always sync server-authoritative warning fields (absent = cleared)
+  out._durationWarning   = sv._durationWarning   || undefined;
+  out._transitionWarning = sv._transitionWarning || undefined;
   return out;
 }
 function genId(){return Math.random().toString(36).slice(2)+Date.now().toString(36);}
@@ -5915,10 +6000,11 @@ function _normalizeLiveSrc(ls) {
       : [];
   }
   delete out.hasAudio; delete out.gstAudioSrc;
-  // keepAlive default: false when uri set (network stream), true for decklink/manual gstSrc
   if (out.keepAlive === undefined) out.keepAlive = !out.uri;
+  out._autoId = ''; // never auto-overwrite existing rows' IDs
   return out;
 }
+
 async function _loadLiveTab(){
   try {
     const r = await fetch('/api/live-sources').then(r=>r.json());
@@ -5928,93 +6014,238 @@ async function _loadLiveTab(){
   _loadRtspTestStatus();
 }
 
+// ── Detects source type from its data ────────────────────────────────────────
+function _liveRowType(ls){
+  if(/decklink/i.test(ls.gstSrc||'')) return 'decklink';
+  if(/^mxl:\/\//i.test(ls.uri||'')) return 'mxl';
+  if(ls.uri) return 'network';
+  return 'manual';
+}
+
+const _LIVE_TYPE_DEF={
+  decklink:{icon:'🎥',label:'DeckLink / SDI',color:'#5a8fd0'},
+  network: {icon:'📡',label:'Netzwerk / IP', color:'#4caf84'},
+  mxl:     {icon:'🔗',label:'DMF / MXL',     color:'#b07cd4'},
+  manual:  {icon:'🔧',label:'Manuell',        color:'#888'},
+};
+
+// Stores MXL flow groups fetched per row (index → groups array)
+const _mxlFlowCache={};
+
+// Save/restore <details> open state so re-renders don't collapse them
+function _saveLiveDetails(){
+  const s={};
+  document.querySelectorAll('#live-src-list details').forEach((d,n)=>s[n]=d.open);
+  return s;
+}
+function _restoreLiveDetails(s){
+  document.querySelectorAll('#live-src-list details').forEach((d,n)=>{if(s[n]!==undefined)d.open=s[n];});
+}
+
 function _renderLiveList(){
   const el=document.getElementById('live-src-list');
   if(!el) return;
-  if(!_liveRows.length){el.innerHTML='<div style="font-size:10px;color:var(--dim);padding:6px 0">Keine Live-Quellen konfiguriert.</div>';return;}
+  const savedDetails=_saveLiveDetails();
+
+  if(!_liveRows.length){
+    el.innerHTML='<div style="font-size:10px;color:var(--dim);padding:10px;text-align:center;background:var(--bg3);border:1px dashed var(--border);border-radius:4px">Noch keine Live-Quellen — Typ unten wählen zum Starten.</div>';
+    return;
+  }
+
+  const dlFormats=['','auto','1080i50','1080i5994','1080i60','1080p25','1080p2997','1080p30','1080p50','1080p5994','1080p60','720p50','720p5994','720p60'];
+
   el.innerHTML=_liveRows.map((ls,i)=>{
+    const type=_liveRowType(ls);
+    const td=_LIVE_TYPE_DEF[type];
     const audios=ls.audioSources||[];
+    const keepAlive=ls.keepAlive!==false;
+
+    // ── Type-specific primary section ────────────────────────────────────────
+    let typeBody='';
+
+    if(type==='decklink'){
+      const devNum=(ls.gstSrc||'').match(/device-number=(\d+)/)?.[1]||'0';
+      const detFmt=S._dlSignal?.[ls.id]?.format||null;
+      const curFmtStr=`${S.config?.width||1920}x${S.config?.height||1080}@${S.config?.fps||25}`;
+      const fmtMatch=detFmt&&`${detFmt.width}x${detFmt.height}@${detFmt.fps}`===curFmtStr;
+      typeBody=`
+      <div style="display:grid;grid-template-columns:auto 80px auto 1fr;gap:4px 8px;align-items:center;font-size:10px">
+        <span style="color:var(--dim)">Gerät #</span>
+        <input id="dl-dev-${i}" type="number" min="0" max="7" value="${_esc(devNum)}"
+          style="font-size:11px;padding:2px 5px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:3px"
+          oninput="_liveDlUpdate(${i})">
+        <span style="color:var(--dim)">Format</span>
+        <select id="dl-fmt-${i}"
+          style="font-size:10px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px;padding:2px 4px"
+          onchange="_liveDlUpdate(${i})">
+          ${dlFormats.map(f=>`<option value="${_esc(f)}"${(ls.videoFormat||'')==f?' selected':''}>${f||'auto-detect'}</option>`).join('')}
+        </select>
+      </div>
+      ${detFmt?`
+      <div style="display:flex;gap:6px;align-items:center;font-size:9px;background:var(--bg4);border-radius:3px;padding:3px 6px">
+        <span style="color:var(--dim)">📡 Signal erkannt:</span>
+        <span style="font-family:var(--mono);color:${fmtMatch?'var(--green)':'var(--yellow)'}">${detFmt.width}x${detFmt.height}@${detFmt.fps}${detFmt.interlaced?'i':'p'}</span>
+        ${fmtMatch?`<span style="color:var(--dim);margin-left:auto">✓ passt zur Pipeline</span>`
+          :`<button class="btn" style="font-size:9px;padding:1px 6px;margin-left:auto" onclick="applyDetectedLiveFormat(${detFmt.width},${detFmt.height},${detFmt.fps})" title="Format auf Pipeline übernehmen">↳ Übernehmen</button>`}
+      </div>`:''}`;
+
+    }else if(type==='network'){
+      typeBody=`
+      <div>
+        <input style="width:100%;box-sizing:border-box;font-size:11px;font-family:var(--mono);padding:3px 6px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:3px"
+          placeholder="rtsp://  ·  srt://  ·  udp://host:port  ·  https://"
+          value="${_esc(ls.uri||'')}"
+          id="net-uri-${i}"
+          oninput="_liveRows[${i}].uri=this.value;_liveRows[${i}].gstSrc='';_liveRows[${i}].keepAlive=false;document.getElementById('net-hint-${i}').textContent=_gstSrcFromUri(this.value)||''">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;font-size:9px">
+        <span style="color:var(--dim);flex-shrink:0">Latenz</span>
+        <input type="number" min="0" max="10000" value="${_esc((ls.gstSrc||'').match(/latency=(\d+)/)?.[1]||(ls.uriLatencyMs??200))}"
+          style="font-size:9px;width:56px;padding:1px 3px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:2px"
+          oninput="_liveRows[${i}].uriLatencyMs=+this.value"> ms
+        <span style="color:var(--dim);opacity:.5">·</span>
+        <label style="display:flex;gap:3px;align-items:center;color:var(--dim);cursor:pointer" title="Keep-Alive: Quelle ständig verbunden halten. Normalerweise Off für Netzwerk-Streams.">
+          <input type="checkbox" ${keepAlive?'checked':''} style="accent-color:var(--accent)" onchange="_liveRows[${i}].keepAlive=this.checked">
+          <span style="color:${keepAlive?'var(--yellow)':'var(--dim)'}">Keep-Alive</span>
+        </label>
+      </div>
+      <div id="net-hint-${i}" style="font-size:8px;font-family:var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 2px">${_esc((_gstSrcFromUri(ls.uri||'')||'').substring(0,120))}</div>`;
+
+    }else if(type==='mxl'){
+      const parsedMxl=_parseMxlUri(ls.uri||'');
+      const flowDomain=ls.mxlDomain||S.config?.mxlDomain||'/dev/shm/mxl';
+      typeBody=`
+      <div style="display:flex;gap:4px;align-items:center">
+        <span style="font-size:9px;color:var(--dim);flex-shrink:0">Domain</span>
+        <input id="mxl-domain-${i}" style="flex:1;font-size:10px;font-family:var(--mono);padding:2px 5px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:3px"
+          value="${_esc(flowDomain)}" placeholder="/dev/shm/mxl"
+          oninput="_liveRows[${i}].mxlDomain=this.value">
+        <button class="btn" style="font-size:9px;padding:2px 7px;white-space:nowrap" onclick="mxlLoadFlows(${i})">🔍 Flows laden</button>
+      </div>
+      <div id="mxl-flows-${i}" style="margin-top:2px">${_mxlFlowCache[i]?_renderMxlFlowList(i):'<span style="font-size:9px;color:var(--dim)">← Flows laden um eine Quelle zu wählen</span>'}</div>
+      ${parsedMxl?.videoFlowId?`<div style="font-size:9px;background:var(--bg4);border-radius:3px;padding:3px 6px;display:flex;gap:6px;align-items:center">
+        <span style="color:var(--green)">✓ Ausgewählt:</span>
+        <span style="font-family:var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(ls.uri)}</span>
+        <button class="btn" style="font-size:8px;padding:0 4px;margin-left:auto;flex-shrink:0" onclick="_liveRows[${i}].uri='';_renderLiveList()">✕</button>
+      </div>`:''}`;
+
+    }else{
+      // Manual: raw GStreamer pipeline string
+      typeBody=`
+      <div>
+        <div style="font-size:9px;color:var(--dim);margin-bottom:2px">GStreamer-Pipeline (Video-Teil):</div>
+        <textarea style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box;resize:vertical;min-height:46px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:3px;padding:3px 5px"
+          placeholder="z.B. decklinkvideosrc device-number=0 ! videoconvert&#10;oder: intervideosrc channel=meinkanal"
+          oninput="_liveRows[${i}].gstSrc=this.value">${_esc(ls.gstSrc||'')}</textarea>
+      </div>`;
+    }
+
+    // ── Audio rows ───────────────────────────────────────────────────────────
     const audioRows=audios.map((a,ai)=>`
-      <div style="display:flex;gap:4px;align-items:center;margin-top:3px">
-        <span style="font-size:9px;color:var(--dim);width:20px;flex-shrink:0">A${ai+1}</span>
-        <input style="flex:1;font-size:10px" placeholder="Label (z.B. PGM Stereo)" value="${_esc(a.label||'')}"
+      <div style="display:grid;grid-template-columns:18px 1fr 62px auto;gap:3px;align-items:center;margin-top:3px">
+        <span style="font-size:8px;color:var(--dim)">A${ai+1}</span>
+        <input style="font-size:10px;padding:1px 3px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:2px" placeholder="Label (z.B. PGM Stereo)" value="${_esc(a.label||'')}"
           oninput="_liveRows[${i}].audioSources[${ai}].label=this.value">
-        <select style="font-size:10px;width:60px" onchange="_liveRows[${i}].audioSources[${ai}].channels=+this.value">
+        <select style="font-size:10px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:1px 2px" onchange="_liveRows[${i}].audioSources[${ai}].channels=+this.value">
           ${[2,8,16].map(n=>`<option value="${n}"${a.channels===n?' selected':''}>${n}ch</option>`).join('')}
         </select>
         <button class="btn" style="font-size:10px;padding:1px 5px" onclick="_liveRows[${i}].audioSources.splice(${ai},1);_renderLiveList()">✕</button>
       </div>
-      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box;margin-top:2px" placeholder="gstAudioSrc (z.B. decklinkaudiosrc device-number=0 connection=2)"
+      <input style="font-size:9px;font-family:var(--mono);width:100%;box-sizing:border-box;margin-top:2px;padding:1px 3px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:2px"
+        placeholder="gstAudioSrc (z.B. decklinkaudiosrc device-number=0)"
         value="${_esc(a.gstSrc||'')}" oninput="_liveRows[${i}].audioSources[${ai}].gstSrc=this.value">`).join('');
-    const keepAlive = ls.keepAlive !== false;
-    const hasUri    = !!ls.uri;
-    const isDL      = /decklink/i.test(ls.gstSrc||'');
-    const dlFormats = ['','auto','1080i50','1080i5994','1080i60','1080p25','1080p2997','1080p30','1080p50','1080p5994','1080p60','720p50','720p5994','720p60'];
-    // Tatsächlich verhandeltes Format der Karte (aus negotiated Caps gepollt, siehe
-    // MasterPipeline._parseVideoCaps) — rein die Video-Essence (Auflösung/FPS), nicht
-    // die 2110-Netzwerk-Transportparameter (die sind GStreamer nicht zugänglich).
-    const _detFmt   = isDL ? (S._dlSignal?.[ls.id]?.format||null) : null;
-    const _curFmtStr = `${S.config?.width||1920}x${S.config?.height||1080}@${S.config?.fps||25}`;
-    const _detFmtMatches = _detFmt && `${_detFmt.width}x${_detFmt.height}@${_detFmt.fps}` === _curFmtStr;
-    return `
-    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px;display:grid;gap:4px">
-      <div style="display:flex;gap:4px;align-items:center">
-        <span style="font-size:9px;color:var(--dim);width:28px">#${i+1}</span>
-        <input style="flex:1;font-size:11px" placeholder="id (z.B. cam1)" value="${_esc(ls.id||'')}" oninput="_liveRows[${i}].id=this.value">
-        <input style="flex:2;font-size:11px" placeholder="Label (z.B. Kamera 1)" value="${_esc(ls.label||'')}" oninput="_liveRows[${i}].label=this.value">
-        <button class="btn" style="font-size:10px;padding:2px 6px" onclick="_liveRows.splice(${i},1);_renderLiveList()">✕</button>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;font-size:9px">
-        <label style="display:flex;align-items:center;gap:3px;cursor:pointer;color:var(--dim)" title="Keep-Alive: Quelle immer empfangen (Decklink). Off = nur beim Cuen starten (RTSP/Netzwerk).">
-          <input type="checkbox" style="accent-color:var(--accent)" ${keepAlive?'checked':''} onchange="_liveRows[${i}].keepAlive=this.checked;_renderLiveList()">
-          <span style="color:${keepAlive?'var(--green)':'var(--yellow)'}">Keep-Alive${keepAlive?'':' (on-demand)'}</span>
-        </label>
-        <span style="color:var(--dim);opacity:.5">|</span>
-        <select style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:1px 3px"
-          onchange="_liveRows[${i}].inputId=this.value" title="Decklink Input für BC-Routing">
-          <option value="${_esc(ls.inputId||'')}">inputId: ${_esc(ls.inputId||'(leer)')}</option>
-        </select>
-        <input style="flex:1;font-size:9px;font-family:var(--mono)" placeholder="inputId (Decklink-Eingang für BC)" value="${_esc(ls.inputId||'')}" oninput="_liveRows[${i}].inputId=this.value">
-      </div>
-      <div style="display:flex;gap:4px">
-        <input style="flex:1;font-size:10px;font-family:var(--mono);box-sizing:border-box" placeholder="URI (rtsp://... / srt://... / udp://... / mxl://...)" value="${_esc(ls.uri||'')}" oninput="_liveRows[${i}].uri=this.value;if(!_liveRows[${i}].gstSrc)_liveRows[${i}].keepAlive=false;">
-        <button class="btn" style="font-size:9px;padding:1px 6px;white-space:nowrap" onclick="mxlPickFeed(${i})" title="DMF/MXL: verfügbare Feeds aus einer Domain auflisten">📡 MXL-Feeds…</button>
-      </div>
-      <input style="font-size:10px;font-family:var(--mono);width:100%;box-sizing:border-box;${ls.uri&&!ls.gstSrc?'color:var(--dim)':''}" placeholder="${ls.uri&&!ls.gstSrc?_esc(_gstSrcFromUri(ls.uri)||'wird automatisch aus URI generiert'):'gstSrc (z.B. decklinkvideosrc device-number=0 — leer = aus URI)'}" value="${_esc(ls.gstSrc||'')}" oninput="_liveRows[${i}].gstSrc=this.value">
-      ${isDL?`<div style="display:flex;gap:6px;align-items:center;font-size:9px">
-        <span style="color:var(--dim);width:72px;flex-shrink:0">Video-Format</span>
-        <select style="font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:1px 4px"
-          onchange="_liveRows[${i}].videoFormat=this.value">
-          ${dlFormats.map(f=>`<option value="${_esc(f)}"${(ls.videoFormat||'')==f?' selected':''}>${f||'(im gstSrc-Feld)'}</option>`).join('')}
-        </select>
-        ${ls.videoFormat?`<span style="color:var(--dim);font-family:var(--mono)">video-format=${_esc(ls.videoFormat)}</span>`:''}
-      </div>`:''}
-      ${_detFmt?`<div style="display:flex;gap:6px;align-items:center;font-size:9px;background:var(--bg4);border-radius:2px;padding:3px 5px">
-        <span style="color:var(--dim)">📡 Erkannt (negotiated Caps):</span>
-        <span style="font-family:var(--mono);color:${_detFmtMatches?'var(--green)':'var(--yellow)'}">${_detFmt.width}x${_detFmt.height}@${_detFmt.fps}${_detFmt.interlaced?'i':'p'}</span>
-        ${_detFmtMatches
-          ?`<span style="color:var(--dim);margin-left:auto">= Pipeline-Format</span>`
-          :`<button class="btn" style="font-size:9px;padding:1px 6px;margin-left:auto" onclick="applyDetectedLiveFormat(${_detFmt.width},${_detFmt.height},${_detFmt.fps})" title="Pipeline-Auflösung/Framerate auf das von der Karte erkannte Format setzen (Neustart der Master-Pipeline)">↳ Als Pipeline-Format übernehmen</button>`}
-      </div>`:''}
-      <div style="border-top:1px solid var(--border);margin-top:2px;padding-top:4px">
-        <div style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">
-          Audio-Quellen
-          <button class="btn" style="font-size:9px;padding:1px 5px" onclick="_liveRows[${i}].audioSources.push({label:'',gstSrc:'',channels:2});_renderLiveList()">＋ Audio</button>
+
+    const hasAudioPresets=Object.keys(S.audioConfig?.presets||{}).length>0;
+
+    // ── Advanced section (gstSrc override for non-manual, inputId for all) ──
+    const advancedContent=`
+      <div style="display:grid;gap:3px;margin-top:4px">
+        <div style="display:flex;gap:6px;align-items:center;font-size:9px">
+          <span style="color:var(--dim);flex-shrink:0">BC-InputId</span>
+          <input style="flex:1;font-size:9px;font-family:var(--mono);padding:1px 3px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:2px"
+            placeholder="(Decklink-Eingang für BC-Routing)" value="${_esc(ls.inputId||'')}" oninput="_liveRows[${i}].inputId=this.value">
         </div>
-        ${audioRows||'<span style="font-size:9px;color:var(--dim)">(keine)</span>'}
-        ${(audios.length && Object.keys(S.audioConfig?.presets||{}).length) ? `
-        <div style="display:flex;gap:4px;align-items:center;margin-top:5px">
-          <span style="font-size:9px;color:var(--dim);width:64px;flex-shrink:0" title="Routing-Preset, mit dem die Audio-Kanäle dieser Quelle auf die Audio-Gruppen gemappt werden (zero-gap im laufenden Betrieb umschaltbar)">Audio-Preset</span>
-          <select style="flex:1;font-size:10px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:1px 4px"
-            onchange="_liveRows[${i}].audioConfig={...(_liveRows[${i}].audioConfig||{}),preset:this.value||undefined}">
-            <option value="">(Standard: "stereo")</option>
-            ${Object.entries(S.audioConfig?.presets||{}).map(([id,p])=>
-              `<option value="${id}"${(ls.audioConfig?.preset||'')===id?' selected':''}>${_esc(p.label||id)}</option>`).join('')}
-          </select>
-        </div>` : ''}
+        ${type!=='manual'?`
+        <div style="font-size:9px;color:var(--dim);margin-top:2px">gstSrc-Override (leer = auto-generiert):</div>
+        <input style="font-size:9px;font-family:var(--mono);width:100%;box-sizing:border-box;padding:1px 3px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:2px"
+          placeholder="(leer lassen für automatische Generierung)"
+          value="${_esc(ls.gstSrc||'')}" oninput="_liveRows[${i}].gstSrc=this.value">`:''}
+      </div>`;
+
+    return `
+    <div style="background:var(--bg3);border:1px solid ${td.color}44;border-radius:5px;overflow:hidden">
+      <!-- ── Card header ── -->
+      <div style="display:flex;gap:6px;align-items:center;padding:5px 8px;background:${td.color}18;border-bottom:1px solid ${td.color}33">
+        <span style="font-size:9px;font-weight:700;color:${td.color};background:${td.color}22;border-radius:3px;padding:1px 6px;flex-shrink:0;white-space:nowrap;letter-spacing:.02em">${td.icon} ${td.label}</span>
+        <input style="flex:2;font-size:11px;font-weight:600;background:transparent;border:none;border-bottom:1px solid ${td.color}44;color:var(--fg);padding:1px 2px;min-width:0"
+          placeholder="Name / Label"
+          value="${_esc(ls.label||'')}"
+          oninput="const v=this.value;_liveRows[${i}].label=v;if(!_liveRows[${i}].id||_liveRows[${i}].id===_liveRows[${i}]._autoId){const p=(v||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').substring(0,20)||'src${i+1}';_liveRows[${i}].id=p;_liveRows[${i}]._autoId=p;const idEl=document.getElementById('live-id-${i}');if(idEl)idEl.value=p;}">
+        <input id="live-id-${i}" style="flex:1;font-size:9px;font-family:var(--mono);background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--dim);padding:1px 2px;min-width:0"
+          placeholder="id (intern)"
+          value="${_esc(ls.id||'')}"
+          oninput="_liveRows[${i}].id=this.value;_liveRows[${i}]._autoId=''">
+        <button class="btn" style="font-size:10px;padding:2px 7px;flex-shrink:0;background:#c0392b22;color:var(--red,#e74c3c);border-color:#c0392b44" onclick="_liveRows.splice(${i},1);_renderLiveList()">✕</button>
+      </div>
+      <!-- ── Type-specific body ── -->
+      <div style="padding:7px 8px;display:grid;gap:5px">
+        ${typeBody}
+        <!-- ── Keep-Alive toggle (not shown inline for network type — already shown there) ── -->
+        ${type!=='network'?`
+        <div style="display:flex;gap:6px;align-items:center;font-size:9px;color:var(--dim)">
+          <label style="display:flex;gap:3px;align-items:center;cursor:pointer" title="Keep-Alive: Quelle ständig in der Pipeline halten (DeckLink). Off = erst beim Cuen verbinden (Netzwerk/MXL).">
+            <input type="checkbox" ${keepAlive?'checked':''} style="accent-color:var(--accent)" onchange="_liveRows[${i}].keepAlive=this.checked">
+            <span style="color:${keepAlive?'var(--green)':'var(--dim)'}">Keep-Alive${keepAlive?'':' (on-demand)'}</span>
+          </label>
+        </div>`:''}
+        <!-- ── Audio section (collapsed) ── -->
+        <details>
+          <summary style="font-size:9px;color:var(--dim);cursor:pointer;user-select:none;display:flex;align-items:center;gap:5px;list-style:none">
+            <span style="font-size:8px">▶</span>
+            <span>Audio${audios.length?' ('+audios.length+' Quelle'+(audios.length>1?'n':'')+')':''}</span>
+            <button class="btn" style="font-size:9px;padding:0 5px;margin-left:auto" onclick="event.preventDefault();_liveRows[${i}].audioSources.push({label:'',gstSrc:'',channels:2});_renderLiveList()">＋ Audio</button>
+          </summary>
+          <div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border)">
+            ${audioRows||'<span style="font-size:9px;color:var(--dim)">(keine Audio-Quellen konfiguriert)</span>'}
+            ${(audios.length&&hasAudioPresets)?`
+            <div style="display:flex;gap:4px;align-items:center;margin-top:6px">
+              <span style="font-size:9px;color:var(--dim);flex-shrink:0">Audio-Preset</span>
+              <select style="flex:1;font-size:9px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:2px;padding:1px 4px"
+                onchange="_liveRows[${i}].audioConfig={...(_liveRows[${i}].audioConfig||{}),preset:this.value||undefined}">
+                <option value="">(Standard)</option>
+                ${Object.entries(S.audioConfig?.presets||{}).map(([id,p])=>
+                  `<option value="${id}"${(ls.audioConfig?.preset||'')===id?' selected':''}>${_esc(p.label||id)}</option>`).join('')}
+              </select>
+            </div>`:''}
+          </div>
+        </details>
+        <!-- ── Advanced / Overrides (collapsed) ── -->
+        <details>
+          <summary style="font-size:9px;color:var(--dim);cursor:pointer;user-select:none;display:flex;align-items:center;gap:5px;list-style:none">
+            <span style="font-size:8px">▶</span>
+            <span>Erweitert / Overrides</span>
+          </summary>
+          ${advancedContent}
+        </details>
       </div>
     </div>`;
   }).join('');
+
+  _restoreLiveDetails(savedDetails);
+}
+
+function _renderMxlFlowList(i){
+  const groups=_mxlFlowCache[i]||[];
+  if(!groups.length) return '<span style="font-size:9px;color:var(--dim)">Keine Flows gefunden.</span>';
+  return `<div style="display:grid;gap:2px;margin-top:2px">` +
+    groups.map((g,gi)=>`
+    <button class="btn" style="font-size:9px;text-align:left;padding:3px 8px;display:flex;gap:8px;align-items:center;width:100%;box-sizing:border-box"
+      onclick="mxlSelectFlow(${i},${gi})">
+      <span style="color:#b07cd4;flex-shrink:0">🔗</span>
+      <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(g.group||g.name||'Flow '+(gi+1))}</span>
+      ${g.video?`<span style="font-size:8px;color:var(--dim)">▶${_esc((g.video.label||g.video.id||'').substring(0,12))}</span>`:''}
+      ${g.audio?`<span style="font-size:8px;color:var(--dim)">♪${_esc((g.audio.label||g.audio.id||'').substring(0,12))}</span>`:''}
+    </button>`).join('') + '</div>';
 }
 
 function _esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;');}
@@ -6023,6 +6254,7 @@ function _parseMxlUri(uri){
   const m=/^mxl:\/\/(.+?)(?:\?(.*))?$/i.exec(uri); if(!m) return null;
   const qs=new URLSearchParams(m[2]||''); return {domain:m[1],videoFlowId:qs.get('video'),audioFlowId:qs.get('audio')};
 }
+
 function _gstSrcFromUri(uri){
   if(!uri) return '';
   const u=uri.trim();
@@ -6039,59 +6271,92 @@ function _gstSrcFromUri(uri){
   return `uridecodebin uri="${u}" name=dec dec. ! videoconvert`;
 }
 
-// DMF/MXL: Feeds einer Domain auflisten (GET /api/mxl/flows) und URI für Zeile i füllen.
-async function mxlPickFeed(i){
-  const domain=await _prompt('MXL-Domain (Shared-Memory-Verzeichnis):', _liveRows[i].mxlDomain||'/dev/shm/mxl');
-  if(!domain) return;
-  let groups;
-  try{ groups=(await fetch('/api/mxl/flows?domain='+encodeURIComponent(domain)).then(r=>r.json())).groups||[]; }
-  catch(e){ alert('MXL-Feeds: '+e.message); return; }
-  if(!groups.length){ alert('Keine Flows in "'+domain+'" gefunden.'); return; }
-  const list=groups.map((g,n)=>`${n+1}) ${g.group}`+
-    (g.video?` [video: ${g.video.label}]`:'')+(g.audio?` [audio: ${g.audio.label}]`:'')).join('\n');
-  const sel=parseInt(await _prompt('Feed wählen:\n'+list, '1'), 10);
-  const g=groups[sel-1]; if(!g) return;
-  const qs=[]; if(g.video) qs.push('video='+g.video.id); if(g.audio) qs.push('audio='+g.audio.id);
-  if(!qs.length){ alert('Gewählter Feed hat keine video/audio-Flows.'); return; }
-  _liveRows[i].uri=`mxl://${domain}?${qs.join('&')}`;
-  _liveRows[i].mxlDomain=domain;
-  _liveRows[i].keepAlive=false;  // MXL-Flow kann verschwinden (Writer stoppt) → nicht in Master einbetten
-  _renderLiveList();
+// DeckLink: auto-update gstSrc from device number + format selects
+function _liveDlUpdate(i){
+  const devEl=document.getElementById(`dl-dev-${i}`);
+  const fmtEl=document.getElementById(`dl-fmt-${i}`);
+  if(!devEl||!fmtEl) return;
+  const devNum=devEl.value||'0';
+  const fmt=fmtEl.value||'';
+  const fmtPart=fmt&&fmt!=='auto'?` video-format=${fmt}`:'';
+  const newSrc=`decklinkvideosrc device-number=${devNum}${fmtPart}`;
+  _liveRows[i].gstSrc=newSrc;
+  _liveRows[i].videoFormat=fmt;
+  // Mirror device number to audio sources (DeckLink audio typically same device)
+  (_liveRows[i].audioSources||[]).forEach(a=>{
+    if(/decklinkaudiosrc/i.test(a.gstSrc||''))
+      a.gstSrc=a.gstSrc.replace(/device-number=\d+/,`device-number=${devNum}`);
+  });
 }
 
-function liveAddRow(){
-  _liveRows.push({id:'',label:'',uri:'',gstSrc:'',inputId:'',keepAlive:true,audioSources:[]});
-  _renderLiveList();
-}
-
-async function liveDiscoverDecklink(){
-  let devices;
-  try {
-    const r = await fetch('/api/devices').then(r=>r.json());
-    devices = r.filter(d=>d.type==='decklink');
-  } catch(e){ showToast('⚠ Discover fehlgeschlagen: '+e.message); return; }
-  if(!devices.length){ showToast('Keine DeckLink-Geräte gefunden'); return; }
-  let added=0;
-  for(const d of devices){
-    const existingId = `decklink-${d.deviceNumber}`;
-    if(_liveRows.some(r=>r.id===existingId)) continue;
-    _liveRows.push({
-      id: existingId,
-      label: d.name || `DeckLink ${d.deviceNumber}`,
-      uri: '',
-      gstSrc: d.gstSrc,
-      // "auto" (Modus-Autodetect) statt eines geratenen festen Modus (z.B. "1080i50") —
-      // ein falscher fixer Modus crasht/blockiert die Pipeline, wenn er nicht exakt
-      // zum tatsächlich eingehenden Signal passt.
-      videoFormat: 'auto',
-      inputId: '',
-      keepAlive: true,
-      audioSources: d.gstAudioSrc ? [{ label:'Audio', gstSrc: d.gstAudioSrc, channels: d.audioChannels||2 }] : [],
-    });
-    added++;
+// Add a new row of the given type; DeckLink tries auto-discover first
+async function liveAddType(type){
+  if(type==='decklink'){
+    let added=0;
+    try{
+      const r=await fetch('/api/devices').then(r=>r.json());
+      const devices=(Array.isArray(r)?r:r.devices||[]).filter(d=>d.type==='decklink');
+      for(const d of devices){
+        const eid=`decklink-${d.deviceNumber}`;
+        if(_liveRows.some(r=>r.id===eid)) continue;
+        _liveRows.push({
+          id:eid,_autoId:eid,label:d.name||`DeckLink ${d.deviceNumber}`,
+          uri:'',gstSrc:d.gstSrc||`decklinkvideosrc device-number=${d.deviceNumber}`,
+          videoFormat:'auto',inputId:'',keepAlive:true,
+          audioSources:d.gstAudioSrc?[{label:'Audio',gstSrc:d.gstAudioSrc,channels:d.audioChannels||2}]:[],
+        });
+        added++;
+      }
+      if(added){ _renderLiveList(); showToast(`✅ ${added} DeckLink-Gerät(e) erkannt und hinzugefügt`); return; }
+      if(devices.length){ showToast('DeckLink-Geräte bereits eingetragen'); return; }
+    }catch(e){ /* no devices API — fall through to manual card */ }
+    // Fallback: manual DeckLink entry
+    _liveRows.push({id:'decklink-0',_autoId:'decklink-0',label:'DeckLink',uri:'',gstSrc:'decklinkvideosrc device-number=0',videoFormat:'auto',inputId:'',keepAlive:true,audioSources:[]});
+  }else if(type==='network'){
+    _liveRows.push({id:'',_autoId:'',label:'',uri:'',gstSrc:'',inputId:'',keepAlive:false,audioSources:[]});
+  }else if(type==='mxl'){
+    _liveRows.push({id:'',_autoId:'',label:'',uri:'',gstSrc:'',mxlDomain:S.config?.mxlDomain||'/dev/shm/mxl',inputId:'',keepAlive:false,audioSources:[]});
+  }else{
+    _liveRows.push({id:'',_autoId:'',label:'',uri:'',gstSrc:'',inputId:'',keepAlive:true,audioSources:[]});
   }
-  if(added) _renderLiveList();
-  showToast(added ? `✅ ${added} DeckLink-Gerät(e) hinzugefügt` : 'DeckLink-Geräte bereits eingetragen');
+  _renderLiveList();
+  setTimeout(()=>document.getElementById('live-src-list')?.lastElementChild?.scrollIntoView({behavior:'smooth',block:'nearest'}),60);
+}
+
+// Load MXL flows inline in the card
+async function mxlLoadFlows(i){
+  const domainEl=document.getElementById(`mxl-domain-${i}`);
+  const domain=(domainEl?.value||'').trim()||S.config?.mxlDomain||'/dev/shm/mxl';
+  _liveRows[i].mxlDomain=domain;
+  const el=document.getElementById(`mxl-flows-${i}`);
+  if(!el) return;
+  el.innerHTML='<span style="font-size:9px;color:var(--dim)">⏳ Lade MXL-Flows…</span>';
+  try{
+    const r=await fetch('/api/mxl/flows?domain='+encodeURIComponent(domain)).then(r=>r.json());
+    if(r.error) throw new Error(r.error);
+    _mxlFlowCache[i]=r.groups||[];
+    el.innerHTML=_renderMxlFlowList(i);
+    if(!(r.groups||[]).length) el.innerHTML='<span style="font-size:9px;color:var(--yellow)">Keine Flows in "'+_esc(domain)+'" gefunden.</span>';
+  }catch(e){
+    el.innerHTML=`<span style="font-size:9px;color:var(--red)">✗ ${_esc(e.message)}</span>`;
+  }
+}
+
+// Select a flow from the cached list (called by onclick in flow buttons)
+function mxlSelectFlow(i,gi){
+  const g=_mxlFlowCache[i]?.[gi]; if(!g) return;
+  const domain=_liveRows[i]?.mxlDomain||S.config?.mxlDomain||'/dev/shm/mxl';
+  const qs=[];
+  if(g.video) qs.push('video='+g.video.id);
+  if(g.audio) qs.push('audio='+g.audio.id);
+  if(!qs.length){showToast('⚠ Dieser Flow hat keine Video/Audio-UUIDs');return;}
+  _liveRows[i].uri=`mxl://${domain}?${qs.join('&')}`;
+  if(!_liveRows[i].label) _liveRows[i].label=g.group||g.name||'MXL Flow';
+  if(!_liveRows[i].id||_liveRows[i].id===_liveRows[i]._autoId){
+    const p=(g.group||'mxl').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').substring(0,20)||'mxl-flow';
+    _liveRows[i].id=p; _liveRows[i]._autoId=p;
+  }
+  _renderLiveList();
 }
 
 async function liveSave(){
@@ -6159,6 +6424,48 @@ async function _loadRtspTestStatus() {
     }
     _updateRtspTestUi(r.running, r.url);
   } catch {}
+  // MXL-Domain-Feld mit gespeichertem Wert befüllen
+  const mxlIn = document.getElementById('cfg-mxl-domain');
+  if (mxlIn) mxlIn.value = S.config?.mxlDomain || '/dev/shm/mxl';
+}
+
+async function mxlDomainSave() {
+  const domain = document.getElementById('cfg-mxl-domain')?.value?.trim() || '/dev/shm/mxl';
+  const st = document.getElementById('cfg-mxl-status');
+  try {
+    await api('POST', '/api/settings', { mxlDomain: domain });
+    if (st) { st.textContent = '✓ gespeichert'; st.style.color = 'var(--green)'; }
+  } catch(e) {
+    if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; }
+  }
+}
+
+async function mxlDomainProbe() {
+  const domain = document.getElementById('cfg-mxl-domain')?.value?.trim() || S.config?.mxlDomain || '/dev/shm/mxl';
+  const st    = document.getElementById('cfg-mxl-status');
+  const box   = document.getElementById('cfg-mxl-flows');
+  if (st)  { st.textContent = '⏳ Suche…'; st.style.color = 'var(--dim)'; }
+  if (box) { box.style.display = 'none'; box.textContent = ''; }
+  try {
+    const r = await fetch('/api/mxl/flows?domain=' + encodeURIComponent(domain)).then(r => r.json());
+    if (r.error) throw new Error(r.error);
+    const groups = r.groups || [];
+    if (!groups.length) {
+      if (st) { st.textContent = 'Keine Flows in "' + domain + '"'; st.style.color = 'var(--yellow)'; }
+      return;
+    }
+    if (st) { st.textContent = groups.length + ' Flow-Gruppe(n) gefunden'; st.style.color = 'var(--green)'; }
+    if (box) {
+      box.textContent = groups.map(g =>
+        `${g.label || g.name || '?'}\n` +
+        (g.video ? `  video: ${g.video}\n` : '') +
+        (g.audio ? `  audio: ${g.audio}\n` : '')
+      ).join('\n');
+      box.style.display = 'block';
+    }
+  } catch(e) {
+    if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; }
+  }
 }
 
 async function _loadAudioTab(){
@@ -8177,6 +8484,60 @@ async function _saveEventInner(){
       if(somSec>=info.duration) showToast(`⚠ SOM (${somV}) liegt nach Dateiende (${ftFF(info.duration,fps)})`);
       else if(eomSec!==null&&(somSec+eomSec)>info.duration+0.1)
         showToast(`⚠ Dauerfehler: SOM+EOM überschreitet Dateidauer um ${ftFF((somSec+eomSec)-info.duration,fps)}`);
+    }
+  }
+  // Transition timing check (client-side, non-blocking)
+  {
+    const _trType  = document.getElementById('em-transition')?.value || 'cut';
+    const _trSpeed = document.getElementById('em-speed')?.value || 'fast';
+    const _speeds  = S.config?.transitionSpeeds || { fast:500, medium:1000, slow:2000 };
+    const _trMs    = _speeds[_trSpeed] ?? _speeds.fast ?? 500;
+    const _isXfade = _trType === 'xfade';
+    const _isFade  = ['v-fade','fade-cut','cut-fade'].includes(_trType);
+
+    // Compute this event's clip duration in ms
+    let _evDurMs = 0;
+    if(isP && file){
+      const _info=S.library?.find(m=>m.fileName===file||m.fileName.replace(/\.[^.]+$/,'')===(file.replace(/\.[^.]+$/,'')));
+      const _fps=parseFps(_info?.video?.fps||25);
+      const _eomSec=eomV?fromTC(eomV,_fps):null;
+      _evDurMs = (_eomSec!=null ? _eomSec : (_info?.duration||0)) * 1000;
+    } else if(!isP){
+      _evDurMs = (fromTC(durV)||0) * 1000;
+    }
+
+    // Check: this event's own xfade/fade vs. clip duration
+    if((_isXfade||_isFade) && _evDurMs > 0 && _evDurMs < _trMs){
+      showToast(`⚠ Überblendung (${(_trMs/1000).toFixed(2)}s) länger als Clipdauer (${(_evDurMs/1000).toFixed(2)}s)`);
+    }
+
+    // Check: previous event in the playlist too short for this event's transition
+    if((_isXfade||_isFade) && S.editIdx > 0){
+      const _prev = S.plData[S.editIdx-1];
+      if(_prev){
+        let _prevDurMs = 0;
+        if(_prev.file){
+          const _pi=S.library?.find(m=>m.fileName===_prev.file||m.fileName.replace(/\.[^.]+$/,'')===((_prev.file||'').replace(/\.[^.]+$/,'')));
+          const _pfps=parseFps(_pi?.video?.fps||25);
+          _prevDurMs = (_prev.eom!=null ? _prev.eom : (_pi?.duration||0)) * 1000;
+        } else if(_prev.duration!=null){
+          _prevDurMs = (parseFloat(_prev.duration)||0)*1000;
+        }
+        if(_prevDurMs > 0 && _prevDurMs < _trMs){
+          showToast(`⚠ Vorheriges Event (${(_prevDurMs/1000).toFixed(2)}s) zu kurz für Crossfade (${(_trMs/1000).toFixed(2)}s)`);
+        }
+      }
+    }
+
+    // Check: double-crossfade sandwich (this event has xfade AND the next event also has xfade)
+    if(_isXfade && _evDurMs > 0 && S.editIdx >= 0){
+      const _next = S.plData[S.editIdx+1];
+      if(_next?.transition === 'xfade'){
+        const _nextMs = _speeds[_next.transitionSpeed||'fast'] ?? _speeds.fast ?? 500;
+        if((_trMs + _nextMs) >= _evDurMs){
+          showToast(`⚠ Crossfade-Ein (${(_trMs/1000).toFixed(2)}s) + Crossfade-Aus (${(_nextMs/1000).toFixed(2)}s) überlappen sich in diesem Clip (${(_evDurMs/1000).toFixed(2)}s)`);
+        }
+      }
     }
   }
   const somMode = document.querySelector('[name="em-sommode"]:checked')?.value || 'user';
@@ -11880,12 +12241,50 @@ let _pluginTab     = null;   // Aktiv angezeigtes Plugin-id
 let _ftmMap        = {};     // basename → TransferEntry (file-transfer-manager)
 
 /** Status-Update vom Server empfangen */
+// ── SCTE-35 Panel ─────────────────────────────────────────────────────────────
+function _scte35UpdatePanel(d) {
+  const wrap = document.getElementById('scte35-section-wrap');
+  if (!wrap) return;
+  const enabled = d.enabled;
+  wrap.style.display = enabled ? '' : 'none';
+  if (!enabled) return;
+
+  const sd   = d.status?.data || {};
+  const hdr  = document.getElementById('scte35-hdr-status');
+  const dot  = document.getElementById('scte35-inbreak-dot');
+  const txt  = document.getElementById('scte35-status-text');
+  const tgt  = document.getElementById('scte35-target');
+  const last = document.getElementById('scte35-last-cue');
+
+  if (hdr) hdr.textContent = sd.inBreak ? '🔴 BREAK' : '🟢 ON-AIR';
+  if (dot) dot.textContent = sd.inBreak ? '🔴' : '🟢';
+  if (txt) txt.textContent = sd.inBreak ? 'CUE-OUT aktiv' : 'ON-AIR';
+  if (tgt) tgt.textContent = `${sd.target || '—'} PID ${sd.pid || '?'}`;
+  if (last && sd.lastCue) {
+    const lc = sd.lastCue;
+    const ago = Math.round((Date.now() - lc.ts) / 1000);
+    last.textContent = `Letzter Cue: ${lc.dir}${lc.dur ? ` (${lc.dur}s)` : ''} — vor ${ago}s`;
+    last.style.display = '';
+  }
+}
+
+async function scte35ManualCue(cueType) {
+  const durEl = document.getElementById('scte35-manual-dur');
+  const durationSec = parseFloat(durEl?.value) || 0;
+  try {
+    const r = await api('POST', '/api/scte35/cue', { cueType, durationSec });
+    if (r.ok) showToast(`📺 SCTE-35 ${cueType.toUpperCase()} gesendet`);
+    else showToast('⚠ ' + (r.error || 'Fehler'));
+  } catch(e) { showToast('⚠ ' + e.message); }
+}
+
 function _onPluginStatus(d) {
   const idx = _plugins.findIndex(p => p.id === d.id);
   if (idx >= 0) {
     _plugins[idx] = { ..._plugins[idx], status: d.status, enabled: d.enabled };
     _renderPluginTab(d.id);
   }
+  if (d.id === 'scte35') _scte35UpdatePanel(d);
   if (d.id === 'file-transfer-manager' && d.status?.data?.transfers) {
     _ftmMap = {};
     for (const t of d.status.data.transfers) _ftmMap[t.file] = t;
