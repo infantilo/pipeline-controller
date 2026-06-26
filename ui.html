@@ -1096,6 +1096,10 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         </select>
       </div>
       <div id="em-preset-desc" style="font-size:9px;color:var(--dim);margin:-4px 0 4px;padding:0 2px;min-height:12px;white-space:pre-wrap"></div>
+      <div class="fld" style="margin-top:4px">
+        <label title="Komma-getrennte Preset-IDs als Fallback wenn Datei zu wenige Audiokanäle hat (leer = Global-Einstellung)">Preset-Fallback (Resilienz)</label>
+        <input type="text" id="em-audio-fallback" style="font-family:var(--mono);font-size:10px" placeholder="z.B. stereo-main, pgm-stereo (leer = global)">
+      </div>
     </div>
   </div><!-- /em-panel-content -->
 
@@ -1282,6 +1286,28 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <button class="btn" style="font-size:10px" onclick="cfgNewPreset()" data-i18n="cfg.audio.addPreset">＋ Preset</button>
       </div>
       <div id="cfg-presets-list" style="margin-bottom:8px"></div>
+
+      <div class="sep"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 6px">🔇 Audio-Resilienz (Preset-Fallback)</div>
+      <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
+        Wenn ein Event-Preset mehr Audiokanäle benötigt als die Datei hat, wird automatisch auf das erste kompatible Preset in dieser Liste gewechselt.<br>
+        <b>Reihenfolge:</b> zuerst = bevorzugter Fallback. Komma-getrennte Preset-IDs.
+      </div>
+      <div class="fld">
+        <label>Globale Fallback-Kette</label>
+        <input type="text" id="cfg-audio-fallback-chain" style="font-family:var(--mono);font-size:10px" placeholder="z.B. stereo-main, pgm-stereo">
+      </div>
+      <div class="two-col" style="margin-top:4px">
+        <div class="fld">
+          <label title="Lautstärke-Schwellwert (dBFS) unter dem Surround als stumm gilt">Stille-Schwelle (dBFS)</label>
+          <input type="number" id="cfg-audio-silence-threshold" value="-55" min="-80" max="-10" step="1" style="font-family:var(--mono)">
+        </div>
+        <div class="fld">
+          <label title="Wie lange Surround stumm sein muss bevor der Fallback ausgelöst wird">Stille-Timeout (s)</label>
+          <input type="number" id="cfg-audio-silence-timeout" value="3" min="1" max="30" step="1" style="font-family:var(--mono)">
+        </div>
+      </div>
+      <button class="btn btn-p" style="font-size:10px;margin-top:4px" onclick="saveAudioResilience()">💾 Resilienz speichern</button>
 
       <div class="sep"></div>
       <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px" data-i18n="cfg.audio.output">Audio-Output</div>
@@ -2961,6 +2987,12 @@ sse.addEventListener('grafik',e=>{
     try {
       const d = JSON.parse(e.data);
       showToast(`[${d.name}] ${d.msg}`);
+    } catch {}
+  });
+  sse.addEventListener('audio-resilience-fallback', e => {
+    try {
+      const d = JSON.parse(e.data);
+      showToast(`🔇 Audio-Fallback: "${d.from}" → "${d.to}" (Surround stumm, Stereo aktiv)`);
     } catch {}
   });
   sse.addEventListener('backup-active', e => {
@@ -5111,6 +5143,7 @@ function renderPl(){
       :`${e.file||e.source||'—'}${_ftmBadgeHtml(e.file)}`;
     const durWarnBadge = e._durationWarning ? `<span style="font-size:8px;color:var(--yellow);margin-left:4px" title="${e._durationWarning}">⏱</span>` : '';
     const trWarnBadge  = e._transitionWarning ? `<span style="font-size:8px;color:var(--yellow);margin-left:4px" title="${e._transitionWarning.replace(/"/g,'&quot;')}">🔀⚠</span>` : '';
+    const apWarnBadge  = e._audioPresetWarning ? `<span style="font-size:8px;color:var(--yellow);margin-left:4px" title="${e._audioPresetWarning.replace(/"/g,'&quot;')}">🔇⚠</span>` : '';
     const classifBadge = _classifBadge(e.classification);
     const subtitleBadge = e.subtitle?.file ? `<span style="font-size:8px;color:#60a5fa;margin-left:3px" title="Subtitle: ${e.subtitle.file}">SUB</span>` : '';
 
@@ -5147,7 +5180,7 @@ function renderPl(){
     cells.push(`<span class="pl-cell" style="text-align:center;font-size:11px">${SRC_ICON[e.source]||_liveSourceIcon(e.source)||'?'}</span>`);
     if(C.classif) cells.push(`<span class="pl-cell" style="overflow:hidden;padding:0 2px" title="${e.classification||''}">${classifBadge||'<span style="color:rgba(128,128,128,.3);font-size:8px">·</span>'}</span>`);
     if(C.title)   cells.push(`<div class="pl-cell" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:10px">${e.title?`<span style="font-weight:600;color:var(--accent)">${e.title}</span>`:'<span style="color:rgba(128,128,128,.3)">—</span>'}</div>`);
-    if(C.file||!C.title) cells.push(`<div class="pl-cell-file"><div class="pl-file">${mainLabel}${durWarnBadge}${trWarnBadge}${subtitleBadge}${gapHtml}</div></div>`);
+    if(C.file||!C.title) cells.push(`<div class="pl-cell-file"><div class="pl-file">${mainLabel}${durWarnBadge}${trWarnBadge}${apWarnBadge}${subtitleBadge}${gapHtml}</div></div>`);
     if(C.status)   cells.push(`<span class="pl-cell" style="text-align:center">${statusHtml}</span>`);
     if(C.audio)    cells.push(`<span class="pl-cell" style="font-size:8px;color:var(--dim);font-family:var(--mono)">${e.audioPreset||e.audioConfig?.preset||e.audioConfig?.pgm||''}</span>`);
     if(C.branding) cells.push(`<span class="pl-cell" style="text-align:center;font-size:9px" title="${e.branding||''}">${e.branding?'🏷':''}</span>`);
@@ -5705,8 +5738,9 @@ function _pickServerFields(sv){
   if(sv.eom !== undefined) out.eom = sv.eom;
   if(sv.som !== undefined) out.som = sv.som;
   // Always sync server-authoritative warning fields (absent = cleared)
-  out._durationWarning   = sv._durationWarning   || undefined;
-  out._transitionWarning = sv._transitionWarning || undefined;
+  out._durationWarning     = sv._durationWarning     || undefined;
+  out._transitionWarning   = sv._transitionWarning   || undefined;
+  out._audioPresetWarning  = sv._audioPresetWarning  || undefined;
   return out;
 }
 function genId(){return Math.random().toString(36).slice(2)+Date.now().toString(36);}
@@ -5783,6 +5817,8 @@ function openEventEditor(idx,ev){
   const presetSel=document.getElementById('em-audio-preset');
   if(presetSel) presetSel.value=e.audioPreset||'';
   _showPresetDesc();
+  const fbInput=document.getElementById('em-audio-fallback');
+  if(fbInput) fbInput.value=Array.isArray(e.audioPresetFallback)?e.audioPresetFallback.join(', '):(e.audioPresetFallback||'');
   document.getElementById('em-transition').value=e.transition||'cut';
   document.getElementById('em-speed').value=e.transitionSpeed||'fast';
   _applyXfadeAvailability();
@@ -6485,6 +6521,16 @@ async function _loadAudioTab(){
   }
   _loadClockConfig(S.audioConfig);
   renderAudioConfig();
+  // Audio-Resilienz-Einstellungen laden
+  try {
+    const r=await fetch('/api/config/audio-resilience').then(r=>r.json());
+    const fc=document.getElementById('cfg-audio-fallback-chain');
+    if(fc) fc.value=(r.audioPresetFallbackChain||[]).join(', ');
+    const th=document.getElementById('cfg-audio-silence-threshold');
+    if(th) th.value=String(r.audioSilenceThresholdDb??-55);
+    const to=document.getElementById('cfg-audio-silence-timeout');
+    if(to) to.value=String(r.audioSilenceTimeoutSec??3);
+  } catch {}
 }
 
 // ── Audio-Gruppen UI ──────────────────────────────────────────────────────
@@ -8558,6 +8604,7 @@ async function _saveEventInner(){
     transition: (!_canUseXfade() && document.getElementById('em-transition').value === 'xfade') ? 'cut' : document.getElementById('em-transition').value,
     transitionSpeed:document.getElementById('em-speed').value,
     audioPreset: document.getElementById('em-audio-preset')?.value || null,
+    audioPresetFallback: (()=>{const v=document.getElementById('em-audio-fallback')?.value?.trim();return v?v.split(',').map(s=>s.trim()).filter(Boolean):undefined;})(),
     // Legacy-Feld bleibt für Kompatibilität
     audioConfig:{pgm:'pgm-de',secondary:'dup-pgm'},
     branding:document.getElementById('em-branding').value||null,
@@ -12058,6 +12105,21 @@ async function saveAudioSink() {
   if (sink !== cur && !await _confirmRestart(`Audio-Sink: ${cur} → ${sink}`)) return;
   await apiFetch('/api/config/audiosink', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sink}) });
   showToast('Audio-Sink gespeichert ✓');
+}
+
+async function saveAudioResilience() {
+  const chainVal = document.getElementById('cfg-audio-fallback-chain')?.value?.trim() || '';
+  const chain    = chainVal ? chainVal.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const threshold = parseFloat(document.getElementById('cfg-audio-silence-threshold')?.value ?? -55);
+  const timeout   = parseFloat(document.getElementById('cfg-audio-silence-timeout')?.value ?? 3);
+  const r = await apiFetch('/api/config/audio-resilience', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audioPresetFallbackChain: chain, audioSilenceThresholdDb: threshold, audioSilenceTimeoutSec: timeout }),
+  });
+  const d = await r?.json();
+  if (d?.ok) showToast('Audio-Resilienz gespeichert ✓');
+  else showToast('⚠ ' + (d?.error || 'Fehler'));
 }
 
 // ── Search / filter helpers ────────────────────────────────────────────────

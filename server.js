@@ -832,7 +832,8 @@ function _revalidateDurations() {
       if (ev._durationWarning) { delete ev._durationWarning; changed = true; }
     }
   }
-  if (_revalidateTransitions()) changed = true;
+  if (_revalidateTransitions())    changed = true;
+  if (_revalidateAudioPresets())   changed = true;
   return changed;
 }
 
@@ -942,6 +943,125 @@ function _revalidateTransitions() {
   }
 
   return changed;
+}
+
+// ── Audio Preset Resilience ────────────────────────────────────────────────
+// Computes the minimum number of audio channels a preset needs by inspecting
+// the highest mxf_chN index referenced in its routes.
+function _presetMinChannels(presetId) {
+  if (!presetId) return 0;
+  const preset = audioGroupConfig?.getPreset?.(presetId);
+  if (!preset?.routes) return 0;
+  let max = 0;
+  for (const route of preset.routes) {
+    const m = /^mxf_ch(\d+)$/i.exec(route.from || '');
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return max; // e.g. mxf_ch6 → 6 channels needed
+}
+
+// Validates each playable playlist event: does the file have enough audio
+// channels for its configured preset? Stores ev._audioPresetWarning or clears it.
+function _revalidateAudioPresets() {
+  let changed = false;
+  const fallbackChain = _settings.audioPresetFallbackChain || [];
+  for (const ev of (playlist?.playlist || [])) {
+    if (!ev.file) {
+      if (ev._audioPresetWarning) { delete ev._audioPresetWarning; changed = true; }
+      continue;
+    }
+    const preset = ev.audioPreset || ev.audioConfig?.preset;
+    if (!preset) {
+      if (ev._audioPresetWarning) { delete ev._audioPresetWarning; changed = true; }
+      continue;
+    }
+    const needed = _presetMinChannels(preset);
+    if (!needed) {
+      if (ev._audioPresetWarning) { delete ev._audioPresetWarning; changed = true; }
+      continue;
+    }
+    const libInfo = library.get(ev.file) || library.getAll().find(m => {
+      const bn = m.fileName.replace(/\.[^.]+$/, '');
+      const en = ev.file.replace(/\.[^.]+$/, '');
+      return bn === en;
+    });
+    if (!libInfo || libInfo.error) {
+      if (ev._audioPresetWarning) { delete ev._audioPresetWarning; changed = true; }
+      continue;
+    }
+    const fileChannels = libInfo.audio?.reduce?.((acc, t) => acc + (t.channels || 0), 0) || 0;
+    if (fileChannels > 0 && fileChannels < needed) {
+      // Find a fallback preset from per-event override or global chain
+      const chain = (ev.audioPresetFallback && ev.audioPresetFallback.length)
+        ? ev.audioPresetFallback
+        : fallbackChain;
+      const fallback = chain.find(fb => (_presetMinChannels(fb) || 0) <= fileChannels);
+      const w = `Preset "${preset}" benötigt ${needed} Kanäle, Datei hat nur ${fileChannels}` +
+                (fallback ? ` → Fallback: "${fallback}"` : ' (kein kompatibler Fallback konfiguriert)');
+      if (ev._audioPresetWarning !== w) { ev._audioPresetWarning = w; changed = true; }
+    } else {
+      if (ev._audioPresetWarning) { delete ev._audioPresetWarning; changed = true; }
+    }
+  }
+  return changed;
+}
+
+// Runtime silence-based fallback: track audio levels per group
+const _audioLevelCache = {};   // groupId → { rmsDbAvg: number, ts: number }
+const _silenceState    = {};   // groupId → { silentSince: number | null, fallbackTriggered: bool }
+
+function _checkAudioSilenceFallback() {
+  if (!playlist?._running) return;
+  const ev = playlist?.playlist?.[playlist?.currentIndex];
+  if (!ev) return;
+  const preset = ev.audioPreset || ev.audioConfig?.preset;
+  if (!preset) return;
+  const threshDb     = _settings.audioSilenceThresholdDb ?? -55;
+  const timeoutSec   = _settings.audioSilenceTimeoutSec  ?? 3;
+  const fallbackChain = (ev.audioPresetFallback && ev.audioPresetFallback.length)
+    ? ev.audioPresetFallback : (_settings.audioPresetFallbackChain || []);
+  if (!fallbackChain.length) return;
+
+  // Find a surround group (channels > 2) — that's the one we're watching for silence
+  const surroundGroup = audioGroupConfig?.groups?.find(g => g.channels > 2);
+  if (!surroundGroup) return;
+  const sId = surroundGroup.id;
+  const sLevel = _audioLevelCache[sId];
+  if (!sLevel) return;
+  const surroundSilent = sLevel.rmsDbAvg <= threshDb;
+
+  // Reference: find any stereo group
+  const stereoGroup = audioGroupConfig?.groups?.find(g => g.channels === 2);
+  const stLevel = stereoGroup ? _audioLevelCache[stereoGroup.id] : null;
+  const stereoActive = stLevel && stLevel.rmsDbAvg > threshDb;
+
+  const st = (_silenceState[sId] = _silenceState[sId] || {});
+  if (surroundSilent && stereoActive) {
+    if (!st.silentSince) st.silentSince = Date.now();
+    if (!st.fallbackTriggered && (Date.now() - st.silentSince) >= timeoutSec * 1000) {
+      _triggerAudioSilenceFallback(ev, preset, fallbackChain, surroundGroup.channels);
+      st.fallbackTriggered = true;
+    }
+  } else {
+    st.silentSince = null;
+    st.fallbackTriggered = false;
+  }
+}
+
+function _triggerAudioSilenceFallback(ev, currentPreset, chain, surroundChannels) {
+  const stereoChannels = 2;
+  const fallback = chain.find(fb => (_presetMinChannels(fb) || 0) <= stereoChannels);
+  if (!fallback) {
+    log(`Audio-Resilienz: kein kompatibler Fallback-Preset gefunden (Kette: ${chain.join(', ')})`, 'warn', 'playlist');
+    return;
+  }
+  log(`Audio-Resilienz: Surround stumm, Stereo aktiv → Preset "${currentPreset}" → "${fallback}"`, 'warn', 'playlist');
+  // Hot-swap the preset on the currently playing event and on-air player
+  ev.audioPreset = fallback;
+  if (ev.audioConfig) ev.audioConfig.preset = fallback;
+  broadcast('audio-resilience-fallback', { from: currentPreset, to: fallback, eventId: ev.id });
+  broadcast('playlist', _enrichPlaylist(playlist.playlist));
+  playlist.changeOnAirPreset?.(fallback).catch(() => {});
 }
 
 function _enrichLibrary(items) {
@@ -1081,7 +1201,13 @@ master.on('level', d => {
 
   // R128: channel-Name → groupId ('agrp_pgm_stereo' → 'pgm-stereo')
   const groupId = ch.startsWith('agrp_') ? ch.replace(/^agrp_/, '').replace(/_/g, '-') : null;
-  if (groupId && d.rms?.length) _r128Process(groupId, d.rms);
+  if (groupId && d.rms?.length) {
+    _r128Process(groupId, d.rms);
+    // Cache audio levels for silence-detection fallback
+    const rmsDbAvg = d.rms.reduce((a, b) => a + b, 0) / d.rms.length;
+    _audioLevelCache[groupId] = { rmsDbAvg, ts: now };
+    _checkAudioSilenceFallback();
+  }
 
   if (now - (_masterLevelThrottles[ch] || 0) < 80) return;
   _masterLevelThrottles[ch] = now;
@@ -1334,6 +1460,8 @@ const playlist = new PlaylistEngine(master, players, transitionEngine, {
     const segs = _segments[file] || [];
     return segs.find(s => s.name === segName) || null;
   },
+  audioGroupConfig:          audioGroupConfig.groups.length ? audioGroupConfig : null,
+  audioPresetFallbackChain:  _settings.audioPresetFallbackChain || [],
 });
 
 const preview = new PreviewPipeline();
@@ -1443,8 +1571,12 @@ playlist.on('live-precue',    d  => {
   const ls = (_settings.liveSources || []).find(l => l.id === d.liveSlot);
   if (ls) master?.startLiveFeeder?.(ls).catch(e => log(`Feeder: ${e.message}`, 'warn', 'playlist'));
 });
-playlist.on('block-start',    d  => pluginHost.dispatch('playlist:block-start', d));
-playlist.on('block-end',      d  => pluginHost.dispatch('playlist:block-end',   d));
+playlist.on('block-start',         d => pluginHost.dispatch('playlist:block-start', d));
+playlist.on('block-end',           d => pluginHost.dispatch('playlist:block-end',   d));
+playlist.on('audio-preset-fallback', d => {
+  broadcast('audio-resilience-fallback', d);
+  pluginHost.dispatch('playlist:audio-preset-fallback', d);
+});
 playlist.on('backup-active',  d  => { broadcast('backup-active', d); log(`⚠ FAILOVER: ${d.fromSlot||'(file)'} → ${d.toSlot||'backup-path'} (${d.event?.file||'?'})`, 'warn', 'playlist'); });
 playlist.on('backup-unavailable', d => { broadcast('backup-unavailable', d); log(`⚠ Backup nicht verfügbar: ${d.fromSlot}`, 'warn', 'playlist'); });
 playlist.on('grafik',       d  => {
@@ -2703,6 +2835,34 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       if (master.activePad >= N && master.activePad <= N+2) master.switchTo(idlePad);
     }
     return json(res, { ok: true, idleSource: masterOpts.idleSource, idleImagePath: masterOpts.idleImagePath });
+  }
+
+  // ── Audio Resilience settings ─────────────────────────────────────────────
+  if (meth === 'GET' && p === '/api/config/audio-resilience') {
+    return json(res, {
+      audioPresetFallbackChain: _settings.audioPresetFallbackChain || [],
+      audioSilenceThresholdDb:  _settings.audioSilenceThresholdDb  ?? -55,
+      audioSilenceTimeoutSec:   _settings.audioSilenceTimeoutSec   ?? 3,
+    });
+  }
+  if (meth === 'POST' && p === '/api/config/audio-resilience') {
+    const sess = _requireAuth(req, res, ['editor']); if (sess === false) return;
+    const b = await parseBody(req);
+    const _before = {
+      audioPresetFallbackChain: _settings.audioPresetFallbackChain,
+      audioSilenceThresholdDb:  _settings.audioSilenceThresholdDb,
+      audioSilenceTimeoutSec:   _settings.audioSilenceTimeoutSec,
+    };
+    if (Array.isArray(b.audioPresetFallbackChain)) {
+      _settings.audioPresetFallbackChain = b.audioPresetFallbackChain.filter(v => typeof v === 'string' && v.trim());
+      playlist.opts.audioPresetFallbackChain = _settings.audioPresetFallbackChain;
+    }
+    if (b.audioSilenceThresholdDb != null) _settings.audioSilenceThresholdDb = parseFloat(b.audioSilenceThresholdDb);
+    if (b.audioSilenceTimeoutSec  != null) _settings.audioSilenceTimeoutSec  = parseFloat(b.audioSilenceTimeoutSec);
+    saveSettings(_settings);
+    _logConfigDiff(req, 'audio-resilience', _before, _settings, ['audioPresetFallbackChain','audioSilenceThresholdDb','audioSilenceTimeoutSec']);
+    if (_revalidateAudioPresets()) broadcast('playlist', _enrichPlaylist(playlist.playlist));
+    return json(res, { ok: true });
   }
 
   // ── Paths + As-Run config ──────────────────────────────────────────────────
