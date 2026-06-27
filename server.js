@@ -1007,13 +1007,15 @@ function _revalidateAudioPresets() {
 }
 
 // Runtime silence-based fallback: track audio levels per group
-const _audioLevelCache = {};   // groupId → { rmsDbAvg: number, ts: number }
-const _silenceState    = {};   // stateKey → { silentSince: number | null, fallbackTriggered: bool }
+const _audioLevelCache      = {};   // groupId → { rmsDbAvg: number, ts: number }
+const _silenceState         = {};   // stateKey → { silentSince: number | null, fallbackTriggered: bool }
+const _activeTrackFallbacks = new Map(); // stateKey → { watchGroup, fallbackGroup, startMs, clipTC, evFile }
 
 function _checkAudioSilenceFallback() {
   if (!playlist?._running) return;
   const ev = playlist?.playlist?.[playlist?.currentIndex];
   if (!ev) return;
+  if (!(ev.audioPreset || ev.audioConfig?.preset)) return;
 
   const threshDb   = _settings.audioSilenceThresholdDb ?? -55;
   const timeoutSec = _settings.audioSilenceTimeoutSec  ?? 3;
@@ -1026,7 +1028,10 @@ function _checkAudioSilenceFallback() {
     if (!watchLevel || !fbLevel) continue;
 
     const watchSilent = watchLevel.rmsDbAvg <= threshDb;
-    const fbActive    = fbLevel.rmsDbAvg > threshDb;
+    // fbActive-Check entfernt: Fallback-Gruppe kann im aktuellen Preset mit
+    // Null-Koeffizienten geroutet sein → Pegel = -90 dB, obwohl im File Ton
+    // vorhanden ist. _patchGroupMatrix routet die Fallback-Kanäle durch die
+    // Watch-Gruppe; ein Pegel-Check am Ausgang blockiert das zu Unrecht.
 
     const stKey = `${rule.watchGroup}:${rule.fallbackGroup}`;
     const st    = (_silenceState[stKey] = _silenceState[stKey] || {});
@@ -1038,7 +1043,7 @@ function _checkAudioSilenceFallback() {
       st.silentSince           = null;
     }
 
-    if (watchSilent && fbActive) {
+    if (watchSilent) {
       if (!st.silentSince) st.silentSince = Date.now();
       if (!st.fallbackTriggered && (Date.now() - st.silentSince) >= timeoutSec * 1000) {
         if (_patchGroupMatrix(ev, rule)) {
@@ -1050,7 +1055,7 @@ function _checkAudioSilenceFallback() {
       st.silentSince = null;
       if (!watchSilent && st.fallbackTriggered && st.triggeredForEventId === ev.id) {
         // Watch-Gruppe hat sich erholt → Original-Matrix wiederherstellen
-        _restoreGroupMatrix(ev, rule.watchGroup);
+        _restoreGroupMatrix(ev, rule.watchGroup, rule.fallbackGroup);
         st.fallbackTriggered   = false;
         st.triggeredForEventId = null;
       }
@@ -1079,13 +1084,29 @@ function _patchGroupMatrix(ev, rule) {
     return false;
   }
 
+  let clipTC = '';
+  try {
+    const slotIdTc = playlist?._onAirSlot;
+    const pos = slotIdTc ? playlist?.players?.[slotIdTc]?.vPipeline?.queryPosition?.() : null;
+    if (pos != null) clipTC = _arFmtTC(pos, FPS);
+  } catch {}
+
   try {
     el.setElementProperty('matrix', matrix);
-    log(`Audio-Resilienz: "${rule.watchGroup}" stumm, "${rule.fallbackGroup}" aktiv → Matrix-Patch (${mixMethod})`, 'warn', 'playlist');
+    const tcPart = clipTC ? ` @ ${clipTC}` : '';
+    log(`🔇 Audio-Resilienz FALLBACK${tcPart}: "${rule.watchGroup}" stumm → "${rule.fallbackGroup}" (${mixMethod}) [${ev.file ? path.basename(ev.file) : ev.id}]`, 'warn', 'playlist');
+    const stKey = `${rule.watchGroup}:${rule.fallbackGroup}`;
+    _activeTrackFallbacks.set(stKey, {
+      watchGroup: rule.watchGroup, fallbackGroup: rule.fallbackGroup,
+      startMs: Date.now(), clipTC, evFile: ev.file || ev.id || '',
+    });
     broadcast('audio-resilience-fallback', {
       watchGroup: rule.watchGroup, fallbackGroup: rule.fallbackGroup,
-      mixMethod, eventId: ev.id,
+      mixMethod, eventId: ev.id, clipTC,
+      evTitle: ev.title || path.basename(ev.file || '', path.extname(ev.file || '')),
     });
+    _arOnTrackFallback('start', rule.watchGroup, rule.fallbackGroup, ev, clipTC);
+    broadcast('state', getState());
     return true;
   } catch (e) {
     log(`Audio-Resilienz: Matrix-Patch fehlgeschlagen: ${e.message}`, 'warn', 'playlist');
@@ -1094,7 +1115,7 @@ function _patchGroupMatrix(ev, rule) {
 }
 
 /** Stellt die Original-Matrix von watchGroup aus dem aktuellen Preset wieder her. */
-function _restoreGroupMatrix(ev, watchGroupId) {
+function _restoreGroupMatrix(ev, watchGroupId, fallbackGroupId) {
   if (!audioGroupConfig) return;
   const presetId = ev.audioPreset || ev.audioConfig?.preset;
   const preset   = presetId ? audioGroupConfig.getPreset(presetId) : null;
@@ -1108,10 +1129,22 @@ function _restoreGroupMatrix(ev, watchGroupId) {
   const matrix   = updates.get(elemName);
   if (!matrix) return;
 
+  let clipTC = '';
+  try {
+    const slotIdTc = playlist?._onAirSlot;
+    const pos = slotIdTc ? playlist?.players?.[slotIdTc]?.vPipeline?.queryPosition?.() : null;
+    if (pos != null) clipTC = _arFmtTC(pos, FPS);
+  } catch {}
+
   try {
     el.setElementProperty('matrix', matrix);
-    log(`Audio-Resilienz: "${watchGroupId}" erholt → Original-Matrix wiederhergestellt`, 'info', 'playlist');
-    broadcast('audio-resilience-restored', { watchGroupId, eventId: ev.id });
+    const tcPart = clipTC ? ` @ ${clipTC}` : '';
+    log(`✅ Audio-Resilienz RESTORED${tcPart}: "${watchGroupId}" erholt → Original-Matrix wiederhergestellt`, 'warn', 'playlist');
+    const stKey = `${watchGroupId}:${fallbackGroupId || ''}`;
+    _activeTrackFallbacks.delete(stKey);
+    broadcast('audio-resilience-restored', { watchGroupId, fallbackGroupId, eventId: ev.id, clipTC });
+    _arOnTrackFallback('stop', watchGroupId, fallbackGroupId, ev, clipTC);
+    broadcast('state', getState());
   } catch (e) {
     log(`Audio-Resilienz: Matrix-Restore fehlgeschlagen: ${e.message}`, 'warn', 'playlist');
   }
@@ -1759,6 +1792,7 @@ function _arOnPlay(d) {
   const reason = _ar.pendingReason || 'natural';
   _ar.pendingReason = null;
   if (_ar.lastPlay) _arFlushPlay(now, reason);
+  _arFlushTrackFallbacks(now);
   _ar.lastPlay = { startMs: now, event: ev, plannedSec: d.clipDur || 0, subReason: d.subReason || null };
 }
 
@@ -1927,6 +1961,75 @@ function _arOnRecord(action, d) {
       '',
       'Completed',
       '',
+    ]));
+  }
+}
+
+// As-Run Track Fallback Logging (type 'T') ─────────────────────────────────
+const _arTrackFallback = new Map(); // key → { startMs, watchGroup, fallbackGroup, ev, clipTC }
+
+function _arOnTrackFallback(action, watchGroup, fallbackGroup, ev, clipTC) {
+  if (!ASRUN_ENABLED) return;
+  const key = `${watchGroup}:${fallbackGroup || ''}`;
+  const now = Date.now();
+  if (action === 'start') {
+    _arTrackFallback.set(key, { startMs: now, watchGroup, fallbackGroup, ev, clipTC: clipTC || '' });
+  } else if (action === 'stop') {
+    const t = _arTrackFallback.get(key);
+    if (!t) return;
+    _arTrackFallback.delete(key);
+    const file = _arFile(); if (!file) return;
+    const mediaId = path.basename(t.ev?.file || '', path.extname(t.ev?.file || '')).slice(0, 32);
+    _arAppend(file, _arRow([
+      'T',
+      _arFmtDate(t.startMs),
+      _arFmtDate(now),
+      mediaId,
+      'Aud.Track Fallback',
+      `${t.watchGroup} → ${t.fallbackGroup || '?'}`.slice(0, 32),
+      t.clipTC || '',
+      (t.ev?.title || '').slice(0, 32),
+      _arFmtDur(now - t.startMs),
+      '',
+      'Silence-Det.',
+      '',
+      action === 'stop' ? 'Restored' : 'Clip-End',
+      '',
+      '',
+      _arNextKey(),
+      '',
+      'Fallback Active',
+      'Silence detected',
+    ]));
+  }
+}
+
+function _arFlushTrackFallbacks(endMs) {
+  for (const [key, t] of _arTrackFallback) {
+    _arTrackFallback.delete(key);
+    if (!ASRUN_ENABLED) continue;
+    const file = _arFile(); if (!file) continue;
+    const mediaId = path.basename(t.ev?.file || '', path.extname(t.ev?.file || '')).slice(0, 32);
+    _arAppend(file, _arRow([
+      'T',
+      _arFmtDate(t.startMs),
+      _arFmtDate(endMs),
+      mediaId,
+      'Aud.Track Fallback',
+      `${t.watchGroup} → ${t.fallbackGroup || '?'}`.slice(0, 32),
+      t.clipTC || '',
+      (t.ev?.title || '').slice(0, 32),
+      _arFmtDur(endMs - t.startMs),
+      '',
+      'Silence-Det.',
+      '',
+      'Clip-End',
+      '',
+      '',
+      _arNextKey(),
+      '',
+      'Fallback Active',
+      'Silence detected',
     ]));
   }
 }
@@ -2566,6 +2669,17 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const slotId = playlist._onAirSlot;
     log(`On-Air Audio-Preset → ${presetId} (${slotId})`, 'info', 'playlist');
     broadcast('onair-preset', { preset: presetId, slotId });
+
+    // Preset neu gesetzt → Silence-State und Track-Fallbacks zurücksetzen
+    Object.keys(_silenceState).forEach(k => delete _silenceState[k]);
+    if (_activeTrackFallbacks.size) {
+      for (const t of _activeTrackFallbacks.values())
+        broadcast('audio-resilience-restored', { watchGroupId: t.watchGroup, fallbackGroupId: t.fallbackGroup, eventId: null, clipTC: null });
+      _activeTrackFallbacks.clear();
+      _arFlushTrackFallbacks(Date.now());
+      broadcast('state', getState());
+    }
+
     return json(res, { ok: true });
   }
   if (meth === 'POST' && p === '/api/playlist/onair-afd') {
@@ -3846,6 +3960,7 @@ function getState() {
     config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, mxlDomain: _settings.mxlDomain||'/dev/shm/mxl', extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'] },
     avSync:   master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs??0, audioMs: _settings.audioDelayMs||{} },
     grafik:   { active: activeGrafiks },
+    audioTrackFallbackActive: Array.from(_activeTrackFallbacks.values()),
   };
 }
 

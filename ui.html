@@ -145,6 +145,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 .mx-btn.active{border-color:var(--accent);background:rgba(99,102,241,.07);}
 .mx-btn.mx-onair{border-color:var(--red)!important;background:rgba(240,80,80,.1)!important;animation:mx-pulse 1.4s ease-in-out infinite;}
 @keyframes mx-pulse{0%,100%{box-shadow:0 0 0 0 rgba(240,80,80,.4)}50%{box-shadow:0 0 0 4px rgba(240,80,80,0)}}
+@keyframes aft-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 .mx-icon{font-size:16px;margin-bottom:2px;line-height:1;}
 .mx-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;line-height:1.1;word-break:break-word;margin-bottom:1px;}
 .mx-dur{font-size:8px;color:var(--dim);font-variant-numeric:tabular-nums;margin-top:auto;}
@@ -464,6 +465,11 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <option value="anamorphic" data-i18n="afd.anamorphic">Anamorph 16:9 in 4:3</option>
     </select>
   </div>
+</div>
+
+<!-- Audio Track Fallback Banner — sichtbar solange Fallback aktiv -->
+<div id="audio-fallback-banner" style="display:none;background:rgba(255,100,0,.18);border-bottom:2px solid #ff6200;padding:5px 16px;font-size:11px;font-weight:800;color:#ff7a22;text-align:center;letter-spacing:.07em;animation:aft-pulse 1.4s ease-in-out infinite;cursor:default">
+  🔇 AUDIO TRACK FALLBACK AKTIV: <span id="audio-fallback-banner-txt" style="font-weight:400"></span>
 </div>
 
 <div class="main">
@@ -2639,6 +2645,13 @@ function _connectSSE(){
     } else if(JSON.stringify(S.config?.liveSources)!==prevLiveSrc){
       _renderSwitcherGrid();
     }
+    // Audio Track Fallback Banner beim Reconnect wiederherstellen
+    if (Array.isArray(d.audioTrackFallbackActive) && d.audioTrackFallbackActive.length) {
+      const fb = d.audioTrackFallbackActive[0];
+      _setAudioFallbackBanner(fb.watchGroup, fb.fallbackGroup, fb.clipTC);
+    } else {
+      _clearAudioFallbackBanner();
+    }
     updateAll();renderPl();
     window.StreamDeck?.scheduleRender();
   });
@@ -3009,7 +3022,24 @@ sse.addEventListener('grafik',e=>{
   sse.addEventListener('audio-resilience-fallback', e => {
     try {
       const d = JSON.parse(e.data);
-      showToast(`🔇 Audio-Fallback: "${d.from}" → "${d.to}" (Surround stumm, Stereo aktiv)`);
+      if (d.watchGroup) {
+        // Track-level silence fallback
+        const tcPart    = d.clipTC  ? ` @ ${d.clipTC}` : '';
+        const titlePart = d.evTitle ? ` [${d.evTitle}]` : '';
+        showToast(`🔇 Audio Fallback${tcPart}: „${d.watchGroup}" stumm → „${d.fallbackGroup}"${titlePart}`);
+        _setAudioFallbackBanner(d.watchGroup, d.fallbackGroup, d.clipTC);
+      } else {
+        // Preset-level chain fallback
+        showToast(`🔇 Audio-Preset-Fallback: „${d.from}" → „${d.to}"`);
+      }
+    } catch {}
+  });
+  sse.addEventListener('audio-resilience-restored', e => {
+    try {
+      const d = JSON.parse(e.data);
+      const tcPart = d.clipTC ? ` @ ${d.clipTC}` : '';
+      showToast(`✅ Audio Fallback beendet${tcPart}: „${d.watchGroupId}" erholt`);
+      _clearAudioFallbackBanner();
     } catch {}
   });
   sse.addEventListener('backup-active', e => {
@@ -11416,6 +11446,19 @@ function showToast(msg){
   let t=document.getElementById('toast');
   t.textContent=msg;t.className='toast show';
   clearTimeout(t._tid);t._tid=setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+function _setAudioFallbackBanner(watchGroup, fallbackGroup, clipTC) {
+  const banner = document.getElementById('audio-fallback-banner');
+  const txt    = document.getElementById('audio-fallback-banner-txt');
+  if (!banner || !txt) return;
+  const tcPart = clipTC ? ` (seit ${clipTC})` : '';
+  txt.textContent = `„${watchGroup}" stumm → „${fallbackGroup}"${tcPart}`;
+  banner.style.display = '';
+}
+function _clearAudioFallbackBanner() {
+  const banner = document.getElementById('audio-fallback-banner');
+  if (banner) banner.style.display = 'none';
 }
 
 // ── Clock (HH:MM:SS:FF) ───────────────────────────────────────────────────
