@@ -2467,6 +2467,28 @@ exports.destroy = <span class="kw">async function</span>() {
   <strong>Wichtig:</strong> Die offizielle Elgato Stream Deck Software muss geschlossen sein, da sie das HID-Gerät exklusiv hält. Sobald die Software beendet ist, kann Pipeline Controller direkt verbinden.
 </div>
 
+<h3>Voraussetzungen</h3>
+
+<h4>Browser</h4>
+<p>WebHID ist in <strong>Chrome ≥ 89</strong> und <strong>Edge ≥ 89</strong> standardmäßig aktiv — keine <code>chrome://flags</code>-Einstellung erforderlich. Auf Firefox und Safari ist WebHID nicht verfügbar.</p>
+<p>Falls der Browser-Dialog zum Gerät auswählen nicht erscheint, prüfen:</p>
+<ul>
+  <li><strong>Enterprise / Managed Chrome:</strong> WebHID kann per Policy gesperrt sein. In <code>chrome://policy</code> nach <code>WebHidAllowDevicesForUrls</code> oder <code>WebHidBlockedForUrls</code> suchen. Der Administrator muss Pipeline Controller freischalten.</li>
+  <li><strong>Fallback-Flag:</strong> Unter <code>chrome://flags/#enable-experimental-web-platform-features</code> → <em>Enabled</em> setzen, Neustart. Nur als Workaround für ältere Chrome-Builds oder Edge-Varianten nötig.</li>
+</ul>
+
+<h4>Linux: udev-Regel (USB-Gerätezugriff)</h4>
+<p>Unter Linux blockiert der Kernel HID-Gerätezugriff durch Nicht-Root-Prozesse, wenn keine passende udev-Regel vorhanden ist. Einmalig einrichten:</p>
+<pre><code><span class="comment"># /etc/udev/rules.d/50-elgato-streamdeck.rules</span>
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="usb",    ATTRS{idVendor}=="0fd9", MODE="0660", GROUP="plugdev"</code></pre>
+<p>Danach udev neu laden und den eigenen Benutzer der Gruppe hinzufügen:</p>
+<pre><code>sudo udevadm control --reload-rules && sudo udevadm trigger
+sudo usermod -aG plugdev $USER   <span class="comment"># dann neu einloggen</span></code></pre>
+<div class="callout callout-info">
+  <strong>Hinweis:</strong> Nach Änderung der udev-Regeln oder Gruppenmitgliedschaft muss die Benutzersitzung neu gestartet werden (Aus- und Einloggen), damit die Berechtigungen wirksam werden. Das Stream Deck muss danach neu angesteckt werden.
+</div>
+
 <h3>Verbindung herstellen</h3>
 <ol>
   <li>Stream Deck per USB anschließen</li>
@@ -2480,9 +2502,10 @@ exports.destroy = <span class="kw">async function</span>() {
 <table>
   <tr><th>Modell</th><th>Raster</th><th>Bildformat</th><th>Anmerkung</th></tr>
   <tr><td>Stream Deck MK.2</td><td>5×3</td><td>72×72 JPEG</td><td>Empfohlen</td></tr>
-  <tr><td>Stream Deck XL</td><td>8×4</td><td>96×96 JPEG</td><td>Mehr Inhalt pro Seite</td></tr>
-  <tr><td>Stream Deck +</td><td>4×4 + Dials</td><td>120×120 JPEG</td><td>Dials werden nicht genutzt</td></tr>
+  <tr><td>Stream Deck XL</td><td>8×4</td><td>96×96 JPEG</td><td>Mehr Inhalt, 2 Inhaltsreihen</td></tr>
+  <tr><td>Stream Deck +</td><td>4×2 + Dials</td><td>120×120 JPEG</td><td>Dials werden nicht genutzt</td></tr>
   <tr><td>Stream Deck Mini</td><td>3×2</td><td>80×80 BMP</td><td>Nur Basis-Steuerung (wenig Platz)</td></tr>
+  <tr><td>Stream Deck Neo</td><td>4×2</td><td>96×96 JPEG</td><td>Wie Plus ohne Dials</td></tr>
 </table>
 
 <h3>Seitenlayout</h3>
@@ -2490,7 +2513,7 @@ exports.destroy = <span class="kw">async function</span>() {
 <ul>
   <li><strong>Oberste Reihe — Menü:</strong> Navigation zwischen Seiten. Enthält den ← Zurück-Button wenn Unterseiten aktiv sind.</li>
   <li><strong>Mittlere Reihen — Inhalt:</strong> Seitenspezifische Buttons (1 Reihe bei MK.2, 2 Reihen bei XL).</li>
-  <li><strong>Unterste Reihe — Playlist:</strong> Immer sichtbar. ⏮ Prev / ▶ Play|⏸ Stop / ⏭ Next / 🔴 Next Live + aktuell gespielter Event.</li>
+  <li><strong>Unterste Reihe — Playlist:</strong> Immer sichtbar. ⏮ Prev (startet vorheriges Event sofort) / ▶ Play|⏸ Stop / ⏭ Next / 🔴 Next Live + aktuell gespielter Event.</li>
 </ul>
 
 <h3>Seiten</h3>
@@ -2502,16 +2525,17 @@ exports.destroy = <span class="kw">async function</span>() {
 <p>Kombiniert Live-Quellen und Asset-Bibliothek:</p>
 <ul>
   <li><strong>Live-Quellen</strong> als Schnellschaltknöpfe — On-Air-Quelle mit rotem Indikator</li>
-  <li><strong>Assets</strong> aus der Medienbibliothek, seitenweise blätterbar (◀ / ▶)</li>
+  <li><strong>Assets</strong> aus der Medienbibliothek, seitenweise blätterbar (◀ / ▶). Bei Pagination reserviert das System 2 Spalten der letzten Inhaltsreihe für ◀ und ▶, beide unabhängig sichtbar</li>
   <li>On-Air-Asset zeigt roten Indikator + laufenden Counter</li>
 </ul>
-<p>Beim MK.2 (nur 1 Inhaltsreihe): Unterseite 0 = Live-Quellen, Unterseiten 1+ = Asset-Pages.</p>
+<p>Beim MK.2 (nur 1 Inhaltsreihe): Unterseite 0 = Live-Quellen, Unterseiten 1+ = Asset-Pages. Beim Mini (3 Spalten) wird ein einziger Navigations-Button (◀ / ▶ abwechselnd) verwendet.</p>
 
 <h4>📺 Grafik</h4>
 <p>Ograf/oGraf-Steuerung:</p>
 <ul>
-  <li>On-Air-Grafiken erscheinen als Buttons — Tap = sofort <em>Take Out</em></li>
-  <li>Template-Browser (beim XL in eigener Reihe) zur Vorauswahl</li>
+  <li>On-Air-Grafiken erscheinen als Buttons mit rotem <code>onair</code>-Indikator — Tap = sofort <em>Take Out</em></li>
+  <li>Template-Browser (beim XL in eigener Reihe, sonst eigene Unterseite) zur Vorauswahl; Pagination mit ◀ / ▶ bei mehr Templates als Platz</li>
+  <li>Ausgewähltes Template zeigt <strong>bernsteinfarbenen Indikator</strong> (▶-Icon) — so ist immer sichtbar, welche Grafik mit <em>Take</em> auf Sendung geht</li>
   <li>Fest belegte Action-Buttons: <strong>▶ Take</strong> / <strong>⏹ Takeout</strong> / <strong>⏩ Continue</strong></li>
 </ul>
 
@@ -2519,7 +2543,16 @@ exports.destroy = <span class="kw">async function</span>() {
 <p>Erscheint im Menü nur, wenn das SCTE-35-Plugin aktiviert ist. Zeigt Break-Status (🔴 / 🟢) und bietet direkte Cue-Buttons: <strong>Cue OUT</strong> / <strong>Cue IN</strong> / <strong>Null</strong>. Die Duration kann direkt vom Gerät per Prompt gesetzt werden.</p>
 
 <h4>🎨 Branding</h4>
-<p>Zeigt das aktive Branding und die verfügbaren Branding-Dateien. Tap auf eine Datei aktiviert sie; Tap auf <em>Aus</em> deaktiviert Branding.</p>
+<p>Zeigt das aktive Branding und die verfügbaren Branding-Dateien, seitenweise blätterbar (◀ / ▶). Tap auf eine Datei aktiviert sie; Tap auf <em>Aus</em> deaktiviert Branding.</p>
+
+<h4>🖼 Stills</h4>
+<p>Verwaltung von Freeze-Frames (eingefrorene Standbilder):</p>
+<ul>
+  <li>Jeder Still-Slot zeigt eine Vorschau des eingefrorenen Bildes direkt als Button-Hintergrund</li>
+  <li><strong>📷 Aufn.</strong>-Button (pro Slot) — erfasst den aktuellen Frame und speichert ihn; die Vorschau aktualisiert sich automatisch nach der Aufnahme</li>
+  <li><strong>▶ Freeze</strong>-Button — aktiviert den eingefrorenen Frame (blendet ihn ein)</li>
+  <li><strong>Pagination:</strong> Bei mehr Stills als Platz ◀ / ▶ zum Blättern; altes Vorschaubild bleibt während des Ladens sichtbar (kein schwarzes Aufblitzen)</li>
+</ul>
 
 <h3>Plugin-Erweiterung</h3>
 <p>Jedes Plugin (oder externes Skript) kann eigene Stream-Deck-Seiten registrieren:</p>
@@ -2559,7 +2592,7 @@ StreamDeck.scheduleRender();</code></pre>
 <ul>
   <li><strong>Protokoll:</strong> HID Output Reports (Report-ID 0x02). Bilder werden in 1015-Byte-Chunks gesendet mit 8-Byte-Header (Button-Index, Paket-Nummer, Last-Flag, Payload-Länge).</li>
   <li><strong>Bildgenerierung:</strong> Canvas-basiert (HTML5 <code>&lt;canvas&gt;</code>). JPEG-Modelle (MK.2, XL, +) als Blob; BMP-Modelle (Mini) als rohe Pixel-Daten mit BMP-Header.</li>
-  <li><strong>Dirty-Tracking:</strong> Jeder Button-Slot hat einen Fingerprint (Icon + Label + Sublabel + Hintergrundfarbe + Indikator). Nur geänderte Buttons werden neu gesendet.</li>
+  <li><strong>Dirty-Tracking:</strong> Jeder Button-Slot hat einen Fingerprint (Icon + Label + Sublabel + Hintergrundfarbe + Indikator + Bildversion). Nur geänderte Buttons werden neu gesendet.</li>
   <li><strong>Render-Debounce:</strong> 100 ms. Zusätzlich periodisches Refresh alle 1,5 s für Counter-Updates.</li>
   <li><strong>Auto-Reconnect:</strong> Via <code>navigator.hid</code> connect/disconnect Events. Nach Wiederanstecken wird automatisch verbunden (sofern bereits einmal manuell genehmigt).</li>
 </ul>

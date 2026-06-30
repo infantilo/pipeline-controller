@@ -106,7 +106,8 @@ fi
 rsync -a \
          --exclude='node_modules' \
          --exclude='build_appimage_tmp' \
-         --exclude='releases' \
+         --exclude='/releases' \
+         --exclude='.claude' \
          --exclude='*.AppImage' \
          --exclude='*.log' \
          --exclude='*.deb' \
@@ -129,12 +130,14 @@ rsync -a \
   cp -r "${SCRIPT_DIR}/." "${STAGING_DIR}/src/"
   rm -rf "${STAGING_DIR}/src/node_modules" \
          "${STAGING_DIR}/src/build_appimage_tmp" \
+         "${STAGING_DIR}/src/releases" \
+         "${STAGING_DIR}/src/.claude" \
          "${STAGING_DIR}/src/library.json" \
          "${STAGING_DIR}/src/startlog.log" \
          "${STAGING_DIR}/src/gst_audio.log" \
          "${STAGING_DIR}/src/filelist.txt" 2>/dev/null || true
-  find "${STAGING_DIR}/src" -maxdepth 1 -name "*.AppImage" -delete 2>/dev/null || true
-  find "${STAGING_DIR}/src" -maxdepth 1 -name "*.deb"      -delete 2>/dev/null || true
+  find "${STAGING_DIR}/src" -name "*.AppImage" -delete 2>/dev/null || true
+  find "${STAGING_DIR}/src" -name "*.deb"      -delete 2>/dev/null || true
   # Video/Audio-Dateien löschen
   for ext in mxf MXF mp4 MP4 mov MOV mkv MKV ts TS mpeg mpg avi AVI wav WAV; do
     find "${STAGING_DIR}/src" -name "*.${ext}" -delete 2>/dev/null || true

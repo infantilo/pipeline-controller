@@ -735,7 +735,10 @@ function _measurePipelineLatency() {
 }
 
 function broadcast(event, data) {
-  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  let _json;
+  try { _json = JSON.stringify(data); }
+  catch (e) { log(`broadcast(${event}): Serialisierungsfehler — ${e.message}`, 'warn', 'system'); return; }
+  const msg = `event: ${event}\ndata: ${_json}\n\n`;
   for (const res of clients) {
     try { res.write(msg); }
     catch { clients.delete(res); }
@@ -1274,6 +1277,7 @@ grafixEngine.on('log', ({ level, msg }) => log(msg, level, 'grafik'));
 
 const master = new MasterPipeline(masterOpts);
 master.on('log',      ({ level, msg }) => log(msg, level, 'master'));
+master.on('branding', d => broadcast('branding', d));
 // Audio-Pegel vom Master-Ausgang.
 // Pegel-Throttle pro Kanal (max ~12/s pro Gruppe).
 // AudioRouter-Modus: level-Elemente liegen im Master (nach dem group-input-selector).
@@ -1501,12 +1505,20 @@ function _rtspTestStart(opts = {}) {
     const m = line.match(/RTSP_URL:(.+)/);
     if (m) { _rtspTestUrl = m[1].trim(); broadcast('rtsp-test-started', { url: _rtspTestUrl }); }
   });
+  let _stderrBuf = '';
+  proc.stderr.on('data', d => { _stderrBuf += d.toString(); });
   proc.on('exit', (code, sig) => {
     _rtspTestProc = null; _rtspTestUrl = null;
-    log(`Test-RTSP-Server gestoppt (${sig||code})`, 'info', 'rtsp');
+    if (code && _stderrBuf) {
+      const nsMatch = _stderrBuf.match(/Namespace (\S+) not available/);
+      if (nsMatch)
+        log(`Test-RTSP-Server: GI-Typelib "${nsMatch[1]}" nicht verfügbar — python3-gst-rtsp-server installieren`, 'warn', 'rtsp');
+      else
+        log(`rtsp stderr: ${_stderrBuf.trim().split('\n').pop()}`, 'debug', 'rtsp');
+    }
+    log(`Test-RTSP-Server gestoppt (${sig||code})`, code ? 'warn' : 'info', 'rtsp');
     broadcast('rtsp-test-stopped', {});
   });
-  proc.stderr.on('data', d => { const t=d.toString().trim(); if(t) log(`rtsp: ${t}`, 'debug', 'rtsp'); });
   _rtspTestProc = proc;
   log(`Test-RTSP-Server gestartet: rtsp://127.0.0.1:${port}${mpath}`, 'info', 'rtsp');
   return { ok: true, url: `rtsp://127.0.0.1:${port}${mpath}` };
@@ -1645,7 +1657,22 @@ playlist.on('playing',      d  => {
   if (!((d.slotId === null || d.slotId === undefined) && d.fixEnd)) {
     _anyEventStartMs = _nowMs;  // real event start (not gap re-emit)
   }
-  if (d.slotId) _clipStartMs = _nowMs;
+  if (d.slotId) {
+    _clipStartMs = _nowMs;
+    // Neuer Clip on-air → aktive Track-Fallbacks aus dem Vorclip löschen
+    if (_activeTrackFallbacks.size) {
+      for (const t of _activeTrackFallbacks.values())
+        broadcast('audio-resilience-restored', { watchGroupId: t.watchGroup, fallbackGroupId: t.fallbackGroup, eventId: null, clipTC: null });
+      _activeTrackFallbacks.clear();
+      _arFlushTrackFallbacks(_nowMs);
+      broadcast('state', getState());
+    }
+    // Silence-State für neue Event-ID ebenfalls zurücksetzen
+    Object.keys(_silenceState).forEach(k => {
+      const st = _silenceState[k];
+      if (st) { st.fallbackTriggered = false; st.triggeredForEventId = null; st.silentSince = null; }
+    });
+  }
   // Track playing state so reconnecting clients can reconstruct counters
   if (!((d.slotId === null || d.slotId === undefined) && d.fixEnd)) {
     // real event start (not gap re-emit)
@@ -2100,7 +2127,15 @@ async function ensureMaster() {
     broadcast('state', getState());
   } else {
     log(`Master-Pipeline fehlgeschlagen — kein Video, Preview bleibt schwarz`, 'error', 'master');
-    log(`  Hinweis: videoSink="${masterOpts.videoSink||'autovideosink'}" prüfen (ximagesink braucht X11-Display)`, 'warn', 'master');
+    {
+      const _vs = masterOpts.videoSink || 'autovideosink';
+      const _sinkName = _vs.split(/\s/)[0];
+      const _needsDisplay = ['ximagesink','xvimagesink','glimagesink','waylandsink'].includes(_sinkName);
+      if (_needsDisplay)
+        log(`  Hinweis: videoSink="${_vs}" braucht X11/Wayland — DISPLAY=${process.env.DISPLAY||'(nicht gesetzt)'}`, 'warn', 'master');
+      else
+        log(`  Hinweis: videoSink="${_vs}" — GStreamer-Log für Details prüfen`, 'warn', 'master');
+    }
   }
   return ok;
 }
@@ -2280,6 +2315,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     res.write(`event: audio-config\ndata: ${JSON.stringify(audioGroupConfig.toJSON())}\n\n`);
     res.write(`event: debug-status\ndata: ${JSON.stringify({ enabled: debugger_.enabled, verbose: debugger_.verboseBus })}\n\n`);
     res.write(`event: hotkeys\ndata: ${JSON.stringify(hotkeys)}\n\n`);
+    if (master._currentBranding !== null) res.write(`event: branding\ndata: ${JSON.stringify({ file: master._currentBranding })}\n\n`);
     if (Object.keys(_dlSignalStatus).length)
       res.write(`event: decklink-signal\ndata: ${JSON.stringify(_dlSignalStatus)}\n\n`);
     for (const entry of logs.slice(-50)) res.write(`event: log\ndata: ${JSON.stringify(entry)}\n\n`);
@@ -3376,6 +3412,24 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const { execSync } = require('child_process');
     const byDevNum = new Map();
 
+    // Parse unique "WxH@fps" strings from the caps section of a device block.
+    // framerate=30000/1001 rounds to 30; progressive and interlaced caps are both
+    // included because decklinkvideosink accepts both for the same mode string.
+    const _parseSinkVideoCaps = block => {
+      const m = block.match(/caps\s*:([\s\S]*?)(?:properties:|$)/);
+      if (!m) return [];
+      const fmts = new Set();
+      for (const line of m[1].split('\n')) {
+        const w  = line.match(/\bwidth=(\d+)/);
+        const h  = line.match(/\bheight=(\d+)/);
+        const fr = line.match(/\bframerate=(\d+)\/(\d+)/);
+        if (!w || !h || !fr) continue;
+        const fps = Math.round(parseInt(fr[1]) / parseInt(fr[2]));
+        if (fps > 0) fmts.add(`${w[1]}x${h[1]}@${fps}`);
+      }
+      return [...fmts];
+    };
+
     const scan = (category, prop) => {
       let raw;
       try { raw = execSync(`gst-device-monitor-1.0 ${category} 2>/dev/null`, { timeout: 5000 }).toString(); }
@@ -3392,6 +3446,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
         const entry = byDevNum.get(dn) || { id: `decklink-out-${dn}`, type: 'decklink-sink', deviceNumber: dn, name };
         entry[prop] = true;
         if (prop === 'hasAudio') entry.audioChannels = audioCh;
+        if (prop === 'hasVideo') entry.supportedFormats = _parseSinkVideoCaps(block);
         byDevNum.set(dn, entry);
         devNum++;
       }
@@ -3405,6 +3460,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       videoSink: d.hasVideo
         ? `decklinkvideosink device-number=${d.deviceNumber}${dlMode ? ` mode=${dlMode}` : ''}`
         : null,
+      supportedFormats: d.supportedFormats || [],
       videoModeWarning: d.hasVideo && !dlMode
         ? `Keine DeckLink-SDI-Norm für aktuelle Auflösung ${masterOpts.width||1920}x${masterOpts.height||1080}@${masterOpts.fps||25} — Video-Sink wird vermutlich nicht funktionieren. Auflösung auf 1920x1080@25, 1920x1080@50 oder 1280x720@50 stellen.`
         : null,

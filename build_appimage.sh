@@ -587,9 +587,29 @@ export HW_NVIDIA_PRESENT
 } >> "$LOG_FILE"
 echo "[AppRun] DeckLink: $([[ $HW_DECKLINK_PRESENT -eq 1 ]] && echo "✓ gefunden" || echo "✗ nicht gefunden") | NVIDIA: $([[ $HW_NVIDIA_PRESENT -eq 1 ]] && echo "✓ gefunden" || echo "✗ nicht gefunden")"
 
+# ── Port aus settings.json lesen (Fallback: 3000) ────────────────────────────
+_PORT="${PORT:-3000}"
+if [[ -f "${WORK_DIR}/settings.json" ]]; then
+    _PORT_READ="$(python3 -c "import json,sys; d=json.load(open('${WORK_DIR}/settings.json')); print(d.get('port', 3000))" 2>/dev/null || true)"
+    [[ -n "$_PORT_READ" ]] && _PORT="$_PORT_READ"
+fi
+
+echo "[AppRun] Server startet auf http://localhost:${_PORT}"
+echo "[AppRun] Log: ${LOG_FILE}"
+echo "[AppRun] Konfiguration: ${WORK_DIR}/settings.json"
+
+# Browser nach 3s automatisch öffnen (nur beim ersten Start, nicht nach Neustart)
+_BROWSER_OPENED=0
+
 while true; do
     echo "=== AppRun: Start $(date -Is) ===" >> "$LOG_FILE"
     set +e
+
+    if [[ "$_BROWSER_OPENED" -eq 0 ]]; then
+        _BROWSER_OPENED=1
+        ( sleep 3 && xdg-open "http://localhost:${_PORT}" ) &>/dev/null &
+    fi
+
     "${APPDIR}/usr/bin/node" \
         --require "${APPDIR}/app/appimage_bootstrap.js" \
         "${APPDIR}/app/server.js" \

@@ -33,5 +33,23 @@
     ],
     "returnMode": "interrupt",
     "liveSource": null
+  },
+  {
+    "id": "5c1oat7hflomqzcbhw2",
+    "label": "TEST2",
+    "color": "#5aabff",
+    "icon": "⬛",
+    "events": [],
+    "returnMode": "interrupt",
+    "liveSource": null
+  },
+  {
+    "id": "e7iyog8shpsmr0dv2vv",
+    "label": "TEST3",
+    "color": "#5aabff",
+    "icon": "⬛",
+    "events": [],
+    "returnMode": "interrupt",
+    "liveSource": null
   }
 ]

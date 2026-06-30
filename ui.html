@@ -1375,7 +1375,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <button class="btn" style="font-size:10px" onclick="cfgDiscoverDecklinkSinks()" data-i18n="btn.discoverDecklinkSinks">🔍 DeckLink-Ausgang suchen</button>
       </div>
       <div class="fld"><label data-i18n="cfg.video.sink">Video-Sink</label>
-        <select id="cfg-video-sink">
+        <select id="cfg-video-sink" onchange="cfgFilterFormatBySink()">
           <option value="autovideosink">Auto (detect)</option>
           <option value="fakesink" data-i18n="cfg.video.fakewin">Fake (kein Fenster)</option>
           <option value="ximagesink">X11 (Crostini)</option>
@@ -2467,6 +2467,7 @@ const S={
   assetState: { active: false },
   recordStatus: {},
 };
+window.S = S;
 let _plClipboard=null,_dragIdx=null,_selectedIdx=null,_selectedSet=new Set();
 let _kbFocus='playlist'; // 'playlist' | 'prep'
 let _suppressPlSSECount=0;  // Zähler: wie viele SSE-'playlist'-Events noch unterdrückt werden
@@ -3077,11 +3078,13 @@ sse.addEventListener('grafik',e=>{
     _stillState = JSON.parse(e.data);
     _renderStillButtons();
     _updateAssetStateBadge();
+    window.StreamDeck?.scheduleRender();
   });
   sse.addEventListener('asset-state', e => {
     S.assetState = JSON.parse(e.data);
     _updateAssetStateBadge();
     if (!document.getElementById('sec-asset')?.classList.contains('collapsed')) _renderAssetPanel();
+    window.StreamDeck?.scheduleRender();
   });
   sse.addEventListener('record-started', e => {
     const d = JSON.parse(e.data);
@@ -4055,6 +4058,7 @@ async function cutAsset(i) {
 
 // ── Freeze / Still ───────────────────────────────────────────────────────────
 let _stillState = [];  // [{ slot, active, hasFrame }, ...]
+Object.defineProperty(window, '_stillState', { get: () => _stillState, configurable: true });
 
 function _renderStillButtons() {
   const count = S.config?.stillSlots ?? 2;
@@ -6688,14 +6692,41 @@ const AUDIO_SINK_OPTS = [
   { value: 'fakesink',     label: 'Fake' },
 ];
 
+// videoSink-String → Set<"WxH@fps"> der vom Gerät nativ unterstützten Formate.
+// Nur für DeckLink-Sinks befüllt (per Discovery); leer = alle Formate zeigen.
+let _dlSinkFormatMap = {};
+
+// Filtert das Format-Dropdown auf die vom gewählten Sink nativ unterstützten
+// Auflösungen. Bei Nicht-DeckLink-Sinks oder unbekannten Caps: alle zeigen.
+function cfgFilterFormatBySink() {
+  const sinkVal = document.getElementById('cfg-video-sink')?.value || '';
+  const fmt = document.getElementById('cfg-format');
+  if (!fmt) return;
+  const supported = _dlSinkFormatMap[sinkVal]; // undefined → zeige alles
+  let firstVisible = null;
+  for (const opt of fmt.options) {
+    const show = !supported || supported.has(opt.value);
+    opt.hidden = !show;
+    if (show && !firstVisible) firstVisible = opt.value;
+  }
+  // Falls aktuelle Auswahl ausgeblendet → ersten sichtbaren nehmen
+  if (fmt.selectedOptions[0]?.hidden && firstVisible) fmt.value = firstVisible;
+}
+
 // Sucht DeckLink-Ausgänge (Programm-Output, getrennt von Live-Quellen-Discovery)
 // und ergänzt sie als Optionen im Video-Sink-Dropdown sowie in AUDIO_SINK_OPTS
 // für die Output-Gruppen.
-async function cfgDiscoverDecklinkSinks(){
+async function cfgDiscoverDecklinkSinks(silent){
   let sinks;
   try { sinks = await fetch('/api/devices/sinks').then(r=>r.json()); }
-  catch(e){ showToast('⚠ Discover fehlgeschlagen: '+e.message); return; }
-  if (!Array.isArray(sinks) || !sinks.length) { showToast('Keine DeckLink-Ausgänge gefunden'); return; }
+  catch(e){ if(!silent) showToast('⚠ Discover fehlgeschlagen: '+e.message); return; }
+  if (!Array.isArray(sinks) || !sinks.length) { if(!silent) showToast('Keine DeckLink-Ausgänge gefunden'); return; }
+
+  // Caps-Map aufbauen: videoSink-String → Set der unterstützten Formate
+  _dlSinkFormatMap = {};
+  sinks.filter(s=>s.videoSink && s.supportedFormats?.length).forEach(s=>{
+    _dlSinkFormatMap[s.videoSink] = new Set(s.supportedFormats);
+  });
 
   // Video-Sink-Dropdown: vorherige DeckLink-Optionen entfernen, neu einfügen
   const vSel = document.getElementById('cfg-video-sink');
@@ -6708,7 +6739,13 @@ async function cfgDiscoverDecklinkSinks(){
       if (s.videoModeWarning) o.title = s.videoModeWarning;
       vSel.appendChild(o);
     });
+    // Gespeicherten Wert wieder setzen (Dropdown wurde neu befüllt)
+    const want = S.config?.videoSink;
+    if (want && [...vSel.options].some(o=>o.value===want)) vSel.value = want;
   }
+
+  // Format-Dropdown sofort filtern
+  cfgFilterFormatBySink();
 
   // AUDIO_SINK_OPTS: vorherige DeckLink-Einträge entfernen, neu eintragen
   for (let i = AUDIO_SINK_OPTS.length - 1; i >= 0; i--) {
@@ -6719,9 +6756,11 @@ async function cfgDiscoverDecklinkSinks(){
   });
   _renderGroupsList();
 
-  const warn = sinks.find(s=>s.videoModeWarning);
-  if (warn) showToast('⚠ ' + warn.videoModeWarning);
-  else showToast(`✅ ${sinks.length} DeckLink-Ausgang/Ausgänge gefunden`);
+  if (!silent) {
+    const warn = sinks.find(s=>s.videoModeWarning);
+    if (warn) showToast('⚠ ' + warn.videoModeWarning);
+    else showToast(`✅ ${sinks.length} DeckLink-Ausgang/Ausgänge gefunden`);
+  }
 }
 
 function _renderGroupsList(){
@@ -7803,13 +7842,29 @@ function openSettings(){
       }
       if (vSel) vSel.value = want;
     }
-    // Format-Dropdown befüllen
+    // Format-Dropdown befüllen (vor Filter, damit alle Optionen sichtbar)
     const w = cfg.width || 1920, h = cfg.height || 1080, fps = cfg.fps || 25;
     const fmtVal = `${w}x${h}@${fps}`;
     const fmtSel = document.getElementById('cfg-format');
     if (fmtSel) {
+      // Alle Optionen zunächst einblenden (filter kommt gleich danach)
+      for (const o of fmtSel.options) o.hidden = false;
       const opts = [...fmtSel.options].map(o => o.value);
       fmtSel.value = opts.includes(fmtVal) ? fmtVal : opts[0];
+    }
+    // Wenn DeckLink-Sink: Format-Caps laden und Dropdown filtern
+    if (/decklink/i.test(cfg.videoSink || '')) {
+      cfgDiscoverDecklinkSinks(true).then(() => {
+        if (fmtSel) {
+          if (fmtSel.selectedOptions[0]?.hidden || ![...fmtSel.options].some(o=>!o.hidden&&o.value===fmtVal)) {
+            // gespeichertes Format auch wenn ausgeblendet anzeigen (kann vom Sink abweichen)
+            const cur = fmtSel.querySelector(`option[value="${fmtVal}"]`);
+            if (cur) { cur.hidden = false; fmtSel.value = fmtVal; }
+          }
+        }
+      });
+    } else {
+      cfgFilterFormatBySink();
     }
     // Still Slots
     const ssSel = document.getElementById('cfg-still-slots');
@@ -10859,6 +10914,7 @@ function swBrandingChange(){
 function updateSwBrandingStatus(file){
   const el=document.getElementById('sw-branding-cur');if(el) el.textContent=file?('🏷 '+file):'—';
   const sel=document.getElementById('sw-branding-sel');if(sel&&file) sel.value=file;
+  window.StreamDeck?.scheduleRender();
 }
 
 // ── oGraf Manuelle Grafik-Steuerung ──────────────────────────────────────────
@@ -10905,6 +10961,8 @@ function _populateGrafikDropdowns() {
 
 let _grafikData = {};  // Aktuelle Template-Daten
 const _grafikActiveMap = new Map();  // template → grafixId (mehrere gleichzeitig)
+window._grafikActiveMap = _grafikActiveMap;
+Object.defineProperty(window, 'GRAFIK_TEMPLATES_META', { get: () => GRAFIK_TEMPLATES_META, configurable: true });
 
 // ── Grafik Hotkeys ────────────────────────────────────────────────────────────
 let _hotkeys = [];
@@ -11259,6 +11317,7 @@ function _updateGrafikDot(active) {
   // Rot wenn mindestens 1 Grafik aktiv, Dim wenn keine
   const anyActive = active ?? (_grafikActiveMap.size > 0);
   dot.style.background = anyActive ? 'var(--red)' : 'var(--dim)';
+  window.StreamDeck?.scheduleRender();
 }
 
 // Grafik-Status von SSE aktualisieren
@@ -11439,6 +11498,7 @@ function updateAll(){
   document.getElementById('hold-badge').style.display=S.playlist.paused?'inline-flex':'none';
   const cp = document.getElementById('toolbar-clock-provider');
   if (cp) cp.textContent = S.config?.clockProvider || '—';
+  window.StreamDeck?.scheduleRender();
 }
 function closeModal(id){document.getElementById(id).classList.remove('show');S.libPickerSlot=null;S.libPickerCb=null;if(id==='event-modal'&&_prepEditMode){_prepEditMode=false;_prepEditIdx=-1;}if(id==='record-modal'){clearInterval(_recDurTimer);}}
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)closeModal(m.id);}));
