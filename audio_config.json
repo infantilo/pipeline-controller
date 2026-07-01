@@ -29,6 +29,12 @@
       "label": "51 Programmton",
       "channels": 6,
       "sink": "fakesink"
+    },
+    {
+      "id": "grp-1782829038021",
+      "label": "Neue Gruppe",
+      "channels": 2,
+      "sink": "fakesink"
     }
   ],
   "presets": {

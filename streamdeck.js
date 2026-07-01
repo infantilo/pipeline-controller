@@ -18,6 +18,8 @@
 
 const SD = window.StreamDeck = {};
 
+let _opening = false;  // guard against double-open during async dev.open()
+
 // ── Model Definitions ─────────────────────────────────────────────────────────
 const VENDOR_ID = 0x0fd9;
 // inOff = byte offset in WebHID inputreport data where button states start
@@ -78,7 +80,14 @@ SD.scheduleRender= _schedule;
 
 SD.connect = async function() {
   if (!navigator?.hid) {
-    alert('WebHID nicht verfügbar — nur Chrome/Edge unterstützt');
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile) {
+      alert('WebHID wird auf mobilen Geräten nicht unterstützt.\nBitte Chrome oder Edge auf einem Desktop-PC verwenden.');
+    } else if (!window.isSecureContext) {
+      alert('WebHID erfordert HTTPS oder localhost.\nBitte die App über HTTPS aufrufen (oder lokal via localhost).\nHinweis: Das Stream Deck kann nur vom selben Gerät wie der Server gesteuert werden, da WebHID nicht über das Netzwerk verfügbar ist.');
+    } else {
+      alert('WebHID nicht verfügbar — bitte Chrome oder Edge (Desktop) verwenden.');
+    }
     return;
   }
   try {
@@ -99,6 +108,9 @@ SD.disconnect = async function() {
 };
 
 async function _open(dev) {
+  if (_opening || _dev === dev) return;
+  _opening = true;
+  try {
   const m = MODELS[dev.productId];
   if (!m) {
     console.error(`[SD] Unbekanntes Modell — vendorId:0x${dev.vendorId.toString(16)} productId:0x${dev.productId.toString(16)} name:"${dev.productName}"`);
@@ -116,11 +128,12 @@ async function _open(dev) {
   _schedule();
   _updToolbar();
   console.log('[SD] connected:', m.name, `${m.cols}×${m.rows}`, `productId:0x${dev.productId.toString(16)}`, `imgSize:${m.imgSize}`, `fmt:${m.fmt}`, `proto:${m.proto}`);
+  } finally { _opening = false; }
 }
 
 // Auto-reconnect on USB plug-in
 navigator.hid?.addEventListener('connect', async e => {
-  if (_dev || e.device.vendorId !== VENDOR_ID) return;
+  if (_dev || _opening || e.device.vendorId !== VENDOR_ID) return;
   const all = await navigator.hid.getDevices().catch(() => []);
   const sd  = all.find(d => d.vendorId === VENDOR_ID && MODELS[d.productId]);
   if (sd) await _open(sd);
@@ -146,7 +159,22 @@ function _onInput(e) {
 
 function _nav(id, sub = 0) {
   if (id !== 'ograf') _grafikTplPage = 0;
-  _page = id; _sub = sub; _schedule();
+  _page = id; _sub = sub;
+  _onPageChange(id);
+  _schedule();
+}
+
+function _onPageChange(id) {
+  const assetExp  = document.getElementById('asset-exp-slot')?.style.display === 'flex';
+  const grafikExp = document.getElementById('grafik-exp-slot')?.style.display === 'flex';
+  if (id === 'assets' || id === 'still') {
+    if (!assetExp)  window.toggleAssetExpand?.();
+  } else if (id === 'ograf') {
+    if (!grafikExp) window.toggleGrafikExpand?.();
+  } else if (id === 'home') {
+    if (assetExp)   window.toggleAssetExpand?.();
+    if (grafikExp)  window.toggleGrafikExpand?.();
+  }
 }
 function _nextSub() { _sub++; _schedule(); }
 function _prevSub() { _sub = Math.max(0, _sub - 1); _schedule(); }
@@ -218,12 +246,20 @@ function _buildGrid() {
 }
 
 function _menuRow(cols) {
-  const row   = _eRow(cols);
-  const pages = [..._pages.values()].filter(p => p.id !== 'home' && (!p.condition || p.condition()));
+  const row         = _eRow(cols);
+  const pages       = [..._pages.values()].filter(p => p.id !== 'home' && (!p.condition || p.condition()));
+  const contentRows = Math.max(0, _model.rows - 2);
 
-  // Slot 0 ist immer für Home reserviert — verhindert Springen der anderen Tasten
+  // Slot 0: always Home — lit when already on home page.
+  // On Mini (no content area) the Home★ button doubles as the Preview toggle.
   if (_page === 'home') {
-    row[0] = _eBtn(); // leer aber fester Platzhalter
+    const prevExp = contentRows === 0 && document.getElementById('preview-exp-slot')?.classList.contains('active');
+    row[0] = {
+      icon:'🏠', label:'Home',
+      bg: '#1e3a8a',
+      ind: prevExp ? 'onair' : null,
+      action: contentRows === 0 ? (() => window.togglePlPreviewMax?.()) : null,
+    };
   } else {
     row[0] = { icon:'🏠', label:'Home', bg:'#0f172a', action:() => _nav('home') };
   }
@@ -304,8 +340,6 @@ function _playlistRow(cols) {
     ind: running ? (isLive ? 'live' : 'onair') : null,
   };
   row[5] = nextEv ? { icon:'⏩', label:_evName(nextEv), bg:'#1e293b', sublabel:'nächstes' } : _eBtn();
-  row[6] = { icon:'⏺', label:'Record',  bg:'#374151', action:() => document.getElementById('btn-record-panel')?.click() };
-  row[7] = { icon:'📺', label:'Preview', bg:'#374151', action:() => window.togglePreview?.() };
   return row;
 }
 
@@ -321,24 +355,42 @@ function _evName(ev) {
   return n.length > 10 ? n.slice(0, 9) + '…' : n;
 }
 
+// ── Home-page helpers ─────────────────────────────────────────────────────────
+
 // ── Built-in Pages ────────────────────────────────────────────────────────────
 
 // HOME
 SD.registerPage({
   id:'home', name:'Home', icon:'🏠', color:'#1e40af',
   getLayout({ cols, contentRows }) {
-    // Seiten-Navigation steht fix in der Menü-Zeile — hier nur Status anzeigen
-    const rows = [];
-    const sRow = _eRow(cols);
+    if (contentRows === 0) return []; // Mini: preview lives in menu slot 0, no content area
+
+    const rows    = [];
     const running = !!window.S?.playlist?.running;
-    sRow[0] = { icon: running ? '▶' : '⏸', label: running ? 'LÄUFT' : 'GESTOPPT', bg: running ? '#166534' : '#374151' };
+    const prevExp = document.getElementById('preview-exp-slot')?.classList.contains('active');
     const gfxCount = (window._grafikActiveMap?.size || 0);
-    if (gfxCount) sRow[1] = { icon:'📺', label:`${gfxCount} Grafik`, bg:'#78350f', ind:'onair' };
-    const scte = window._scte35State;
-    if (scte?.inBreak) sRow[2] = { icon:'🔴', label:'SCTE BREAK', bg:'#7f1d1d', ind:'onair' };
-    const brd = window.S?.master?.currentBranding;
-    if (brd) sRow[3] = { icon:'🎨', label: brd.replace(/\.[^.]+$/,''), bg:'#064e3b' };
-    rows.push(sRow);
+    const scte     = window._scte35State;
+    const brd      = window.S?.master?.currentBranding;
+
+    const previewBtn = {
+      icon:'📺', label:'Preview',
+      bg: prevExp ? '#1e3a8a' : '#374151',
+      ind: prevExp ? 'onair' : null,
+      action:() => window.togglePlPreviewMax?.(),
+    };
+
+    // Row 0: status + preview + countdown current + countdown next-live + grafik/scte/branding
+    const r0 = _eRow(cols);
+    r0[0] = { icon: running ? '▶' : '⏸', label: running ? 'LÄUFT' : 'GESTOPPT', bg: running ? '#166534' : '#374151' };
+    r0[1] = previewBtn;
+    // Slot 2+: status badges
+    const badges = [];
+    if (gfxCount) badges.push({ icon:'🖼', label:`${gfxCount} Grafik`, bg:'#78350f', ind:'onair' });
+    if (scte?.inBreak) badges.push({ icon:'🔴', label:'SCTE BREAK', bg:'#7f1d1d', ind:'onair' });
+    if (brd) badges.push({ icon:'🎨', label: brd.replace(/\.[^.]+$/,''), bg:'#064e3b' });
+    badges.forEach((b, i) => { if (2 + i < cols) r0[2 + i] = b; });
+    rows.push(r0);
+
     while (rows.length < contentRows) rows.push(_eRow(cols));
     return rows;
   }
@@ -449,7 +501,14 @@ SD.registerPage({
     const _dim = btn => ({ ...btn, bg:'#1a1a1a', textColor:'#3a3a3a', action: null });
     const takeBtn    = selTpl   ? { icon:'▶',  label:'Take',    bg:'#15803d', action:() => window.grafikShow?.()     } : _dim({ icon:'▶',  label:'Take'    });
     const takeoutBtn = selOnAir ? { icon:'⏹', label:'Takeout', bg:'#b91c1c', action:() => window.grafikHide?.()    } : _dim({ icon:'⏹', label:'Takeout' });
-    const contBtn    = selOnAir ? { icon:'⏩', label:'Cont.',   bg:'#1d4ed8', action:() => window.grafikContinue?.() } : _dim({ icon:'⏩', label:'Cont.'   });
+    // Continue nur anzeigen wenn das Template es unterstützt (analog html ui _updateGrafikPanelState).
+    // Single-Step-Ograf (stepCount <= 1): leerer Slot. Multi-Step / HTML-Template: aktiv oder gedimmt.
+    const _selMeta        = selTpl ? tpls.find(t => t.id === selTpl) : null;
+    const supportsContinue = !_selMeta || _selMeta.type !== 'ograf' || (_selMeta.stepCount ?? 1) > 1;
+    const contBtn    = supportsContinue
+      ? (selOnAir ? { icon:'⏩', label:'Cont.', bg:'#1d4ed8', action:() => window.grafikContinue?.() }
+                  : _dim({ icon:'⏩', label:'Cont.' }))
+      : _eBtn();
 
     const _tplBtn = (t) => {
       const onAir    = activeMap.has(t.id);
@@ -566,7 +625,10 @@ SD.registerPage({
 // SCTE-35 (only shown if plugin is active)
 SD.registerPage({
   id:'scte35', name:'SCTE-35', icon:'📡', color:'#6d28d9',
-  condition: () => !!window._plugins?.find(p => p.id === 'scte35' && p.enabled),
+  condition: () => {
+    const wrap = document.getElementById('scte35-section-wrap');
+    return !!(wrap && wrap.style.display !== 'none');
+  },
   getLayout({ cols, contentRows }) {
     const st  = window._scte35State || {};
     const rows = [];
@@ -822,7 +884,7 @@ async function _render() {
 }
 
 function _fp(def) {
-  return `${def.icon}|${def.label}|${def.sublabel}|${def.bg}|${def.ind}|${def._bgVer||0}`;
+  return `${def.icon}|${def.label}|${def.sublabel}|${def.bg}|${def.ind}|${def._bgVer||0}|${def._sig||''}`;
 }
 
 // ── Button Image Renderer ─────────────────────────────────────────────────────
@@ -863,37 +925,40 @@ async function _renderBtn(def) {
     ctx.fillRect(0, 0, size, 5);
   }
 
-  const hasIcon  = !!def.icon;
-  const hasLabel = !!def.label;
-  const hasSub   = !!def.sublabel;
+  if (def.drawFn) {
+    def.drawFn(ctx, size);
+  } else {
+    const hasIcon  = !!def.icon;
+    const hasLabel = !!def.label;
+    const hasSub   = !!def.sublabel;
 
-  // Vertical layout zones
-  const iconY  = size * (hasLabel ? (hasSub ? 0.30 : 0.36) : 0.50);
-  const labelY = size * (hasSub ? 0.62 : (hasIcon ? 0.74 : 0.50));
-  const subY   = size * 0.86;
+    const iconY  = size * (hasLabel ? (hasSub ? 0.30 : 0.36) : 0.50);
+    const labelY = size * (hasSub ? 0.62 : (hasIcon ? 0.74 : 0.50));
+    const subY   = size * 0.86;
 
-  if (hasIcon) {
-    ctx.font = `${Math.floor(size * (hasLabel ? 0.36 : 0.50))}px serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(def.icon, size / 2, iconY);
-  }
+    if (hasIcon) {
+      ctx.font = `${Math.floor(size * (hasLabel ? 0.36 : 0.50))}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(def.icon, size / 2, iconY);
+    }
 
-  if (hasLabel) {
-    ctx.font = `bold ${Math.max(9, Math.floor(size * 0.16))}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = def.textColor || '#ffffff';
-    ctx.fillText(_trunc(def.label, 10), size / 2, labelY);
-  }
+    if (hasLabel) {
+      ctx.font = `bold ${Math.max(9, Math.floor(size * 0.16))}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = def.textColor || '#ffffff';
+      ctx.fillText(_trunc(def.label, 10), size / 2, labelY);
+    }
 
-  if (hasSub) {
-    ctx.font = `${Math.max(8, Math.floor(size * 0.13))}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#9ca3af';
-    ctx.fillText(_trunc(def.sublabel, 12), size / 2, subY);
+    if (hasSub) {
+      ctx.font = `${Math.max(8, Math.floor(size * 0.13))}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#9ca3af';
+      ctx.fillText(_trunc(def.sublabel, 12), size / 2, subY);
+    }
   }
 
   if (_model.fmt === 'bmp') return _canvasToBMP(canvas, size);
@@ -1009,8 +1074,13 @@ async function _setBrightness(pct) {
   if (!_dev) return;
   const d = new Uint8Array(16);
   d[0] = 0x08; d[1] = Math.min(100, Math.max(0, pct));
-  try { await _dev.sendFeatureReport(0x03, d); }
-  catch(e) { console.warn('[SD] setBrightness failed:', e.message); }
+  const delays = [200, 500, 1000];
+  for (let i = 0; i <= delays.length; i++) {
+    try { await _dev.sendFeatureReport(0x03, d); return; } catch(e) {
+      if (i === delays.length) { console.warn('[SD] setBrightness failed:', e.message); return; }
+      await new Promise(r => setTimeout(r, delays[i]));
+    }
+  }
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -1026,7 +1096,7 @@ function _updToolbar() {
   if (!btn) return;
   btn.title = _dev
     ? `Stream Deck: ${_model.name} (${_model.cols}×${_model.rows}) — klicken zum Trennen`
-    : 'Stream Deck verbinden (WebHID, Chrome/Edge)';
+    : 'Stream Deck verbinden (WebHID, Chrome/Edge Desktop, nur localhost/HTTPS)';
   btn.style.opacity = _dev ? '1' : '0.5';
   btn.style.color   = _dev ? 'var(--accent)' : '';
 }

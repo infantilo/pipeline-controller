@@ -2923,8 +2923,8 @@ sse.addEventListener('grafik',e=>{
   sse.addEventListener('player-position',e=>{
     const{slotId,pos,dur}=JSON.parse(e.data);S.pos[slotId]={pos,dur};
     const pct=dur>0?Math.min(100,(pos/dur)*100):0;
-    document.getElementById(`pprog-${slotId}`).style.width=pct+'%';
-    document.getElementById(`pinfo-${slotId}`).textContent=`${ftFF(pos)} / ${ftFF(dur)}`;
+    const _ppg2=document.getElementById(`pprog-${slotId}`);if(_ppg2)_ppg2.style.width=pct+'%';
+    const _pin2=document.getElementById(`pinfo-${slotId}`);if(_pin2)_pin2.textContent=`${ftFF(pos)} / ${ftFF(dur)}`;
   });
   sse.addEventListener('playlist-ended',e=>{
     clearInterval(S._playingTimer);clearInterval(S._holdTimer);S._holdTimer=null;S._playingClipDur=0;S._playingFixEnd=null;
@@ -3735,7 +3735,8 @@ function _mxStartCountdown(asset, startMs) {
   const fps = S.config?.fps || 25;
   _mxTotalMs = durEvs.reduce((sum, e) => {
     // Support both plain seconds (number/string) and TC strings HH:MM:SS:FF
-    const d = fromTC(e.duration ?? e.eom ?? 0, fps) || 0;
+    // _clipDur (Sekunden) als Fallback für Videoclips, die kein explizites duration/eom tragen.
+    const d = fromTC(e.duration ?? e.eom, fps) || e._clipDur || 0;
     return sum + d * 1000;
   }, 0);
 
@@ -12903,9 +12904,11 @@ function _renderPluginConfigForm(p) {
       case 'boolean':
         html += `<input type="checkbox" name="${field.key}" ${val ? 'checked' : ''} style="margin-top:2px">`;
         break;
-      case 'number':
-        html += `<input type="number" name="${field.key}" value="${val}" min="${field.min??''}" max="${field.max??''}" style="flex:1;font-size:10px">`;
+      case 'number': {
+        const numVal = (val === '' || val == null || isNaN(Number(val))) ? '' : Number(val);
+        html += `<input type="number" name="${field.key}" value="${numVal}" min="${field.min??''}" max="${field.max??''}" style="flex:1;font-size:10px">`;
         break;
+      }
       case 'password':
         html += `<input type="password" name="${field.key}" value="${val}" autocomplete="new-password" style="flex:1;font-size:10px">`;
         break;
@@ -12922,7 +12925,7 @@ function _renderPluginConfigForm(p) {
         for (const [k, v] of Object.entries(kvObj)) {
           rows += `<tr>
             <td><input class="kv-key" oninput="kvtSync('${p.id}','${field.key}')" value="${_esc(String(k))}"></td>
-            <td><input class="kv-val" type="number" oninput="kvtSync('${p.id}','${field.key}')" value="${Number(v)}"></td>
+            <td><input class="kv-val" type="number" oninput="kvtSync('${p.id}','${field.key}')" value="${isNaN(Number(v)) ? '' : Number(v)}"></td>
             <td><button type="button" class="ib" style="color:var(--red)" onclick="this.closest('tr').remove();kvtSync('${p.id}','${field.key}')">✕</button></td>
           </tr>`;
         }

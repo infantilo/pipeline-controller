@@ -503,7 +503,16 @@ function _assetCut(assetId, overrideReturnMode) {
         newEvs.push({
           ...JSON.parse(JSON.stringify(curEv)),
           id: returnCopyId, som: resumeSom, eom: returnEom,
+          // Korrekte Restdauer: duration überschreiben damit _evDurSec/_calcDurMs die
+          // verbleibende Zeit zeigen statt der Gesamtdauer der Originaldatei.
+          // Nur wenn returnClipDur bekannt — sonst original-duration beibehalten.
+          ...(returnClipDur != null ? { duration: returnClipDur } : {}),
           _clipDur: returnClipDur ?? undefined,
+          // Grafik-Children NICHT mitführen: DVE-Images (delay=0) würden sofort nach
+          // dem Return erneut feuern und das Programmbild wieder einquetschen → "schwarz".
+          // Die Children des Originalclips waren vor dem Interrupt bereits aktiv — sie
+          // sollen im Return-Segment nicht nochmal gestartet werden.
+          children: undefined,
           startType: 'sequential', transition: 'cut',
           _isAsset: true, _isAssetReturn: true, _assetId: assetId, _assetLabel: asset.label || '',
         });
@@ -1094,8 +1103,22 @@ function _patchGroupMatrix(ev, rule) {
     if (pos != null) clipTC = _arFmtTC(pos, FPS);
   } catch {}
 
+  // Attempt setElementProperty with number[][] (programmatic GstValueArray build).
+  // If gst-kit rejects it (rare edge case), fall back to the GStreamer string format.
+  const _applyMatrix = (m) => {
+    try {
+      el.setElementProperty('matrix', m);
+      return true;
+    } catch (e1) {
+      if (!e1.message?.includes('convert')) throw e1;
+      log(`Audio-Resilienz: Array-Patch fehlgeschlagen (${e1.message}), versuche String-Format (${m.length}×${m[0]?.length})`, 'warn', 'playlist');
+      el.setElementProperty('matrix', AudioRouter._matrixToGst(m));
+      return true;
+    }
+  };
+
   try {
-    el.setElementProperty('matrix', matrix);
+    _applyMatrix(matrix);
     const tcPart = clipTC ? ` @ ${clipTC}` : '';
     log(`🔇 Audio-Resilienz FALLBACK${tcPart}: "${rule.watchGroup}" stumm → "${rule.fallbackGroup}" (${mixMethod}) [${ev.file ? path.basename(ev.file) : ev.id}]`, 'warn', 'playlist');
     const stKey = `${rule.watchGroup}:${rule.fallbackGroup}`;
@@ -1139,8 +1162,18 @@ function _restoreGroupMatrix(ev, watchGroupId, fallbackGroupId) {
     if (pos != null) clipTC = _arFmtTC(pos, FPS);
   } catch {}
 
+  const _applyMatrix = (m) => {
+    try {
+      el.setElementProperty('matrix', m);
+    } catch (e1) {
+      if (!e1.message?.includes('convert')) throw e1;
+      log(`Audio-Resilienz: Array-Restore fehlgeschlagen (${e1.message}), versuche String-Format (${m.length}×${m[0]?.length})`, 'warn', 'playlist');
+      el.setElementProperty('matrix', AudioRouter._matrixToGst(m));
+    }
+  };
+
   try {
-    el.setElementProperty('matrix', matrix);
+    _applyMatrix(matrix);
     const tcPart = clipTC ? ` @ ${clipTC}` : '';
     log(`✅ Audio-Resilienz RESTORED${tcPart}: "${watchGroupId}" erholt → Original-Matrix wiederhergestellt`, 'warn', 'playlist');
     const stKey = `${watchGroupId}:${fallbackGroupId || ''}`;
@@ -2487,7 +2520,9 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       const newPl  = playlist.playlist;
       const retIdx = newPl.findIndex(ev2 => ev2.id === savedReturnId);
       if (retIdx >= 0) {
-        newPl[retIdx] = { ...newPl[retIdx], som: savedReturnSom };
+        // children entfernen: DVE-Image-Children mit delay=0 würden sonst sofort beim
+        // Return feuern und das Programmbild wieder einquetschen ("video schwarz").
+        newPl[retIdx] = { ...newPl[retIdx], som: savedReturnSom, children: undefined };
         playlist.set(newPl);
         // jumpInterrupt: pre-cued direkt auf dem freien Slot während das letzte
         // Asset-Event noch im Speicher ist → kein Idle-Frame, kein Audio-Gap.
@@ -3987,6 +4022,8 @@ if (_httpsKey && _httpsCert) {
   try {
     const https      = require('https');
     const HTTPS_PORT = parseInt(_settings.httpsPort || process.env.HTTPS_PORT || String(PORT + 443));
+    if (!fs.existsSync(_httpsKey))  throw new Error(`Key-Datei nicht gefunden: ${_httpsKey}`);
+    if (!fs.existsSync(_httpsCert)) throw new Error(`Cert-Datei nicht gefunden: ${_httpsCert}`);
     const httpsServer = https.createServer(
       { key: fs.readFileSync(_httpsKey), cert: fs.readFileSync(_httpsCert) },
       _requestHandler
@@ -3994,8 +4031,10 @@ if (_httpsKey && _httpsCert) {
     httpsServer.listen(HTTPS_PORT, () =>
       log(`🔒 HTTPS → https://localhost:${HTTPS_PORT}`, 'info', 'system'));
   } catch(e) {
-    log(`HTTPS Fehler: ${e.message}`, 'error', 'system');
+    log(`❌ HTTPS konnte nicht gestartet werden: ${e.message}`, 'error', 'system');
   }
+} else {
+  log('ℹ HTTPS nicht konfiguriert (httpsKey/httpsCert in settings.json fehlen) — nur HTTP aktiv', 'info', 'system');
 }
 
 // ── State / Perf ───────────────────────────────────────────────────────────────
