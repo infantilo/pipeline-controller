@@ -24,17 +24,17 @@ let _opening = false;  // guard against double-open during async dev.open()
 const VENDOR_ID = 0x0fd9;
 // inOff = byte offset in WebHID inputreport data where button states start
 // mirror = physical key index uses mirrored column order
-// imgMirror = BMP pixel data needs horizontal flip
+// rot90 = image needs 90° CCW rotation + vertical flip before BMP encode (Mini panel orientation)
 // For 'bmp' models the Mini write protocol differs from MK.2
 const MODELS = {
-  0x006d: { name:'Stream Deck MK.2',      cols:5, rows:3, imgSize:72,  fmt:'jpeg', inOff:3, mirror:false, imgMirror:false, proto:'mk2',  flip:true  },
-  0x006c: { name:'Stream Deck XL',        cols:8, rows:4, imgSize:96,  fmt:'jpeg', inOff:3, mirror:false, imgMirror:false, proto:'mk2',  flip:true  },
-  0x008f: { name:'Stream Deck XL v2',     cols:8, rows:4, imgSize:96,  fmt:'jpeg', inOff:3, mirror:false, imgMirror:false, proto:'mk2',  flip:true  },
-  0x0084: { name:'Stream Deck +',         cols:4, rows:2, imgSize:120, fmt:'jpeg', inOff:3, mirror:false, imgMirror:false, proto:'mk2',  flip:true  },
-  0x0063: { name:'Stream Deck Mini',      cols:3, rows:2, imgSize:80,  fmt:'bmp',  inOff:0, mirror:true,  imgMirror:true,  proto:'mini', flip:false },
-  0x0090: { name:'Stream Deck Mini MK.2', cols:3, rows:2, imgSize:80,  fmt:'jpeg', inOff:3, mirror:false, imgMirror:false, proto:'mk2',  flip:true  },
-  0x009a: { name:'Stream Deck Neo',       cols:4, rows:2, imgSize:96,  fmt:'jpeg', inOff:3, mirror:false, imgMirror:false, proto:'mk2',  flip:true  },
-  0x0060: { name:'Stream Deck MK.1',      cols:5, rows:3, imgSize:72,  fmt:'bmp',  inOff:1, mirror:true,  imgMirror:false, proto:'mk1',  flip:false },
+  0x006d: { name:'Stream Deck MK.2',      cols:5, rows:3, imgSize:72,  fmt:'jpeg', inOff:3, mirror:false, proto:'mk2',  flip:true  },
+  0x006c: { name:'Stream Deck XL',        cols:8, rows:4, imgSize:96,  fmt:'jpeg', inOff:3, mirror:false, proto:'mk2',  flip:true  },
+  0x008f: { name:'Stream Deck XL v2',     cols:8, rows:4, imgSize:96,  fmt:'jpeg', inOff:3, mirror:false, proto:'mk2',  flip:true  },
+  0x0084: { name:'Stream Deck +',         cols:4, rows:2, imgSize:120, fmt:'jpeg', inOff:3, mirror:false, proto:'mk2',  flip:true  },
+  0x0063: { name:'Stream Deck Mini',      cols:3, rows:2, imgSize:80,  fmt:'bmp',  inOff:0, mirror:false, rot90:true, proto:'mini', flip:false },
+  0x0090: { name:'Stream Deck Mini MK.2', cols:3, rows:2, imgSize:80,  fmt:'bmp',  inOff:0, mirror:false, rot90:true, proto:'mini', flip:false },
+  0x009a: { name:'Stream Deck Neo',       cols:4, rows:2, imgSize:96,  fmt:'jpeg', inOff:3, mirror:false, proto:'mk2',  flip:true  },
+  0x0060: { name:'Stream Deck MK.1',      cols:5, rows:3, imgSize:72,  fmt:'bmp',  inOff:1, mirror:true,  proto:'mk1',  flip:false },
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -124,6 +124,7 @@ async function _open(dev) {
   _prints = Array(n).fill('');
   _acts   = Array(n).fill(null);
   _dev.addEventListener('inputreport', _onInput);
+  await _resetKeyStream();
   await _setBrightness(70);
   _schedule();
   _updToolbar();
@@ -961,7 +962,7 @@ async function _renderBtn(def) {
     }
   }
 
-  if (_model.fmt === 'bmp') return _canvasToBMP(canvas, size);
+  if (_model.fmt === 'bmp') return _canvasToBMP(_model.rot90 ? _rotate90ccw(canvas, size) : canvas, size);
 
   // JPEG — Gen2 hardware expects image rotated 180°
   let src = canvas;
@@ -976,6 +977,26 @@ async function _renderBtn(def) {
   }
   const blob = await new Promise(res => src.toBlob(res, 'image/jpeg', 0.85));
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+// Rotate 90° CCW + flip vertical — matches python-elgato-streamdeck's
+// image.rotate(90) + transpose(FLIP_TOP_BOTTOM) for the Mini panel.
+function _rotate90ccw(canvas, size) {
+  const rot = document.createElement('canvas');
+  rot.width = rot.height = size;
+  const rc = rot.getContext('2d');
+  rc.translate(size / 2, size / 2);
+  rc.rotate(-Math.PI / 2);
+  rc.translate(-size / 2, -size / 2);
+  rc.drawImage(canvas, 0, 0);
+
+  const flip = document.createElement('canvas');
+  flip.width = flip.height = size;
+  const fc = flip.getContext('2d');
+  fc.translate(0, size);
+  fc.scale(1, -1);
+  fc.drawImage(rot, 0, 0);
+  return flip;
 }
 
 // ── BMP Encoder (Mini / MK.1) ─────────────────────────────────────────────────
@@ -1000,8 +1021,7 @@ function _canvasToBMP(canvas, size) {
   let off = 54;
   for (let r = size - 1; r >= 0; r--) {      // bottom-to-top rows
     for (let c = 0; c < size; c++) {
-      const sc = _model.imgMirror ? size - 1 - c : c;  // horizontal flip for Mini
-      const si = (r * size + sc) * 4;
+      const si = (r * size + c) * 4;
       buf[off++] = imgD[si+2]; // B
       buf[off++] = imgD[si+1]; // G
       buf[off++] = imgD[si+0]; // R
@@ -1046,8 +1066,10 @@ async function _sendImgMK2(physIdx, data) {
 }
 
 async function _sendImgMini(physIdx, data) {
-  // Mini protocol: 16-byte header per packet, payload = 1007 bytes
-  const PAYLOAD = 1007;
+  // Mini protocol: reportId 0x02 is sent by sendReport() itself, NOT part of `data`.
+  // Remaining header (15 bytes): [cmd=0x01, page, 0x00, isLast, key(1-based), 10×0x00]
+  const HEADER  = 15;
+  const PAYLOAD = 1023 - HEADER; // 1008
   let pkt = 0, off = 0;
   while (off < data.length || pkt === 0) {
     const chunk  = data.slice(off, off + PAYLOAD);
@@ -1055,14 +1077,13 @@ async function _sendImgMini(physIdx, data) {
     const isLast = off >= data.length;
 
     const buf = new Uint8Array(1023);
-    buf[0] = 0x02;
-    buf[1] = 0x01;
-    buf[2] = pkt & 0xff;   // page number (0-indexed here, some implementations use 1-indexed)
-    buf[3] = 0x00;
-    buf[4] = isLast ? 1 : 0;
-    buf[5] = physIdx;
-    // buf[6..15] = 0x00
-    buf.set(chunk, 16);
+    buf[0] = 0x01;
+    buf[1] = pkt & 0xff;   // page number
+    buf[2] = 0x00;
+    buf[3] = isLast ? 1 : 0;
+    buf[4] = physIdx + 1;  // 1-based key index
+    // buf[5..14] = 0x00
+    buf.set(chunk, HEADER);
 
     await _dev.sendReport(0x02, buf);
     pkt++;
@@ -1070,13 +1091,30 @@ async function _sendImgMini(physIdx, data) {
   }
 }
 
+// Clears any in-progress image transfer left over on the device firmware — required before
+// the first set_key_image after open(), otherwise the device ignores writes and keeps
+// showing its standby/default logo. Protocol-specific, mirrors python-elgato-streamdeck.
+async function _resetKeyStream() {
+  if (!_dev) return;
+  try {
+    if (_model.proto === 'mini') {
+      await _dev.sendReport(0x02, new Uint8Array(1023)); // all-zero OUT report
+    } else if (_model.proto === 'mk2') {
+      await _dev.sendReport(0x02, new Uint8Array(1023));
+    }
+  } catch(e) { console.warn('[SD] resetKeyStream failed:', e.message); }
+}
+
 async function _setBrightness(pct) {
   if (!_dev) return;
-  const d = new Uint8Array(16);
-  d[0] = 0x08; d[1] = Math.min(100, Math.max(0, pct));
+  const p = Math.min(100, Math.max(0, pct));
+  const d = _model.proto === 'mini'
+    ? Uint8Array.of(0x55, 0xaa, 0xd1, 0x01, p, 0,0,0,0,0,0,0,0,0,0,0)
+    : Uint8Array.of(0x08, p, ...new Array(14).fill(0));
+  const reportId = _model.proto === 'mini' ? 0x05 : 0x03;
   const delays = [200, 500, 1000];
   for (let i = 0; i <= delays.length; i++) {
-    try { await _dev.sendFeatureReport(0x03, d); return; } catch(e) {
+    try { await _dev.sendFeatureReport(reportId, d); return; } catch(e) {
       if (i === delays.length) { console.warn('[SD] setBrightness failed:', e.message); return; }
       await new Promise(r => setTimeout(r, delays[i]));
     }

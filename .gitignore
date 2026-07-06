@@ -96,3 +96,12 @@ releases/
 # Claude Code settings (project-specific)
 .claude/
 Trace-20260601T141143.json
+
+# TLS-Zertifikate (lokal generiert, niemals committen)
+cert.pem
+key.pem
+
+# Multi-Channel-Betriebsdaten / Supervisor-Laufzeitstatus
+channels/
+channels.json
+.supervisor-state.json

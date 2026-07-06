@@ -491,12 +491,19 @@ function _assetCut(assetId, overrideReturnMode) {
         // Player clip: resume at exact file position with trimmed EOM
         const origSomSec    = _fromTC(curEv.som ?? 0, fps) || 0;
         const origEomDurSec = curEv.eom != null ? (_fromTC(curEv.eom, fps) || 0) : null;
-        const origEomAbsSec = origEomDurSec != null ? origSomSec + origEomDurSec : null;
+        // Absolute stop position in the file. Explicit eom is a duration-from-som, so it's
+        // added to origSomSec. No eom means "play to natural file end" — that end position
+        // is the full unseeked file duration (same convention as the UI's duration fallback),
+        // NOT origSomSec+duration. Without this fallback, returnEom stayed null for the very
+        // common no-eom clips, so the return copy fell back to queryDuration() (full, untrimmed
+        // file length) and held on the last frame for exactly the pre-interrupt elapsed time.
+        const fullFileDur   = curEv._clipDur ?? library.get(curEv.file)?.duration ?? null;
+        const origEomAbsSec = origEomDurSec != null ? origSomSec + origEomDurSec : fullFileDur;
         let returnEom = null;
         if (origEomAbsSec != null && origEomAbsSec > resumeSom) {
           returnEom = origEomAbsSec - resumeSom;
         }
-        const origClipDur  = curEv._clipDur ?? origEomDurSec ?? null;
+        const origClipDur  = curEv._clipDur ?? origEomDurSec ?? fullFileDur ?? null;
         const returnClipDur = origClipDur != null ? Math.max(0, origClipDur - (resumeSom - origSomSec)) : null;
         returnCopyId = genId();
         newIds.add(returnCopyId);
@@ -1255,6 +1262,22 @@ const masterOpts = {
   gpuDecode:        _settings.gpuDecode     ?? undefined,
 };
 
+// ── Pipeline-Clock-Strategie ──────────────────────────────────────────────────
+// gst-kit hat KEINE Clock-API (kein setClock/useClock) — PTP-Sync geht daher nur
+// über GStreamers Sink-Clock-Auto-Selection: steckt ein DeckLink-Sink in der
+// Master-Pipeline und ist er der einzige Clock-Provider (alle pulsesinks laufen
+// provide-clock=false), wählt GStreamer automatisch die Karten-Clock (IP100: PTP-locked).
+// Auto-Aktivierung: PGM-Video-Sink ist DeckLink + kein explizit konfigurierter
+// clockProvider in audio_config (Default 'audiotestsrc') → effektiv 'ptp-decklink'.
+// Explizit konfigurierte Provider werden NIE stillschweigend überschrieben.
+const ClockStrategy = require('./lib/ClockStrategy');
+let _clockProviderEffective = audioGroupConfig?.clock?.provider || 'audiotestsrc';
+if (_clockProviderEffective === 'audiotestsrc' && /decklinkvideosink/.test(masterOpts.videoSink || '')) {
+  _clockProviderEffective = 'ptp-decklink';
+  log('Pipeline-Clock: DeckLink (PTP-locked) — automatisch, da PGM-Video-Sink DeckLink ist', 'info', 'master');
+}
+masterOpts.clockStrategy = new ClockStrategy({ ...(audioGroupConfig?.clock || {}), provider: _clockProviderEffective });
+
 // ── VoiceoverEngine ───────────────────────────────────────────────────────────
 const VoiceoverEngine  = require('./lib/VoiceoverEngine');
 const _voGroupIds      = audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'];
@@ -1476,20 +1499,78 @@ pluginHost.on('setEventProps',(eventId, props) => {
 });
 
 // Marina-Sync (und andere Plugins) können die Playlist komplett ersetzen
-pluginHost.on('playlist-set', ({ events, startIndex, somOffset }) => {
+// sync = { targetEventId, schedStartMs, toleranceSec } — optional, für framegenauen
+// On-Air-Abgleich (siehe plugins/marina-sync). somOffset wird bei Vorhandensein von
+// sync.schedStartMs zum Ausführungszeitpunkt frisch berechnet (kompensiert Debounce-/
+// Parse-Latenz zwischen Plugin-Berechnung und Server-Ausführung).
+function _nowMsMidnight() {
+  const d = new Date();
+  return d.getHours() * 3600000 + d.getMinutes() * 60000 + d.getSeconds() * 1000 + d.getMilliseconds();
+}
+// Differenz "jetzt − schedStartMs" in ms, Mitternachts-Wrap kompensiert.
+function _msSinceSched(schedStartMs) {
+  let diff = _nowMsMidnight() - schedStartMs;
+  if (diff < -12 * 3600000) diff += 24 * 3600000;
+  return diff;
+}
+// Setzt ev.som additiv relativ zum ORIGINAL-som (verhindert Akkumulation bei wiederholten Aufrufen).
+function _applySomOffset(ev, offsetSec) {
+  if (ev._somBase === undefined) ev._somBase = (typeof ev.som === 'number' ? ev.som : 0);
+  ev.som = ev._somBase + Math.max(0, offsetSec || 0);
+}
+
+pluginHost.on('playlist-set', ({ events, startIndex, somOffset, sync }) => {
   log(`Marina-Sync: ${events.length} Events geladen`, 'info', 'system');
   playlist.set(events);
-  // Auto-Start: nur wenn Playlist aktuell nicht läuft UND Plugin explizit startIndex liefert
-  if (!playlist._running && typeof startIndex === 'number' && startIndex >= 0 && startIndex < playlist.playlist.length) {
-    // SOM-Offset für On-Air-Sync auf das Einsteige-Event anwenden
-    if (typeof somOffset === 'number' && somOffset > 0) {
-      const ev = playlist.playlist[startIndex];
-      if (ev) ev.som = Math.max(0, (typeof ev.som === 'number' ? ev.som : 0) + somOffset);
+
+  if (!playlist._running) {
+    // Auto-Start: nur wenn Playlist aktuell nicht läuft UND Plugin explizit startIndex liefert
+    if (typeof startIndex === 'number' && startIndex >= 0 && startIndex < playlist.playlist.length) {
+      let offset = (typeof somOffset === 'number') ? somOffset : 0;
+      // Framegenauer: SOM-Offset zum Startzeitpunkt aus sync.schedStartMs neu berechnen (statt
+      // vorberechnetem Wert des Plugins zu vertrauen — kompensiert Verarbeitungs-Latenz).
+      if (sync && typeof sync.schedStartMs === 'number') {
+        offset = Math.max(0, _msSinceSched(sync.schedStartMs) / 1000);
+      }
+      if (offset > 0) {
+        const ev = playlist.playlist[startIndex];
+        if (ev) _applySomOffset(ev, offset);
+      }
+      playlist.start(startIndex);
+      log(`Marina-Sync: Start ab Event ${startIndex + 1} (SOM-Offset ${offset.toFixed(1)}s)`, 'info', 'system');
+      broadcast('state', getState());
     }
-    playlist.start(startIndex);
-    log(`Marina-Sync: Start ab Event ${startIndex + 1} (SOM-Offset ${somOffset?.toFixed(1) ?? 0}s)`, 'info', 'system');
-    broadcast('state', getState());
+    return;
   }
+
+  // Playlist läuft bereits — nur bei explizitem Sync-Ziel eingreifen (kein Auto-Restart).
+  if (!sync || !sync.targetEventId || typeof sync.schedStartMs !== 'number') return;
+
+  const toleranceSec = (typeof sync.toleranceSec === 'number' && sync.toleranceSec >= 0) ? sync.toleranceSec : 2;
+  const sollOffset    = _msSinceSched(sync.schedStartMs) / 1000;
+  const onAir         = playlist.playlist[playlist.currentIndex];
+
+  if (onAir && onAir.id === sync.targetEventId) {
+    const st        = getState();
+    const istOffset = (st.playing?.elapsedMs || 0) / 1000 + (onAir._somBase ?? (typeof onAir.som === 'number' ? onAir.som : 0));
+    const delta     = Math.abs(istOffset - sollOffset);
+    if (delta <= toleranceSec) {
+      log(`Marina-Sync: bereits synchron (Δ ${delta.toFixed(1)}s)`, 'info', 'system');
+      return;
+    }
+  }
+
+  const targetIndex = playlist.playlist.findIndex(e => e.id === sync.targetEventId);
+  if (targetIndex < 0) {
+    log(`Marina-Sync: Sync-Ziel-Event nicht gefunden (id=${sync.targetEventId}) — kein Sprung`, 'warn', 'system');
+    return;
+  }
+
+  const targetEv = playlist.playlist[targetIndex];
+  _applySomOffset(targetEv, Math.max(0, sollOffset));
+  playlist.forceJump(targetIndex);
+  log(`Marina-Sync: Umstieg auf Event ${targetIndex + 1}/${playlist.playlist.length} (SOM-Offset ${Math.max(0, sollOffset).toFixed(1)}s)`, 'info', 'system');
+  broadcast('state', getState());
 });
 
 // ── RecordEngine ──────────────────────────────────────────────────────────────
@@ -1514,9 +1595,20 @@ const outputEngine = new OutputEngine({
   outputs: _settings.extraOutputs || [],
   log:     (msg, lvl) => log(msg, lvl, 'output'),
 });
-outputEngine.on('started', d => broadcast('output-started', d));
-outputEngine.on('stopped', d => broadcast('output-stopped', d));
-outputEngine.on('error',   d => broadcast('output-error', d));
+outputEngine.on('started',    d => broadcast('output-started', d));
+outputEngine.on('stopped',    d => broadcast('output-stopped', d));
+outputEngine.on('error',      d => broadcast('output-error', d));
+outputEngine.on('restarting', d => broadcast('output-restarting', d));
+// Clock-Domänen-Warnung: Zusatz-Ausgänge laufen als EIGENE gst-kit-Pipelines mit
+// eigener Clock (gst-kit hat keine Clock-API — die DeckLink-Clock der Master-Pipeline
+// ist nicht auf andere Pipelines übertragbar). Ein DeckLink-Zusatz-Ausgang ohne
+// DeckLink-PGM-Sink tickt daher in einer anderen Clock-Domäne → Drift/Frame-Repeats.
+{
+  const _hasDlExtra = (_settings.extraOutputs || []).some(o => o.enabled && o.sink === 'decklink');
+  if (_hasDlExtra && !/decklinkvideosink/.test(masterOpts.videoSink || '')) {
+    log('DeckLink-Zusatz-Ausgang aktiv, aber PGM-Video-Sink ist kein DeckLink: Ausgang läuft in eigener Clock-Domäne (Drift/Frame-Repeats möglich). Für framegenaue PTP-Ausgabe den Video-Sink auf DeckLink stellen.', 'warn', 'output');
+  }
+}
 outputEngine.startEnabled();
 
 // ── Test-RTSP-Server ─────────────────────────────────────────────────────────
@@ -2974,6 +3066,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       maxClients:        parseInt(_settings.maxClients || '0') || 0,
       videoDelayMs:      _settings.videoDelayMs      ?? 0,
       audioDelayMs:      _settings.audioDelayMs      || {},
+      decklinkOutputInterlaced: !!_settings.decklinkOutputInterlaced,
     });
   }
   if (meth === 'GET'  && p === '/api/config/sinks') {
@@ -2985,6 +3078,26 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     masterOpts.videoSink = b.sink; _settings.videoSink = b.sink; saveSettings(_settings);
     _logConfigDiff(req, 'videosink', _before, _settings, ['videoSink']);
     await master.stop(); await ensureMaster(); return json(res, { ok: true, sink: b.sink });
+  }
+  // DeckLink interlaced Output (1080i50 statt 1080p25/50) — Setting + ggf. Mode-Umschaltung
+  if (meth === 'POST' && p === '/api/config/decklink-interlaced') {
+    const b = await parseBody(req);
+    const _before = { decklinkOutputInterlaced: !!_settings.decklinkOutputInterlaced };
+    _settings.decklinkOutputInterlaced = !!b.enabled;
+    saveSettings(_settings);
+    _logConfigDiff(req, 'decklink-interlaced', _before, _settings, ['decklinkOutputInterlaced']);
+    // Läuft PGM bereits auf DeckLink: mode= im videoSink-String an neue Tabelle anpassen
+    // (progressive ↔ interlaced) und Master neu starten.
+    if (/decklinkvideosink/.test(masterOpts.videoSink || '')) {
+      const dlMode = _decklinkModeForCurrentRes();
+      if (dlMode && /\bmode=[\w-]+/.test(masterOpts.videoSink)) {
+        masterOpts.videoSink = masterOpts.videoSink.replace(/\bmode=[\w-]+/, `mode=${dlMode}`);
+        _settings.videoSink  = masterOpts.videoSink;
+        saveSettings(_settings);
+        await master.stop(); masterStarted = false; await ensureMaster();
+      }
+    }
+    return json(res, { ok: true, enabled: !!_settings.decklinkOutputInterlaced, videoSink: masterOpts.videoSink || null });
   }
   if (meth === 'POST' && p === '/api/config/audiosink') {
     const b = await parseBody(req); if (!b.sink) return json(res, { ok: false, error: 'sink required' }, 400);
@@ -3435,9 +3548,18 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     '1920x1080@50': '1080p50',
     '1280x720@50':  '720p50',
   };
+  // Setting decklinkOutputInterlaced: 1080er-Auflösungen als 1080i50 ausgeben
+  // (interlace-Kette in MasterPipeline, siehe lib/InterlaceChain.js).
+  // 720p bleibt progressiv — 720i existiert nicht als SDI-Norm.
+  const DECKLINK_MODE_BY_RES_INTERLACED = {
+    '1920x1080@25': '1080i50',
+    '1920x1080@50': '1080i50',
+    '1280x720@50':  '720p50',
+  };
   function _decklinkModeForCurrentRes() {
     const w = masterOpts.width || 1920, h = masterOpts.height || 1080, fps = masterOpts.fps || 25;
-    return DECKLINK_MODE_BY_RES[`${w}x${h}@${fps}`] || null;
+    const table = _settings.decklinkOutputInterlaced ? DECKLINK_MODE_BY_RES_INTERLACED : DECKLINK_MODE_BY_RES;
+    return table[`${w}x${h}@${fps}`] || null;
   }
 
   // DeckLink-Ausgänge (Programm-Output) — getrennt von /api/devices (Live-Quellen),
@@ -4052,7 +4174,7 @@ function getState() {
     slots:    { onAir: playlist._onAirSlot, idle: playlist._idleSlot },
     playlist: { running: playlist._running, paused: playlist._paused, currentIndex: playlist.currentIndex, length: playlist.playlist.length },
     playing:  _currentPlaying ? { ..._currentPlaying, elapsedMs: Date.now() - _currentPlaying.startMs } : null,
-    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, mxlDomain: _settings.mxlDomain||'/dev/shm/mxl', extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'] },
+    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, mxlDomain: _settings.mxlDomain||'/dev/shm/mxl', extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'], decklinkOutputInterlaced: !!_settings.decklinkOutputInterlaced },
     avSync:   master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs??0, audioMs: _settings.audioDelayMs||{} },
     grafik:   { active: activeGrafiks },
     audioTrackFallbackActive: Array.from(_activeTrackFallbacks.values()),

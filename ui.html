@@ -1394,6 +1394,13 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         </select>
         <div style="font-size:9px;color:var(--dim);margin-top:3px">Niedrigere Auflösung = weniger CPU auf Crostini. Neustart des Masters erforderlich.</div>
       </div>
+      <div class="fld">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="cfg-dl-interlaced" onchange="cfgSaveDecklinkInterlaced(this.checked)">
+          <span data-i18n="cfg.video.dlInterlaced">DeckLink interlaced (1080i50)</span>
+        </label>
+        <div style="font-size:9px;color:var(--dim);margin-top:3px">1080er-PGM als 1080i50 statt 1080p ausgeben (SDI-Norm für klassische Zuspielwege). Nur wirksam bei DeckLink-Video-Sink; Master wird neu gestartet.</div>
+      </div>
 
       <div class="sep" style="margin:12px 0 10px"></div>
       <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px" data-i18n="cfg.video.conversion">Format-Konvertierung</div>
@@ -7896,6 +7903,9 @@ function openSettings(){
     if (sqSel) sqSel.value = String(cfg.scaleMethod ?? 1);
     const diSel = document.getElementById('cfg-deinterlace-mode');
     if (diSel) diSel.value = cfg.deinterlaceMode || 'auto';
+    // DeckLink interlaced Output
+    const dliChk = document.getElementById('cfg-dl-interlaced');
+    if (dliChk) dliChk.checked = !!cfg.decklinkOutputInterlaced;
     cfgIdleSourceChange();
     // Debug-Tab-Status
     document.getElementById('cfg-debug-enabled').checked  = S.debugEnabled  ?? false;
@@ -8002,6 +8012,28 @@ async function saveSettings(){
   else showToast('Einstellungen gespeichert ✓');
 
   closeModal('settings-modal');
+}
+
+// DeckLink interlaced Output (1080i50) — speichert sofort; Server passt bei
+// laufendem DeckLink-PGM-Sink den mode= an und startet den Master neu.
+async function cfgSaveDecklinkInterlaced(enabled){
+  try {
+    const resp = await apiFetch('/api/config/decklink-interlaced', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ enabled }) });
+    const r = resp ? await resp.json() : null;
+    showToast(enabled ? 'DeckLink interlaced (1080i50) aktiviert' : 'DeckLink interlaced deaktiviert');
+    // videoSink-String kann geändert worden sein (mode=1080p25 ↔ mode=1080i50)
+    if (r?.videoSink) {
+      const vSel = document.getElementById('cfg-video-sink');
+      if (vSel) {
+        if (![...vSel.options].some(o=>o.value===r.videoSink)) {
+          const o = document.createElement('option');
+          o.value = r.videoSink; o.dataset.decklink = '1'; o.textContent = r.videoSink;
+          vSel.appendChild(o);
+        }
+        vSel.value = r.videoSink;
+      }
+    }
+  } catch(e){ showToast('⚠ Speichern fehlgeschlagen: '+e.message); }
 }
 
 function _getBackupDirsFromUI(){
@@ -8143,7 +8175,7 @@ async function saveServerSettings(){
 // ── Zusatz-Ausgänge (Downconvert / Cleanfeed / DeckLink-Hardware-Sinks) ──────
 let _outputRows = [];
 let _outputDecklinkDevices = null;  // null = noch nicht gesucht; [] = gesucht, keine gefunden
-const OUTPUT_DECKLINK_MODES = ['pal-p','720p50','720p5994','1080p25','1080p2997','1080p50'];
+const OUTPUT_DECKLINK_MODES = ['pal-p','720p50','720p5994','1080p25','1080p2997','1080p50','1080i50','1080i5994','1080i60','pal','ntsc'];
 
 function _loadOutputsTab(){
   _outputRows = (S.config?.extraOutputs || []).map(o => ({...o}));

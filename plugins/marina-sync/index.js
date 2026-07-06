@@ -5,46 +5,23 @@
  *
  * Liest das aktuellste .mpl pro Channel-ID aus einem Watchfolder.
  * Dateien werden NIEMALS gelockt (readFileSync öffnet/liest/schließt sofort).
- * On-Air-Sync: Berechnet Einsteigepunkt wenn unsere Playlist noch nicht läuft
- * aber Marina bereits sendet (state="Running" im MPL).
+ * On-Air-Sync: Berechnet Einsteigepunkt/Resync-Ziel aus Marina-Status
+ * (state="Running" im MPL, per parseMarina — reine JS, kein python3 mehr).
+ *
+ * Stabile IDs: Events werden über reconcileKey mit der laufenden Playlist
+ * gematcht — bekommen bei Übereinstimmung deren `id`. Dadurch bleibt in
+ * PlaylistEngine.set() der _state (playing/done/…) erhalten und das
+ * On-Air-Event behält seine Identität (kein Re-Cue nötig).
+ *
+ * Resync statt Blind-Setzen: Läuft unsere Playlist bereits synchron zum
+ * Marina-Running-Event (innerhalb syncToleranceSec), wird NICHT gesprungen —
+ * das laufende On-Air-Signal bleibt ungestört. Nur bei echter Abweichung
+ * (Umstieg auf anderes Event oder Zeit-Drift > Toleranz) sendet der Server
+ * einen forceJump (siehe server.js pluginHost.on('playlist-set')).
  */
 
 const fs   = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
-
-// Python: Scheduling-State je Event (ms seit Mitternacht, lokale Zeit)
-const _STATE_SCRIPT = `
-import sys, json, re, xml.etree.ElementTree as ET
-
-def ms_midnight(dt):
-    if not dt: return None
-    m = re.search(r'T(\\d{2}):(\\d{2}):(\\d{2})', dt)
-    if not m: return None
-    return int(m.group(1))*3600000 + int(m.group(2))*60000 + int(m.group(3))*1000
-
-try:
-    root = ET.fromstring(sys.stdin.read())
-except Exception:
-    print(json.dumps([])); sys.exit(0)
-
-el = root.find('eventList')
-out = []
-for ev in (el or []):
-    if ev.get('enabled','true').lower() == 'false': continue
-    t = ev.get('type','')
-    if t not in ('PrimaryVideo','Live','Comment','PlaylistStart','PlaylistEnd'): continue
-    s = ev.find('state')
-    if s is None: continue
-    out.append({
-        'uid':   ev.get('uid',''),
-        'type':  t,
-        'state': s.get('state',''),
-        'start': ms_midnight(s.get('schedStartTime')),
-        'end':   ms_midnight(s.get('schedEndTime')),
-    })
-print(json.dumps(out))
-`;
 
 // ── Plugin-Manifest ────────────────────────────────────────────────────────────
 exports.meta = {
@@ -68,7 +45,11 @@ exports.meta = {
     },
     {
       key: 'onAirSync', label: 'On-Air Sync', type: 'boolean', default: true,
-      help: 'Einsteigepunkt aus Marina-Status berechnen (state=Running)',
+      help: 'Einsteigepunkt/Resync-Ziel aus Marina-Status berechnen (state=Running)',
+    },
+    {
+      key: 'syncToleranceSec', label: 'Sync-Toleranz (s)', type: 'number', default: 2,
+      help: 'Solange unsere Playlist innerhalb dieser Toleranz synchron zu Marina läuft, wird das On-Air-Event NICHT unterbrochen. Erst bei größerer Abweichung oder Event-Wechsel wird gesprungen.',
     },
     {
       key: 'pollIntervalSec', label: 'Poll-Intervall (s)', type: 'number', default: 30,
@@ -80,13 +61,15 @@ exports.meta = {
 
 // ── Plugin-State ───────────────────────────────────────────────────────────────
 let _api, _cfg = {};
-let _watcher    = null;
-let _pollTimer  = null;
-let _debounce   = null;
-let _lastMtime  = 0;
-let _lastFile   = null;
-let _processing = false;
-let _statusData = {};
+let _watcher      = null;
+let _pollTimer    = null;
+let _debounce     = null;
+let _lastMtime    = 0;
+let _lastFile     = null;
+let _processing   = false;
+let _recheckAfter = false;   // Datei änderte sich während _processing lief → danach erneut prüfen
+const MAX_RETRIES = 5;       // Parse-Retries bei abgeschnittener/unvollständiger Datei (2s Abstand)
+let _statusData   = {};
 
 function _log(msg, level = 'info') { _api?.log?.(level, msg); }
 function _setStatus(state, extra = {}) {
@@ -146,69 +129,73 @@ function _findLatest() {
 
 // ── On-Air Sync ────────────────────────────────────────────────────────────────
 
-/** Extrahiert State + Timing pro Event aus dem MPL XML (zweiter Python-Pass). */
-function _extractState(xmlString) {
-  const r = spawnSync('python3', ['-c', _STATE_SCRIPT], {
-    input: xmlString, encoding: 'utf8', timeout: 20000,
-  });
-  if (r.error || r.status !== 0) {
-    _log(`State-Extraktion: ${r.error?.message || (r.stderr || '').slice(0, 200)}`, 'warn');
-    return [];
-  }
-  try { return JSON.parse(r.stdout); }
-  catch { return []; }
-}
-
 /**
- * Bestimmt in welches Event und an welcher Position wir einsteigen müssen.
- * stateItems und events haben dieselbe Reihenfolge (beide filtern disabled=false).
- * Gibt { startIndex, somOffset } zurück oder null.
+ * Bestimmt das Marina-Event, das gerade "on air" ist (source player/live).
+ * Priorität 1: _marinaState === 'Running'. Priorität 2: Zeitfenster
+ * (_schedStartMs ≤ now ≤ _schedEndMs) — Fallback falls Marina den State
+ * nicht rechtzeitig aktualisiert hat.
  */
-function _calcOnAirSync(events, stateItems) {
-  if (!stateItems.length || !events.length) return null;
+function _findRunningEvent(events) {
+  const candidates = events.filter(e => e.source === 'player' || e.source === 'live');
+  if (!candidates.length) return null;
+
+  let hit = candidates.find(e => e._marinaState === 'Running');
+  if (hit) return hit;
 
   const d   = new Date();
   const now = d.getHours() * 3600000 + d.getMinutes() * 60000 +
               d.getSeconds() * 1000   + d.getMilliseconds();
-
-  // Priorität 1: Marina meldet state="Running"
-  let idx = stateItems.findIndex(s => s.state === 'Running');
-
-  // Priorität 2: Zeitfenster enthält jetzt (schedStart ≤ now ≤ schedEnd)
-  if (idx < 0) {
-    idx = stateItems.findIndex(s =>
-      s.start != null && s.end != null && now >= s.start && now <= s.end
-    );
-  }
-
-  if (idx < 0) return null;
-
-  const si         = stateItems[idx];
-  const startIndex = Math.min(idx, events.length - 1);
-  const somOffset  = si.start != null ? Math.max(0, (now - si.start) / 1000) : 0;
-  return { startIndex, somOffset };
+  hit = candidates.find(e =>
+    e._schedStartMs != null && e._schedEndMs != null && now >= e._schedStartMs && now <= e._schedEndMs
+  );
+  return hit || null;
 }
 
 // ── Verarbeitung ───────────────────────────────────────────────────────────────
 
-async function _processFile(filePath) {
-  if (_processing) return;
+// Liest + parsed die Datei, mit Retry bei Parse-Fehler (abgeschnittene Datei, Marina
+// noch nicht fertig geschrieben). Bleibt innerhalb EINES _processFile-Aufrufs — _processing
+// bleibt währenddessen durchgehend true (keine parallele Re-Verarbeitung derselben Datei).
+async function _readAndParse(filePath, fps) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // readFileSync: öffnet, liest, schließt sofort — kein Advisory-Lock, kein flock()
+    const xmlString = fs.readFileSync(filePath, 'utf8');
+    if (!xmlString.trim()) return { empty: true };
+    const { parseMarina } = require('../../lib/MarinaParser');
+    try {
+      return { events: parseMarina(xmlString, fps) };
+    } catch (e) {
+      if (attempt >= MAX_RETRIES) {
+        _log(`Parse-Fehler: ${e.message} — Maximalzahl Retries (${MAX_RETRIES}) erreicht, Datei übersprungen`, 'error');
+        return { error: e };
+      }
+      _log(`Parse-Fehler (Versuch ${attempt + 1}/${MAX_RETRIES}): ${e.message} — Retry in 2s`, 'warn');
+      _setStatus('warn', { msg: `Parse-Fehler, Retry ${attempt + 1}/${MAX_RETRIES}` });
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  return { error: new Error('unreachable') };
+}
+
+/** Gibt true zurück wenn die Datei erfolgreich verarbeitet wurde (für _lastFile/_lastMtime). */
+async function _processFile(filePath, fname) {
   _processing = true;
   try {
-    const fname = path.basename(filePath);
     _log(`Lade ${fname}`);
     _setStatus('loading', { file: fname });
 
-    // readFileSync: öffnet, liest, schließt sofort — kein Advisory-Lock, kein flock()
-    const xmlString = fs.readFileSync(filePath, 'utf8');
-    if (!xmlString.trim()) { _log('Datei leer — übersprungen', 'warn'); return; }
+    const state0 = await _api.getState();
+    const fps    = state0?.config?.fps || 25;
 
-    // Marina-XML → interne Event-Struktur (MarinaParser, spawnSync Python3)
-    const { parseMarina } = require('../../lib/MarinaParser');
-    const events = parseMarina(xmlString);
+    // Marina-XML → interne Event-Struktur (reines JS, ein Parse-Pass inkl. State/Timing)
+    const parsed = await _readAndParse(filePath, fps);
+    if (parsed.empty) { _log('Datei leer — übersprungen', 'warn'); return false; }
+    if (parsed.error) { _setStatus('error', { error: parsed.error.message }); return false; }
+    const events = parsed.events;
 
-    // Manuell hinzugefügte Kinder (Record-Slots, eigene VOs) und Subtitles
-    // aus der laufenden Playlist via reconcileKey erhalten
+    // Stabile IDs + Zusatzdaten aus der laufenden Playlist via reconcileKey übernehmen.
+    // Dadurch bleibt _state (playing/done/…) in PlaylistEngine.set() erhalten und das
+    // On-Air-Event behält seine id (kein ungewollter Re-Cue).
     try {
       const existing = await _api.getPlaylist();
       if (existing.length > 0) {
@@ -219,7 +206,14 @@ async function _processFile(filePath) {
         for (const ev of events) {
           if (!ev.reconcileKey) continue;
           const prev = prevMap.get(ev.reconcileKey);
-          if (!prev) continue;
+          if (!prev) {
+            // Kein Vorgänger — Marina meldet dieses Event evtl. schon als "Done"
+            if (ev._marinaState === 'Done') ev._state = 'done';
+            continue;
+          }
+
+          // Stabile id übernehmen → _state bleibt in playlist.set() erhalten
+          ev.id = prev.id;
 
           const prevChildren = prev.children || [];
 
@@ -240,7 +234,7 @@ async function _processFile(filePath) {
           }
 
           // Benutzerdefinierte Felder erhalten (nicht im Marina-Format vorhanden)
-          const USER_FIELDS = ['audioConfig', 'classification', 'segment', 'segmentName', 'somMode', 'chLabel', 'playMode'];
+          const USER_FIELDS = ['audioConfig', 'classification', 'segment', 'segmentName', 'somMode', 'chLabel', 'playMode', '_somBase'];
           for (const f of USER_FIELDS) {
             if (ev[f] === undefined && prev[f] !== undefined) ev[f] = prev[f];
           }
@@ -253,52 +247,64 @@ async function _processFile(filePath) {
     if (!events.length) {
       _log('Keine aktivierten Events in Marina-Datei', 'warn');
       _setStatus('warn', { msg: 'Keine Events' });
-      return;
+      return false;
     }
 
-    // On-Air Sync: Einsteigepunkt berechnen
-    let startIndex = null;
-    let somOffset  = null;
+    // On-Air Sync: Ziel-Event (Marina "Running") bestimmen
+    let syncPayload = null;
+    let runningLabel = null;
 
     if (_cfg.onAirSync !== false) {
-      const stateItems = _extractState(xmlString);
-      const sync = _calcOnAirSync(events, stateItems);
-      if (sync) {
-        startIndex = sync.startIndex;
-        somOffset  = sync.somOffset;
-        _log(`On-Air Sync: Event ${startIndex + 1}/${events.length}, SOM-Offset ${somOffset.toFixed(2)}s`);
+      const running = _findRunningEvent(events);
+      if (running && running._schedStartMs != null) {
+        syncPayload = {
+          targetEventId: running.id,
+          schedStartMs:  running._schedStartMs,
+          toleranceSec:  Math.max(0, parseFloat(_cfg.syncToleranceSec) || 2),
+        };
+        runningLabel = running.title || running.file || running.liveSource || '(unbenannt)';
+        _log(`On-Air Sync: Ziel-Event "${runningLabel}" (schedStart ${running._schedStartMs}ms)`);
       } else {
-        _log('On-Air Sync: kein laufendes Event gefunden — Start ab Event 1');
+        _log('On-Air Sync: kein laufendes Event gefunden — kein Sync-Ziel');
       }
     }
 
     // Playout-State: läuft bereits?
-    const state     = await _api.getState();
-    const isRunning = state?.playlist?.running === true;
+    const isRunning = state0?.playlist?.running === true;
+    // Auto-Start-Index/Offset (nur relevant wenn NICHT running) — Server berechnet den
+    // exakten SOM-Offset zum Ausführungszeitpunkt selbst aus sync.schedStartMs (framegenauer,
+    // kompensiert Debounce/Parse-Latenz seit hier).
+    let startIndex = null;
+    if (!isRunning && _cfg.autoStart) {
+      startIndex = syncPayload ? events.findIndex(e => e.id === syncPayload.targetEventId) : 0;
+      if (startIndex < 0) startIndex = 0;
+    }
 
-    // Playlist an PluginHost → server.js → playlist.set() + ggf. playlist.start()
-    _api.setPlaylist(
-      events,
-      (!isRunning && _cfg.autoStart) ? (startIndex ?? 0) : null,
-      (!isRunning && _cfg.autoStart) ? somOffset         : null,
-    );
+    // Playlist an PluginHost → server.js → playlist.set() + ggf. Start/Resync
+    _api.setPlaylist(events, startIndex, null, syncPayload);
 
     const summary = `${events.length} Events aus ${fname}`;
     _api.notify(`Marina-Sync: ${summary}`, 'info');
     _setStatus('ok', {
-      events:    events.length,
-      file:      fname,
-      syncEvent: startIndex != null ? startIndex + 1 : null,
-      started:   !isRunning && !!_cfg.autoStart,
-      ts:        new Date().toISOString(),
+      events:     events.length,
+      file:       fname,
+      syncTarget: runningLabel,
+      started:    !isRunning && !!_cfg.autoStart,
+      ts:         new Date().toISOString(),
     });
     _log(`Importiert: ${summary}`);
+    return true;
 
   } catch (e) {
     _log(`Verarbeitungsfehler: ${e.message}`, 'error');
     _setStatus('error', { error: e.message });
+    return false;
   } finally {
     _processing = false;
+    if (_recheckAfter) {
+      _recheckAfter = false;
+      _scheduleCheck();
+    }
   }
 }
 
@@ -308,15 +314,32 @@ function _scheduleCheck() {
   if (_debounce) { clearTimeout(_debounce); _debounce = null; }
   _debounce = setTimeout(async () => {
     _debounce = null;
+
+    if (_processing) {
+      // Kein Verlust von Änderungen: nach Abschluss der laufenden Verarbeitung erneut prüfen
+      _recheckAfter = true;
+      return;
+    }
+
     const found = _findLatest();
     if (!found) return;
     // Nur verarbeiten wenn sich Datei oder mtime geändert haben
     if (found.name === _lastFile && found.mtime === _lastMtime) return;
-    _lastFile  = found.name;
-    _lastMtime = found.mtime;
+
     const dir  = _resolveDir(_cfg.watchFolder);
     const full = path.join(dir, found.name);
-    await _processFile(full).catch(e => _log(`Prozess-Fehler: ${e.message}`, 'warn'));
+
+    const ok = await _processFile(full, found.name).catch(e => {
+      _log(`Prozess-Fehler: ${e.message}`, 'warn');
+      return false;
+    });
+
+    // _lastFile/_lastMtime erst NACH erfolgreicher Verarbeitung setzen (nicht bei Parse-Fehler),
+    // sonst würde eine noch unvollständige Datei beim nächsten fs.watch-Event ignoriert.
+    if (ok) {
+      _lastFile  = found.name;
+      _lastMtime = found.mtime;
+    }
   }, 500); // 500ms Debounce: warten bis Marina fertig geschrieben hat
 }
 
@@ -358,9 +381,10 @@ function _startWatch() {
 }
 
 function _stopWatch() {
-  if (_debounce)  { clearTimeout(_debounce);    _debounce  = null; }
-  if (_watcher)   { try { _watcher.close(); } catch {} _watcher   = null; }
-  if (_pollTimer) { clearInterval(_pollTimer);  _pollTimer = null; }
+  if (_debounce)  { clearTimeout(_debounce);   _debounce  = null; }
+  if (_watcher)   { try { _watcher.close(); } catch {} _watcher = null; }
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  _recheckAfter = false;
 }
 
 // ── Plugin-API ─────────────────────────────────────────────────────────────────
