@@ -329,6 +329,18 @@ for pat in "${GST_CORE_PATTERNS[@]}"; do
 done
 [[ ${#CORE_FILES[@]} -gt 0 ]] && copy_libs "$APP_LIB" "${CORE_FILES[@]}"
 
+# libpulsecommon: von libpulse.so per dlopen(bare filename) nachgeladen, daher
+# KEIN NEEDED-Eintrag im ELF — copy_libs() (die nur `readelf -d` NEEDED folgt)
+# findet es nicht. Ohne diese Datei bricht das gst-plugin-scanning von
+# libgstpulseaudio.so lautlos ab ("no element pulsesink"), sobald das Zielsystem
+# nicht zufällig dieselbe Version unter dem hart einkompilierten RUNPATH
+# (/usr/lib/x86_64-linux-gnu/pulseaudio/) bereitstellt. LD_LIBRARY_PATH (in
+# AppRun gesetzt) hat Vorrang vor diesem RUNPATH, daher reicht es, die Datei
+# flach in APP_LIB abzulegen.
+for f in "${GST_LIB_SRC}/pulseaudio/"libpulsecommon-*.so; do
+    [[ -f "$f" ]] && cp -aL "$f" "${APP_LIB}/$(basename "$f")" && log "libpulsecommon: $(basename "$f")"
+done
+
 # ── 5b. ffmpeg / ffprobe ──────────────────────────────────────────────────────
 for _bin in ffmpeg ffprobe; do
     _bin_var="${_bin^^}_SRC"
@@ -418,7 +430,7 @@ node -e "
 const fs = require('fs');
 const p = '${APP_SRC}/settings.json';
 const s = JSON.parse(fs.readFileSync(p, 'utf8'));
-['asRunDir','mediaDir','playlistsDir','grafixDir'].forEach(k => delete s[k]);
+['asRunDir','mediaDir','playlistsDir','grafixDir','httpsKey','httpsCert'].forEach(k => delete s[k]);
 fs.writeFileSync(p, JSON.stringify(s, null, 2));
 " 2>/dev/null || { warn "Node konnte settings.json nicht bereinigen — manuelle Prüfung empfohlen"; }
 

@@ -343,6 +343,11 @@ s.grafixDir   = path.join(installDir, 'templates', 'grafik');
 s.asRunDir    = path.join(installDir, 'asrun');
 s.backupMediaDirs = [];
 delete s.userLogPath;
+// httpsKey/httpsCert: Quellmaschinen-Pfade, existieren auf dem Zielsystem nicht
+// → HTTPS-Start würde bei jedem Start fehlschlagen (Server fällt eh auf HTTP zurück,
+// aber ohne Bereinigung loggt das bei jedem Start eine irreführende ERROR-Zeile).
+delete s.httpsKey;
+delete s.httpsCert;
 
 // idleImagePath: keep relative filename (resolved via images/ dir), clear absolute
 if (typeof s.idleImagePath === 'string' && path.isAbsolute(s.idleImagePath)) {

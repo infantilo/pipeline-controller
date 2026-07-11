@@ -75,7 +75,7 @@ function _writablePath(relPath) {
 }
 
 const PORT           = parseInt(process.env.PORT       || '3000');
-const IMAGES_DIR     = path.join(__dirname, 'images');
+const IMAGES_DIR     = _writablePath('images');
 const VIDEO_SINK     = process.env.VIDEO_SINK || null;
 const DB_PATH        = _writablePath('library.json');
 const SETTINGS_PATH  = _writablePath('settings.json');
