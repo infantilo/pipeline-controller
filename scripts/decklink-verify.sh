@@ -12,6 +12,10 @@
 #                       (progressive UND interlaced), PASS/FAIL je Mode
 #   clock [dev]         Prüfen ob GstDecklinkClock als Pipeline-Clock gewählt wird
 #   soak <min> [dev] [mode]  Langlauf, zählt drop/late/QoS-Zeilen pro Minute
+#   duplex [devA] [devB] [secs]  6 Kombinations-Tests (Sink allein / + Live-Quelle /
+#                       + Audio-Sink / alle vier Rollen / auf anderem device-number) —
+#                       grenzt ein, ob "state change failed" bei zweiter Decklink-Rolle
+#                       am selben device-number liegt oder grundsätzlich ist
 #   ptp                 PTP-Status (ptp4l/phc2sys, ethtool -T, pmc) — tolerant
 #   (ohne Argument)     default = detect + clock + modes Kurzdurchlauf
 #
@@ -265,6 +269,96 @@ do_soak() {
     [[ "$rc" -eq 0 ]]
 }
 
+# ── duplex ───────────────────────────────────────────────────────────────────
+# Reproduziert den gemeldeten Bug isoliert (ohne Node-App): decklinkvideosink
+# läuft solo einwandfrei, schlägt aber fehl sobald eine Live-Quelle
+# (decklinkvideosrc) oder ein decklinkaudiosink dazukommt. Jeder Test ist EINE
+# gst-launch-Pipeline mit mehreren Decklink-Rollen gleichzeitig — wie im echten
+# Master-Prozess (ein Prozess, mehrere Decklink-Elemente in derselben Pipeline).
+# Tests 5/6 wiederholen 2/3 auf einem ANDEREN device-number, um zu trennen ob
+# der Konflikt am WIEDERVERWENDEN desselben device-number liegt oder generell
+# bei einer zweiten Decklink-Instanz im selben Prozess auftritt.
+do_duplex() {
+    local devA="${1:-0}" devB="${2:-1}" secs="${3:-8}"
+    guard_server
+    hdr "duplex: Kombinations-Tests device-number=${devA} (Tests 5/6 zusätzlich gegen device-number=${devB})"
+    if ! has_card; then
+        out "FAIL: keine DeckLink-Karte gefunden — Duplex-Tests nicht möglich."
+        return 1
+    fi
+    out "Jeder Test läuft ${secs}s als EINE gst-launch-1.0-Pipeline (SIGINT-Stop danach),"
+    out "GST_DEBUG=decklink:5,*:2 wird je Test mitgeschnitten. rc≠0 oder ERROR-Zeilen vor Ablauf → FAIL."
+
+    local vsink="videotestsrc is-live=true pattern=smpte ! video/x-raw,format=UYVY,width=1920,height=1080,framerate=25/1 ! videoconvert ! decklinkvideosink device-number=${devA} mode=1080p25 sync=true"
+    local asrc="audiotestsrc wave=silence is-live=true ! audio/x-raw,format=S16LE,channels=2,rate=48000"
+
+    local order=(
+        "1-baseline-sink-allein"
+        "2-plus-videosrc-gleiches-device"
+        "3-plus-audiosink-gleiches-device"
+        "4-alle-vier-rollen-gleiches-device"
+        "5-plus-videosrc-ANDERES-device"
+        "6-plus-audiosink-ANDERES-device"
+    )
+    declare -A LAUNCH=(
+        ["1-baseline-sink-allein"]="${vsink}"
+        ["2-plus-videosrc-gleiches-device"]="${vsink} decklinkvideosrc device-number=${devA} mode=auto ! fakesink"
+        ["3-plus-audiosink-gleiches-device"]="${vsink} ${asrc} ! decklinkaudiosink device-number=${devA}"
+        ["4-alle-vier-rollen-gleiches-device"]="${vsink} ${asrc} ! decklinkaudiosink device-number=${devA} decklinkvideosrc device-number=${devA} mode=auto ! fakesink decklinkaudiosrc device-number=${devA} ! fakesink"
+        ["5-plus-videosrc-ANDERES-device"]="${vsink} decklinkvideosrc device-number=${devB} mode=auto ! fakesink"
+        ["6-plus-audiosink-ANDERES-device"]="${vsink} ${asrc} ! decklinkaudiosink device-number=${devB}"
+    )
+
+    local pass=0 fail=0
+    local -a failed_tests=()
+    for key in "${order[@]}"; do
+        local launch="${LAUNCH[$key]}"
+        out ""
+        out "── Test ${key} ──"
+        out "gst-launch-1.0 ${launch}"
+        local errf; errf="$(mktemp)"
+        GST_DEBUG="decklink:5,*:2" GST_DEBUG_NO_COLOR=1 \
+            timeout -s INT "${secs}" gst-launch-1.0 -q ${launch} >/dev/null 2>"$errf"
+        local rc=$?
+        local errlines
+        errlines="$(grep -iE 'ERROR|not-negotiated|could not' "$errf" || true)"
+        if [[ "$rc" -eq 0 && -z "$errlines" ]]; then
+            out "  PASS (rc=${rc}, lief ${secs}s ohne Fehler)"
+            pass=$((pass+1))
+        else
+            out "  FAIL (rc=${rc})"
+            local dllines; dllines="$(grep -i decklink "$errf" | tail -30 || true)"
+            if [[ -n "$dllines" ]]; then
+                out "  decklink-Zeilen (letzte 30):"
+                out "$dllines"
+            else
+                out "  (keine decklink-Zeilen — allgemeine Fehler:)"
+                out "$(grep -iE 'error' "$errf" | tail -10 || true)"
+            fi
+            fail=$((fail+1))
+            failed_tests+=("$key")
+        fi
+        rm -f "$errf"
+    done
+
+    out ""
+    out "duplex-Zusammenfassung: ${pass} PASS, ${fail} FAIL"
+    [[ "$fail" -gt 0 ]] && out "Fehlgeschlagen: ${failed_tests[*]}"
+    if [[ "$fail" -gt 0 ]]; then
+        out ""
+        out "Interpretationshilfe:"
+        out "  Test 1 FAIL                        → Grundproblem, nicht duplex-bezogen (Karte/Treiber generell defekt)."
+        out "  2 und/oder 3 FAIL, 5 und 6 PASS     → Konflikt spezifisch bei WIEDERVERWENDUNG desselben device-number."
+        out "                                        Fix: Live-Quelle/Audio-Sink auf anderen device-number legen."
+        out "  2/3 UND 5/6 FAIL                    → Konflikt ist nicht device-number-spezifisch, tritt bei jeder"
+        out "                                        zweiten Decklink-Instanz im selben Prozess auf (Plugin-/"
+        out "                                        Treiber-/Lizenz-Limit, keine reine Config-Frage)."
+        out "  Nur 4 FAIL, 2/3 PASS                → Konflikt erst bei allen vier Rollen gleichzeitig (Ressourcen-"
+        out "                                        limit, z.B. max. gleichzeitige Streams der Karte)."
+    fi
+    [[ "$fail" -eq 0 ]]
+}
+
 # ── ptp ──────────────────────────────────────────────────────────────────────
 do_ptp() {
     hdr "ptp: Prozesse"
@@ -311,6 +405,7 @@ case "$CMD" in
     modes)  do_modes "${ARGS[1]:-0}" 0 || RC=$? ;;
     clock)  do_clock "${ARGS[1]:-0}" || RC=$? ;;
     soak)   do_soak "${ARGS[1]:-}" "${ARGS[2]:-0}" "${ARGS[3]:-1080p25}" || RC=$? ;;
+    duplex) do_duplex "${ARGS[1]:-0}" "${ARGS[2]:-1}" "${ARGS[3]:-8}" || RC=$? ;;
     ptp)    do_ptp ;;
     default)
         do_detect
@@ -319,7 +414,7 @@ case "$CMD" in
         ;;
     *)
         out "Unbekannter Modus: ${CMD}"
-        out "Nutzung: $0 [detect|modes [dev]|clock [dev]|soak <min> [dev] [mode]|ptp] [--force]"
+        out "Nutzung: $0 [detect|modes [dev]|clock [dev]|soak <min> [dev] [mode]|duplex [devA] [devB] [secs]|ptp] [--force]"
         RC=1
         ;;
 esac
