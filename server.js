@@ -30,6 +30,19 @@ process.env.GST_GL_API = 'none';
   } catch (e) { console.warn(`[mxl] env/mxl.env konnte nicht geladen werden: ${e.message}`); }
 })();
 
+// Robust gegen versehentlich mitgetipptes "GST_DEBUG=" (naheliegend, da Doku/
+// Log-Hinweise den Filter oft in Shell-Form GST_DEBUG="foo:5" zeigen) und
+// Leerzeichen nach Kommas — beides macht gst_debug_set_threshold_from_string()
+// wortlos wirkungslos: kein Fehler, einfach keine Kategorie aktiviert, und man
+// merkt es erst wenn im Log die erwarteten Trace-Zeilen fehlen.
+function _sanitizeGstDebugFilter(raw) {
+  let s = (raw || '').trim();
+  if (!s) return '';
+  s = s.replace(/^GST_DEBUG\s*=\s*/i, '').trim();
+  s = s.replace(/^["']|["']$/g, '').trim();
+  return s.split(',').map(seg => seg.trim()).filter(Boolean).join(',');
+}
+
 // ── GStreamer debug filter muss VOR dem ersten require('gst-kit') gesetzt sein,
 // da gst_init() beim Laden des nativen Addons aufgerufen wird.
 (function applyGstDebugEarly() {
@@ -39,8 +52,10 @@ process.env.GST_GL_API = 'none';
   const settingsPath = path.join(process.env.PC_DATA_DIR || __dirname, 'settings.json');
   try {
     const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    if (s.gstDebugFilter) {
-      process.env.GST_DEBUG = s.gstDebugFilter;
+    const cleaned = _sanitizeGstDebugFilter(s.gstDebugFilter);
+    if (cleaned) {
+      if (cleaned !== s.gstDebugFilter) console.warn(`[gst-debug] gstDebugFilter normalisiert: "${s.gstDebugFilter}" → "${cleaned}"`);
+      process.env.GST_DEBUG = cleaned;
       process.env.GST_DEBUG_NO_COLOR = '1';
     }
   } catch {}
@@ -2259,7 +2274,7 @@ async function ensureMaster() {
       if (_needsDisplay)
         log(`  Hinweis: videoSink="${_vs}" braucht X11/Wayland — DISPLAY=${process.env.DISPLAY||'(nicht gesetzt)'}`, 'warn', 'master');
       else if (_sinkName === 'decklinkvideosink')
-        log(`  Hinweis: decklinkvideosink state-change-Fehler ohne Detail-Reason meist: (1) Karte bereits von anderem Prozess/altem Handle belegt, (2) bei DeckLink IP: Stream-Mapping/Profil nicht via Blackmagic IP Video Configuration konfiguriert, (3) desktopvideod läuft nicht. GST_DEBUG="decklink:5,*:2" setzen (Server-Tab) und Master neu starten, um die eigentliche HRESULT/Fehlermeldung der DeckLink-API im Log zu sehen.`, 'warn', 'master');
+        log(`  Hinweis: decklinkvideosink state-change-Fehler ohne Detail-Reason meist: (1) Karte bereits von anderem Prozess/altem Handle belegt, (2) bei DeckLink IP: Stream-Mapping/Profil nicht via Blackmagic IP Video Configuration konfiguriert, (3) desktopvideod läuft nicht. Filter "decklink:5,*:2" im Server-Tab setzen und den KOMPLETTEN SERVER-PROZESS neu starten (nicht nur Master — GST_DEBUG wird nur beim Prozessstart gelesen), um die eigentliche HRESULT/Fehlermeldung der DeckLink-API im Log zu sehen.`, 'warn', 'master');
       else
         log(`  Hinweis: videoSink="${_vs}" — GStreamer-Log für Details prüfen`, 'warn', 'master');
     }
@@ -4071,7 +4086,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       saveSettings(_settings);
       return json(res, { ok: true, filter: '' });
     }
-    const filter = (b.filter || '').trim();
+    const filter = _sanitizeGstDebugFilter(b.filter || '');
     _settings.gstDebugFilter = filter;
     saveSettings(_settings);
     return json(res, { ok: true, filter });

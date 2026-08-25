@@ -141,8 +141,14 @@ do_detect() {
 }
 
 # Liefert 0 wenn mind. eine Karte da ist (für frühe, klare FAIL-Meldung).
+# Der Klassen-Filter "gst-device-monitor-1.0 Video/Sink" liefert auf manchen
+# Systemen/Versionen KEINE Treffer, obwohl die unfilterte Abfrage (siehe
+# do_detect) die Karte sauber findet — deshalb hier bewusst unfiltert +
+# grep, statt sich auf den Klassen-Filter zu verlassen (führte sonst zu
+# falschen "keine Karte gefunden"-FAILs bei clock/modes/duplex/soak trotz
+# vorhandener und in `detect` gelisteter Karte).
 has_card() {
-    timeout 15 gst-device-monitor-1.0 Video/Sink 2>/dev/null | grep -qi 'decklink\|blackmagic'
+    timeout 15 gst-device-monitor-1.0 2>/dev/null | grep -qi 'decklink\|blackmagic'
 }
 
 # ── modes ────────────────────────────────────────────────────────────────────
