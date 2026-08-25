@@ -2258,6 +2258,8 @@ async function ensureMaster() {
       const _needsDisplay = ['ximagesink','xvimagesink','glimagesink','waylandsink'].includes(_sinkName);
       if (_needsDisplay)
         log(`  Hinweis: videoSink="${_vs}" braucht X11/Wayland — DISPLAY=${process.env.DISPLAY||'(nicht gesetzt)'}`, 'warn', 'master');
+      else if (_sinkName === 'decklinkvideosink')
+        log(`  Hinweis: decklinkvideosink state-change-Fehler ohne Detail-Reason meist: (1) Karte bereits von anderem Prozess/altem Handle belegt, (2) bei DeckLink IP: Stream-Mapping/Profil nicht via Blackmagic IP Video Configuration konfiguriert, (3) desktopvideod läuft nicht. GST_DEBUG="decklink:5,*:2" setzen (Server-Tab) und Master neu starten, um die eigentliche HRESULT/Fehlermeldung der DeckLink-API im Log zu sehen.`, 'warn', 'master');
       else
         log(`  Hinweis: videoSink="${_vs}" — GStreamer-Log für Details prüfen`, 'warn', 'master');
     }
@@ -4055,6 +4057,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       { label: 'Player: vollständig',                  filter: 'uridecodebin:4,decodebin:4,interaudiosink:5,intervideosink:5,audioconvert:3,videorate:4' },
       { label: 'Master: Audio-Routing',                filter: 'interaudiosrc:5,input-selector:5,audioconvert:4,audiomixmatrix:5' },
       { label: 'Clock / Sync',                         filter: 'basesink:5,clock:5,videorate:5' },
+      { label: '🔷 DeckLink: Sink/Source-Fehler',       filter: 'decklink:5,*:2',                                                        description: 'HRESULT/Fehlertext der DeckLink-API sichtbar machen (z.B. bei state-change-Fehler ohne Detail)' },
       { label: 'Alles (sehr viel Output!)',             filter: 'GST_ELEMENT_FACTORY:4,*:3' },
     ];
     const saved = _settings.gstDebugFilter || '';
