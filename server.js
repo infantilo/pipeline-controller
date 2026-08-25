@@ -46,7 +46,13 @@ function _sanitizeGstDebugFilter(raw) {
 // ── GStreamer debug filter muss VOR dem ersten require('gst-kit') gesetzt sein,
 // da gst_init() beim Laden des nativen Addons aufgerufen wird.
 (function applyGstDebugEarly() {
-  if (process.env.GST_DEBUG) return; // bereits via Env gesetzt → nicht überschreiben
+  // GST_DEBUG_NO_COLOR IMMER setzen, sobald irgendein GST_DEBUG aktiv ist — auch
+  // wenn GST_DEBUG schon von außen (Shell-Export, systemd Environment=) geerbt
+  // wurde und der settings.json-Pfad unten übersprungen wird. Ohne das schreibt
+  // GStreamer ANSI-Farbcodes vor jede Zeile in logs/server.log; das bricht das
+  // Zeilenformat, das DiagnosticBundle.js zur Erkennung nativer Trace-Zeilen
+  // erwartet (sieht dann aus wie "keine native Zeile", obwohl GST_DEBUG lief).
+  if (process.env.GST_DEBUG) { process.env.GST_DEBUG_NO_COLOR ??= '1'; return; }
   const fs   = require('fs');
   const path = require('path');
   const settingsPath = path.join(process.env.PC_DATA_DIR || __dirname, 'settings.json');
