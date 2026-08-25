@@ -2253,7 +2253,23 @@ async function ensureMaster() {
   }
 
   log(`Master starten (videoSink=${masterOpts.videoSink||'auto'}, idleSource=${masterOpts.idleSource})`, 'info', 'master');
-  const ok = await master.start();
+  let ok = await master.start();
+
+  // DeckLink-Hardware/-Treiber gibt die Karte nach einem Stop manchmal nicht
+  // sofort frei — ein direkt folgender Neuversuch scheitert dann mit
+  // "state change failed" OHNE jede Bus-Fehlermeldung (bekannte Einschränkung
+  // von gst-plugins-bad/decklink: EnableVideoOutput()-Fehler wird nicht als
+  // GST_ELEMENT_ERROR gepostet, play() liefert nur result=failure state=0/3
+  // ohne Detail). Beobachtet: ein zweiter Versuch nach kurzer Wartezeit läuft
+  // oft durch. Ein Retry ist hier risikolos — bei echtem Hardwaredefekt
+  // scheitert er genauso und die normale Fehlerbehandlung greift danach.
+  if (!ok && /decklinkvideosink/.test(masterOpts.videoSink || '')) {
+    log('Master-Start fehlgeschlagen (DeckLink) — erneuter Versuch in 2s (Karte evtl. noch nicht freigegeben)…', 'warn', 'master');
+    await new Promise(r => setTimeout(r, 2000));
+    ok = await master.start();
+    if (ok) log('Master-Pipeline im 2. Versuch erfolgreich gestartet ✓', 'info', 'master');
+  }
+
   if (ok) {
     masterStarted = true;
     grafixEngine.masterPipeline = master;
@@ -3511,9 +3527,57 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     catch { return json(res, []); }
   }
 
+  // ── DeckLink Device-Belegung ────────────────────────────────────────────────
+  // Kein GStreamer-Property verrät zuverlässig, ob ein device-number von einem
+  // ANDEREN Prozess belegt ist — aber die eigene Konfiguration (PGM-Video-/
+  // Audio-Sink, Audio-Gruppen-Sinks, Live-Quellen, Zusatz-Ausgänge) kennen wir
+  // genau, und genau die versehentliche Mehrfachnutzung desselben device-number
+  // in mehreren Rollen ist die häufigste Ursache für "state change failed"-
+  // Abstürze. UI zeigt das als "belegt als: …"-Hinweis, damit man den Konflikt
+  // schon beim Konfigurieren sieht statt erst beim Absturz.
+  function _decklinkDeviceUsage() {
+    const usage = new Map(); // deviceNumber → [{role, label, refId}]
+    const add = (dn, role, label, refId) => {
+      if (!Number.isInteger(dn) || dn < 0) return;
+      if (!usage.has(dn)) usage.set(dn, []);
+      usage.get(dn).push({ role, label, refId: refId ?? null });
+    };
+    const dnFrom = str => { const m = /device-number=(\d+)/.exec(str || ''); return m ? parseInt(m[1]) : null; };
+
+    const vsDn = dnFrom(masterOpts.videoSink);
+    if (vsDn != null) add(vsDn, 'pgm-video', 'PGM-Video-Ausgang');
+
+    const asDn = dnFrom(masterOpts.audioSink);
+    if (asDn != null) add(asDn, 'pgm-audio', 'PGM-Audio-Ausgang');
+
+    for (const g of (audioGroupConfig?.groups || [])) {
+      if (g.sink?.type === 'decklink') {
+        const dn = parseInt(g.sink.device);
+        if (Number.isInteger(dn)) add(dn, 'audio-group', `Audio-Gruppe "${g.id}"`, `audio-group:${g.id}`);
+      }
+    }
+
+    for (const ls of (_settings.liveSources || [])) {
+      const vDn = dnFrom(ls.gstSrc);
+      if (vDn != null) add(vDn, 'live-source', `Live-Quelle "${ls.label || ls.id}"`, ls.id);
+      for (const a of (ls.audioSources || [])) {
+        const aDn = dnFrom(a.gstSrc);
+        if (aDn != null && aDn !== vDn) add(aDn, 'live-source-audio', `Live-Quelle "${ls.label || ls.id}" (Audio)`, ls.id);
+      }
+    }
+
+    for (const o of (outputEngine?.getConfig?.() || [])) {
+      if (o.sink === 'decklink' && Number.isInteger(o.deviceNumber)) {
+        add(o.deviceNumber, 'extra-output', `Zusatz-Ausgang "${o.label || o.id || ''}"`.trim(), `extra-output:${o.id ?? o.deviceNumber}`);
+      }
+    }
+    return usage;
+  }
+
   // Devices
   if (meth === 'GET' && p === '/api/devices') {
     const { execSync } = require('child_process'); const devices = [];
+    const _dlUsage = _decklinkDeviceUsage();
 
     // V4L2
     try { execSync('ls /dev/video* 2>/dev/null',{timeout:2000}).toString().trim().split('\n').filter(Boolean)
@@ -3547,6 +3611,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
           gstAudioSrc: `decklinkaudiosrc device-number=${dn} channels=${audioCh}`,
           audioChannels: audioCh,
           keepAlive: true,
+          usedBy: _dlUsage.get(dn) || [],
         });
         devNum++;
       }
@@ -3604,31 +3669,37 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       return [...fmts];
     };
 
-    const scan = (category, prop) => {
-      let raw;
-      try { raw = execSync(`gst-device-monitor-1.0 ${category} 2>/dev/null`, { timeout: 5000 }).toString(); }
-      catch { return; }
-      let devNum = 0;
-      for (const block of raw.split(/(?=Device found:)/)) {
-        const nameMatch = block.match(/name\s*:\s*(.+)/);
-        const name = nameMatch?.[1]?.trim() || '';
-        if (!/decklink|blackmagic/i.test(name)) continue;
-        const numMatch = block.match(/device[.\-](?:number|path)\s*[=:]\s*(\d+)/i);
-        const dn = numMatch ? parseInt(numMatch[1]) : devNum;
-        const chMatch = block.match(/channels\s*=\s*\(int\)\s*(\d+)/);
-        const audioCh = chMatch ? Math.min(16, parseInt(chMatch[1])) : 8;
-        const entry = byDevNum.get(dn) || { id: `decklink-out-${dn}`, type: 'decklink-sink', deviceNumber: dn, name };
-        entry[prop] = true;
-        if (prop === 'hasAudio') entry.audioChannels = audioCh;
-        if (prop === 'hasVideo') entry.supportedFormats = _parseSinkVideoCaps(block);
-        byDevNum.set(dn, entry);
-        devNum++;
+    // "gst-device-monitor-1.0 Video/Sink" (Klassen-Filter) liefert auf manchen
+    // Systemen/Plugin-Versionen KEINE Treffer, obwohl die unfilterte Abfrage die
+    // Karte sauber findet (gleicher Bug wie has_card() in decklink-verify.sh
+    // hatte) — deshalb hier bewusst EINMAL unfiltert scannen und die Klasse
+    // selbst aus der "class:"-Zeile parsen, statt dem CLI-Filter zu vertrauen.
+    let raw = '';
+    try { raw = execSync('gst-device-monitor-1.0 2>/dev/null', { timeout: 5000 }).toString(); } catch {}
+    let devNum = 0;
+    for (const block of raw.split(/(?=Device found:)/)) {
+      const nameMatch = block.match(/name\s*:\s*(.+)/);
+      const name = nameMatch?.[1]?.trim() || '';
+      if (!/decklink|blackmagic/i.test(name)) continue;
+      const klass = (block.match(/class\s*:\s*(.+)/)?.[1] || '').trim();
+      const numMatch = block.match(/device[.\-](?:number|path)\s*[=:]\s*(\d+)/i);
+      const dn = numMatch ? parseInt(numMatch[1]) : devNum;
+      const entry = byDevNum.get(dn) || { id: `decklink-out-${dn}`, type: 'decklink-sink', deviceNumber: dn, name };
+      if (klass.startsWith('Video/Sink')) {
+        entry.hasVideo = true;
+        entry.supportedFormats = _parseSinkVideoCaps(block);
       }
-    };
-    scan('Video/Sink', 'hasVideo');
-    scan('Audio/Sink', 'hasAudio');
+      if (klass.startsWith('Audio/Sink')) {
+        const chMatch = block.match(/channels\s*=\s*\(int\)\s*(\d+)/);
+        entry.hasAudio = true;
+        entry.audioChannels = chMatch ? Math.min(16, parseInt(chMatch[1])) : 8;
+      }
+      byDevNum.set(dn, entry);
+      devNum++;
+    }
 
     const dlMode = _decklinkModeForCurrentRes();
+    const _dlUsage = _decklinkDeviceUsage();
     const sinks = [...byDevNum.values()].map(d => ({
       id: d.id, type: d.type, deviceNumber: d.deviceNumber, name: d.name,
       videoSink: d.hasVideo
@@ -3640,6 +3711,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
         : null,
       audioSink: d.hasAudio ? `decklinkaudiosink device-number=${d.deviceNumber}` : null,
       audioChannels: d.audioChannels || 8,
+      usedBy: _dlUsage.get(d.deviceNumber) || [],
     }));
     return json(res, sinks);
   }
@@ -3867,7 +3939,17 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     return json(res, { ok: true });
   }
   if (meth === 'GET' && p === '/api/live-sources') {
-    return json(res, { liveSources: _settings.liveSources || [] });
+    const _dlUsage = _decklinkDeviceUsage();
+    const dnFrom = str => { const m = /device-number=(\d+)/.exec(str || ''); return m ? parseInt(m[1]) : null; };
+    const liveSources = (_settings.liveSources || []).map(ls => {
+      const dn = dnFrom(ls.gstSrc);
+      if (dn == null) return ls;
+      // Nur ANDERE Rollen als Konflikt zeigen — die eigene live-source-Zuordnung
+      // dieses Eintrags selbst ist erwartungsgemäß in der Belegungsliste enthalten.
+      const conflicts = (_dlUsage.get(dn) || []).filter(u => u.refId !== ls.id);
+      return conflicts.length ? { ...ls, deviceConflicts: conflicts } : ls;
+    });
+    return json(res, { liveSources });
   }
   if (meth === 'POST' && p === '/api/scte35/cue') {
     const sess = _requireAuth(req, res, ['admin', 'operator']); if (sess === false) return;

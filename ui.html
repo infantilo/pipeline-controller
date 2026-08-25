@@ -6184,6 +6184,12 @@ function _renderLiveList(){
         <span style="font-family:var(--mono);color:${fmtMatch?'var(--green)':'var(--yellow)'}">${detFmt.width}x${detFmt.height}@${detFmt.fps}${detFmt.interlaced?'i':'p'}</span>
         ${fmtMatch?`<span style="color:var(--dim);margin-left:auto">✓ passt zur Pipeline</span>`
           :`<button class="btn" style="font-size:9px;padding:1px 6px;margin-left:auto" onclick="applyDetectedLiveFormat(${detFmt.width},${detFmt.height},${detFmt.fps})" title="Format auf Pipeline übernehmen">↳ Übernehmen</button>`}
+      </div>`:''}
+      ${ls.deviceConflicts?.length?`
+      <div style="display:flex;gap:6px;align-items:flex-start;font-size:9px;background:rgba(255,180,0,0.1);border:1px solid rgba(255,180,0,0.3);border-radius:3px;padding:3px 6px"
+        title="Gleiches device-number wird noch für weitere Rollen verwendet — häufigste Ursache für 'state change failed'-Abstürze bei DeckLink.">
+        <span style="color:var(--yellow)">⚠ Gerät #${_esc(devNum)} belegt als:</span>
+        <span style="color:var(--yellow)">${ls.deviceConflicts.map(c=>_esc(c.label)).join(', ')}</span>
       </div>`:''}`;
 
     }else if(type==='network'){
@@ -6393,18 +6399,30 @@ async function liveAddType(type){
     try{
       const r=await fetch('/api/devices').then(r=>r.json());
       const devices=(Array.isArray(r)?r:r.devices||[]).filter(d=>d.type==='decklink');
+      let busy=0;
       for(const d of devices){
         const eid=`decklink-${d.deviceNumber}`;
         if(_liveRows.some(r=>r.id===eid)) continue;
+        // usedBy kommt vom Server (Gerät bereits als PGM-Sink/Audio-Gruppe/Zusatz-
+        // Ausgang konfiguriert) — direkt übernehmen, damit der "belegt"-Hinweis
+        // sofort sichtbar ist statt erst nach dem nächsten Tab-Reload.
+        if(d.usedBy?.length) busy++;
         _liveRows.push({
           id:eid,_autoId:eid,label:d.name||`DeckLink ${d.deviceNumber}`,
           uri:'',gstSrc:d.gstSrc||`decklinkvideosrc device-number=${d.deviceNumber}`,
           videoFormat:'auto',inputId:'',keepAlive:true,
           audioSources:d.gstAudioSrc?[{label:'Audio',gstSrc:d.gstAudioSrc,channels:d.audioChannels||2}]:[],
+          ...(d.usedBy?.length?{deviceConflicts:d.usedBy}:{}),
         });
         added++;
       }
-      if(added){ _renderLiveList(); showToast(`✅ ${added} DeckLink-Gerät(e) erkannt und hinzugefügt`); return; }
+      if(added){
+        _renderLiveList();
+        showToast(busy
+          ? `✅ ${added} DeckLink-Gerät(e) hinzugefügt — ⚠ ${busy} davon bereits anderweitig belegt (siehe Hinweis in der Liste)`
+          : `✅ ${added} DeckLink-Gerät(e) erkannt und hinzugefügt`);
+        return;
+      }
       if(devices.length){ showToast('DeckLink-Geräte bereits eingetragen'); return; }
     }catch(e){ /* no devices API — fall through to manual card */ }
     // Fallback: manual DeckLink entry
@@ -6743,8 +6761,14 @@ async function cfgDiscoverDecklinkSinks(silent){
     sinks.filter(s=>s.videoSink).forEach(s=>{
       const o = document.createElement('option');
       o.value = s.videoSink; o.dataset.decklink = '1';
-      o.textContent = `DeckLink ${s.deviceNumber} (Video-Ausgang)${s.videoModeWarning ? ' ⚠' : ''}`;
-      if (s.videoModeWarning) o.title = s.videoModeWarning;
+      // "belegt"-Hinweis: andere Rollen als der aktuelle PGM-Video-Sink selbst,
+      // die dasselbe device-number verwenden (häufigste Ursache für DeckLink-
+      // "state change failed"-Abstürze bei Reconfigure).
+      const otherUses = (s.usedBy||[]).filter(u=>u.role!=='pgm-video');
+      const busyNote = otherUses.length ? ` ⚠ belegt: ${otherUses.map(u=>u.label).join(', ')}` : '';
+      o.textContent = `DeckLink ${s.deviceNumber} (Video-Ausgang)${s.videoModeWarning ? ' ⚠' : ''}${busyNote}`;
+      const titleParts = [s.videoModeWarning, otherUses.length ? `Gerät auch verwendet als: ${otherUses.map(u=>u.label).join(', ')}` : null].filter(Boolean);
+      if (titleParts.length) o.title = titleParts.join('\n');
       vSel.appendChild(o);
     });
     // Gespeicherten Wert wieder setzen (Dropdown wurde neu befüllt)
@@ -8250,7 +8274,11 @@ function _renderOutputsList(){
           <select data-f="deviceNumber" style="font-size:10px">
             ${_outputDecklinkDevices === null ? `<option value="">… suchen</option>` :
               !_outputDecklinkDevices.length ? `<option value="">keine gefunden</option>` :
-              _outputDecklinkDevices.filter(d=>d.videoSink).map(d=>`<option value="${d.deviceNumber}"${o.deviceNumber===d.deviceNumber?' selected':''}>DeckLink ${d.deviceNumber} (${d.name||''})</option>`).join('')}
+              _outputDecklinkDevices.filter(d=>d.videoSink).map(d=>{
+                const otherUses=(d.usedBy||[]).filter(u=>u.role!=='extra-output');
+                const busyNote=otherUses.length?` ⚠ belegt: ${otherUses.map(u=>u.label).join(', ')}`:'';
+                return `<option value="${d.deviceNumber}"${o.deviceNumber===d.deviceNumber?' selected':''}>DeckLink ${d.deviceNumber} (${d.name||''})${busyNote}</option>`;
+              }).join('')}
           </select>
         </label>
         <button class="btn btn-s" onclick="_outputDiscoverDecklink()" title="DeckLink-Ausgänge neu suchen">🔍</button>
