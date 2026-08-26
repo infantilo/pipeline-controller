@@ -6,15 +6,32 @@
 process.env.UV_THREADPOOL_SIZE = '16';
 process.env.GST_GL_API = 'none';
 
-// ── DMF/MXL Plugin-Pfade (GST_PLUGIN_PATH/LD_LIBRARY_PATH) müssen wie GST_DEBUG
-// VOR dem ersten require('gst-kit') gesetzt sein — gst_init() scannt Plugin-Pfade
-// nur beim Start. env/mxl.env wird von scripts/install-mxl.sh erzeugt; per `bash -c
-// source` statt eigenem Parser geladen, damit ${VAR:-}-Erweiterungen darin korrekt
-// aufgelöst werden.
-(function applyMxlEnvEarly() {
+// Gleiche Auflösung wie _writablePath() weiter unten (Zeile ~93) — hier dupliziert,
+// weil diese frühen IIFEs (mxl.env, GST_DEBUG) VOR dem ersten require('gst-kit')
+// laufen müssen, also bevor _writablePath() überhaupt definiert ist. Ohne den
+// APPDIR-Zweig lesen beide im AppImage-Betrieb vom read-only squashfs-Mount
+// (__dirname) statt aus dem echten, beschreibbaren Datenverzeichnis — das
+// bundle-Standard-settings.json/env/mxl.env wird dann lautlos verwendet, die
+// echten (vom User gespeicherten) Werte greifen nie (z.B. gstDebugFilter).
+function _earlyDataDir() {
+  const path = require('path');
+  if (process.env.PC_DATA_DIR) return process.env.PC_DATA_DIR;
+  if (process.env.APPDIR) return path.join(process.env.XDG_DATA_HOME || path.join(process.env.HOME || '~', '.local', 'share'), 'pipeline-controller');
+  return __dirname;
+}
+
+// ── Plugin-Pfade (GST_PLUGIN_PATH/LD_LIBRARY_PATH) für extern gebaute GStreamer-
+// Plugins (DMF/MXL, Intel MTL/ST2110) müssen wie GST_DEBUG VOR dem ersten
+// require('gst-kit') gesetzt sein — gst_init() scannt Plugin-Pfade nur beim Start.
+// env/mxl.env bzw. env/mtl.env werden von scripts/install-mxl.sh bzw.
+// scripts/install-mtl.sh erzeugt; per `bash -c source` statt eigenem Parser
+// geladen, damit ${VAR:-}-Erweiterungen darin korrekt aufgelöst werden.
+// GST_PLUGIN_PATH wird dabei zusammengeführt (mehrere Plugin-Sets gleichzeitig
+// aktiv) statt vom später geladenen Env überschrieben.
+function _applyExternalEnvEarly(envFileName, extraKeys) {
   const fs   = require('fs');
   const path = require('path');
-  const envPath = path.join(process.env.PC_DATA_DIR || __dirname, 'env', 'mxl.env');
+  const envPath = path.join(_earlyDataDir(), 'env', envFileName);
   if (!fs.existsSync(envPath)) return;
   try {
     const { execFileSync } = require('child_process');
@@ -22,13 +39,18 @@ process.env.GST_GL_API = 'none';
     for (const line of out.split('\n')) {
       const i = line.indexOf('=');
       if (i <= 0) continue;
-      const key = line.slice(0, i);
-      if (['GST_PLUGIN_PATH', 'LD_LIBRARY_PATH', 'MXL_DOMAIN', 'MXL_INFO_BIN', 'PATH'].includes(key)) {
-        process.env[key] = line.slice(i + 1);
+      const key = line.slice(0, i), val = line.slice(i + 1);
+      if (key === 'GST_PLUGIN_PATH' || key === 'LD_LIBRARY_PATH' || key === 'PATH') {
+        const existing = process.env[key];
+        process.env[key] = existing ? `${val}:${existing}` : val;
+      } else if (extraKeys.includes(key)) {
+        process.env[key] = val;
       }
     }
-  } catch (e) { console.warn(`[mxl] env/mxl.env konnte nicht geladen werden: ${e.message}`); }
-})();
+  } catch (e) { console.warn(`[${envFileName}] konnte nicht geladen werden: ${e.message}`); }
+}
+_applyExternalEnvEarly('mxl.env', ['MXL_DOMAIN', 'MXL_INFO_BIN']);
+_applyExternalEnvEarly('mtl.env', ['MTL_BACKEND']);
 
 // Robust gegen versehentlich mitgetipptes "GST_DEBUG=" (naheliegend, da Doku/
 // Log-Hinweise den Filter oft in Shell-Form GST_DEBUG="foo:5" zeigen) und
@@ -55,7 +77,7 @@ function _sanitizeGstDebugFilter(raw) {
   if (process.env.GST_DEBUG) { process.env.GST_DEBUG_NO_COLOR ??= '1'; return; }
   const fs   = require('fs');
   const path = require('path');
-  const settingsPath = path.join(process.env.PC_DATA_DIR || __dirname, 'settings.json');
+  const settingsPath = path.join(_earlyDataDir(), 'settings.json');
   try {
     const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     const cleaned = _sanitizeGstDebugFilter(s.gstDebugFilter);
@@ -728,6 +750,52 @@ function _buildUriLiveAudioSrc(uri, latencyMs = 200) {
   return `uridecodebin uri="${uri}" name=dec dec. ! audioconvert ! audioresample`;
 }
 
+// ── Intel MTL / SMPTE ST2110 Live-Quellen (Intel E810 o.ä.) ─────────────────────
+// Bewusst NICHT wie DeckLink direkt in die Master-Pipeline eingebettet — siehe
+// _isEmbedded() in lib/MasterPipeline.js: eine fehlschlagende Netzwerk-/Hardware-
+// Quelle darf die Master-Pipeline nicht mitreißen (exakt das Problem, das diese
+// Session bei eingebetteten DeckLink-Live-Quellen gelöst hat). ST2110-Quellen
+// laufen daher immer über den bestehenden, isolierten startLiveFeeder()-Pfad
+// (separate Pipeline → intervideosrc/interaudiosrc-Brücke), keepAlive wird beim
+// Speichern hart auf false erzwungen (siehe /api/live-sources Handler).
+//
+// dev-port/dev-ip: die per scripts/install-mtl.sh gebundene E810-Schnittstelle
+// (siehe _settings.st2110) — EIN MTL-Kontext pro Prozess, daher zentral statt
+// pro Quelle konfigurierbar. video-/audio-ip:port:payload-type sind je Quelle
+// unterschiedlich (Multicast-Gruppe/Unicast-Absender + RTP-Payload-Type).
+//
+// ACHTUNG: Element-/Property-Namen (mtl_st20p_rx/mtl_st30p_rx, dev-port, dev-ip,
+// ip, udp-port, payload-type, fmt, …) folgen der öffentlich dokumentierten MTL-
+// GStreamer-Plugin-API (OpenVisualCloud/Media-Transport-Library, ecosystem/
+// gstreamer_plugin) — NICHT gegen echten gst-inspect-1.0-Output verifiziert
+// (MTL war zum Zeitpunkt der Implementierung noch nicht installiert). Nach
+// scripts/install-mtl.sh gegen `gst-inspect-1.0 mtl_st20p_rx`/`mtl_st30p_rx`
+// prüfen und hier ggf. anpassen — dies ist die einzige Stelle für die RX-Seite.
+function _st2110DevProps() {
+  const s = _settings.st2110 || {};
+  return `dev-port=${s.devIface || 'auto'}${s.devIp ? ` dev-ip=${s.devIp}` : ''}`;
+}
+
+function _buildSt2110VideoSrc(ls) {
+  const v = ls.st2110?.video;
+  if (!v?.ip || !v?.port) return null;
+  const width  = parseInt(v.width)  || masterOpts.width  || 1920;
+  const height = parseInt(v.height) || masterOpts.height || 1080;
+  const fps    = v.fps || masterOpts.fps || 25;
+  return `mtl_st20p_rx ${_st2110DevProps()} ip=${v.ip} udp-port=${v.port}` +
+    ` payload-type=${v.payloadType ?? 112} width=${width} height=${height} fps=${fps}` +
+    ` fmt=${v.format || 'YUV422PLANAR10LE'} ! videoconvert`;
+}
+
+function _buildSt2110AudioSrc(ls) {
+  const a = ls.st2110?.audio;
+  if (!a?.ip || !a?.port) return null;
+  return `mtl_st30p_rx ${_st2110DevProps()} ip=${a.ip} udp-port=${a.port}` +
+    ` payload-type=${a.payloadType ?? 111} channel=${a.channels || 2}` +
+    ` sampling=${a.sampling || '48kHz'} ptime=${a.ptime || '1ms'} fmt=${a.format || 'pcm24'}` +
+    ` ! audioconvert ! audioresample`;
+}
+
 // ── Pipeline-Latenz-Messung ────────────────────────────────────────────────────
 // Misst die aktuelle GStreamer-Pipeline-Latenz (min/max) und gibt Empfehlungen.
 // GStreamer-Pipelines propagieren Latenz-Queries von Senken zu Quellen.
@@ -1296,8 +1364,17 @@ let _clockProviderEffective = audioGroupConfig?.clock?.provider || 'audiotestsrc
 if (_clockProviderEffective === 'audiotestsrc' && /decklinkvideosink/.test(masterOpts.videoSink || '')) {
   _clockProviderEffective = 'ptp-decklink';
   log('Pipeline-Clock: DeckLink (PTP-locked) — automatisch, da PGM-Video-Sink DeckLink ist', 'info', 'master');
+} else if (_clockProviderEffective === 'audiotestsrc' && /mtl_st20p_tx/.test(masterOpts.videoSink || '')) {
+  _clockProviderEffective = 'ptp-mtl';
+  log('Pipeline-Clock: Intel MTL/ST2110 (PTP-locked) — automatisch, da PGM-Video-Sink MTL ist', 'info', 'master');
 }
-masterOpts.clockStrategy = new ClockStrategy({ ...(audioGroupConfig?.clock || {}), provider: _clockProviderEffective });
+// st2110Audio aus audio_config.json (ip/port/payloadType/… je Gruppe, per /api/audio/clock
+// gesetzt) mit der geteilten NIC-Bindung aus _settings.st2110 (devIface/devIp, EIN MTL-
+// Kontext pro Prozess, siehe scripts/install-mtl.sh) zusammenführen — AudioRouter._buildSink()
+// braucht beides zusammen, um den mtl_st30p_tx-Sink-String zu bauen.
+const _clockCfg = { ...(audioGroupConfig?.clock || {}), provider: _clockProviderEffective };
+if (_clockCfg.st2110Audio) _clockCfg.st2110Audio = { ..._settings.st2110, ..._clockCfg.st2110Audio };
+masterOpts.clockStrategy = new ClockStrategy(_clockCfg);
 
 // ── VoiceoverEngine ───────────────────────────────────────────────────────────
 const VoiceoverEngine  = require('./lib/VoiceoverEngine');
@@ -1440,9 +1517,44 @@ master.on('error',    msg => log(msg, 'error', 'master'));
 // (_startLiveSignalPoll) und nur bei Änderung hier emittiert — Key ist die Live-
 // Quellen-ID (z.B. "live1"), nicht ein Geräte-Slot.
 master.on('decklink-signal', d => {
-  _dlSignalStatus[d.id] = { ...(_dlSignalStatus[d.id]||{}), ok: d.ok, ts: Date.now() };
+  // error gesetzt (siehe MasterPipeline.markLiveSourceBroken): echter Hardware-/Treiber-Fehler,
+  // nicht nur "kein Signal anliegend" — Quelle wurde bereits durch einen Platzhalter ersetzt.
+  // Alten error-Wert NUR löschen, wenn dieses Event explizit ok:true meldet (normale
+  // Signal-Poll-Updates für andere Quellen dürfen einen vorhandenen error nicht überschreiben).
+  const prev = _dlSignalStatus[d.id] || {};
+  _dlSignalStatus[d.id] = { ...prev, ok: d.ok, ts: Date.now(), error: d.error ?? (d.ok ? null : prev.error) };
   broadcast('decklink-signal', _dlSignalStatus);
-  if (!d.ok) log(`DeckLink: kein Signal auf Live-Quelle "${d.id}"`, 'warn', 'system');
+  if (!d.ok && !d.error) log(`DeckLink: kein Signal auf Live-Quelle "${d.id}"`, 'warn', 'system');
+});
+// Live-Quelle wurde als defekt markiert (E_ACCESSDENIED, "in use already", …) und ab dem
+// nächsten Pipeline-Aufbau durch einen harmlosen Platzhalter ersetzt — siehe
+// MasterPipeline.markLiveSourceBroken(). Muss aktiv über /api/live-sources/:id/retry
+// zurückgesetzt werden (siehe dort), damit ein defekter Kanal nie automatisch wieder
+// eingebettet wird und die Pipeline erneut mit sich reißen kann.
+// Automatischer Einmal-Rebuild NACH der Erkennung: markLiveSourceBroken() wirkt nur auf den
+// NÄCHSTEN build()-Aufruf — ohne diesen Trigger bliebe das echte (kaputte) Decklink-Element
+// bis zum nächsten UNABHÄNGIGEN Rebuild-Anlass (z.B. Live-Quellen erneut speichern) live in
+// der Pipeline eingebettet. In diesem Fenster zeigt der betroffene isel-Pad kein Bild (schwarz,
+// wenn angewählt) UND das Element trägt weiter das Korruptions-Risiko beim nächsten Stop/Start
+// (siehe markLiveSourceBroken()-Kommentar in MasterPipeline.js). Debounce, falls kurz hinter-
+// einander mehrere Quellen brechen — dann nur EIN Rebuild für alle zusammen.
+let _liveSourceHealTimer = null;
+master.on('live-source-broken', d => {
+  log(`⚠ Live-Quelle "${d.id}" ist defekt (${d.message}) — Kanal deaktiviert, Pipeline bleibt stabil. Hardware/Konfiguration prüfen und über die UI erneut versuchen.`, 'error', 'system');
+  clearTimeout(_liveSourceHealTimer);
+  _liveSourceHealTimer = setTimeout(() => {
+    _liveSourceHealTimer = null;
+    (async () => {
+      // Niemals stop() aufrufen während ein Start-Vorgang noch läuft (masterStarted wird erst
+      // am Ende von ensureMaster() gesetzt) — das könnte die MasterPipeline-Instanz korrumpieren.
+      for (let i = 0; i < 20 && !masterStarted; i++) await new Promise(r => setTimeout(r, 250));
+      log('Automatischer Rebuild nach defekter Live-Quelle — ersetzt sie durch Platzhalter…', 'info', 'master');
+      await master.stop(); masterStarted = false;
+      if (/decklinkvideosink/.test(masterOpts.videoSink || '')) await new Promise(r => setTimeout(r, 800));
+      await ensureMaster();
+      broadcast('state', getState());
+    })().catch(e => log(`Automatischer Rebuild nach defekter Live-Quelle fehlgeschlagen: ${e.message}`, 'error', 'master'));
+  }, 2000);
 });
 // Tatsächlich verhandeltes Video-Format (Auflösung/FPS/Interlace) der DeckLink-
 // Source — rein informativ aus den negotiated Caps, siehe MasterPipeline._parseVideoCaps.
@@ -2269,11 +2381,18 @@ async function ensureMaster() {
   // ohne Detail). Beobachtet: ein zweiter Versuch nach kurzer Wartezeit läuft
   // oft durch. Ein Retry ist hier risikolos — bei echtem Hardwaredefekt
   // scheitert er genauso und die normale Fehlerbehandlung greift danach.
-  if (!ok && /decklinkvideosink/.test(masterOpts.videoSink || '')) {
-    log('Master-Start fehlgeschlagen (DeckLink) — erneuter Versuch in 2s (Karte evtl. noch nicht freigegeben)…', 'warn', 'master');
-    await new Promise(r => setTimeout(r, 2000));
+  // Bei Live-Quellen-Rebuilds gibt eine DeckLink-IP-Karte oft MEHRERE Kanäle
+  // gleichzeitig frei/neu an (1 Ausgang + N Eingänge als eigene Netzwerk-Streams)
+  // — ein einzelner 2s-Retry reicht dafür nicht immer. Mehrere Versuche mit
+  // steigendem Backoff sind risikolos — bei echtem Hardwaredefekt scheitert
+  // der letzte Versuch genauso und die normale Fehlerbehandlung greift danach.
+  const DECKLINK_RETRY_DELAYS_MS = [2000, 3000, 5000];
+  for (let i = 0; !ok && i < DECKLINK_RETRY_DELAYS_MS.length && /decklinkvideosink/.test(masterOpts.videoSink || ''); i++) {
+    const delay = DECKLINK_RETRY_DELAYS_MS[i];
+    log(`Master-Start fehlgeschlagen (DeckLink) — erneuter Versuch in ${delay / 1000}s (Karte evtl. noch nicht freigegeben)… [${i + 1}/${DECKLINK_RETRY_DELAYS_MS.length}]`, 'warn', 'master');
+    await new Promise(r => setTimeout(r, delay));
     ok = await master.start();
-    if (ok) log('Master-Pipeline im 2. Versuch erfolgreich gestartet ✓', 'info', 'master');
+    if (ok) log(`Master-Pipeline im ${i + 2}. Versuch erfolgreich gestartet ✓`, 'info', 'master');
   }
 
   if (ok) {
@@ -2760,6 +2879,26 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       deviceNumber: o.deviceNumber != null ? parseInt(o.deviceNumber) : null,
       decklinkMode: o.decklinkMode || '1080p25',
       decklinkAudio: o.decklinkAudio !== false,
+      // ST2110 (Intel MTL/E810): dev-Bindung aus der geteilten _settings.st2110
+      // stempeln (EIN MTL-Kontext pro Prozess, siehe scripts/install-mtl.sh) —
+      // wie gstSrc bei Live-Quellen wird das beim Speichern aufgelöst, nicht zur
+      // Build-Zeit gelesen (OutputEngine kennt _settings nicht, siehe dort).
+      st2110DevIface: _settings.st2110?.devIface || 'auto',
+      st2110DevIp:    _settings.st2110?.devIp    || '',
+      st2110Video: o.st2110VideoIp ? {
+        ip: o.st2110VideoIp, port: parseInt(o.st2110VideoPort) || 20000,
+        payloadType: o.st2110VideoPayloadType != null ? parseInt(o.st2110VideoPayloadType) : 112,
+        format: o.st2110VideoFormat || 'YUV422PLANAR10LE',
+        width: parseInt(o.st2110VideoWidth) || 0, height: parseInt(o.st2110VideoHeight) || 0,
+        fps: parseInt(o.st2110VideoFps) || 0,
+      } : null,
+      st2110Audio: o.st2110AudioIp ? {
+        ip: o.st2110AudioIp, port: parseInt(o.st2110AudioPort) || 20001,
+        payloadType: o.st2110AudioPayloadType != null ? parseInt(o.st2110AudioPayloadType) : 111,
+        channels: parseInt(o.st2110AudioChannels) || 2,
+        sampling: o.st2110AudioSampling || '48kHz', ptime: o.st2110AudioPtime || '1ms',
+        format: o.st2110AudioFormat || 'pcm24',
+      } : null,
     }));
     _settings.extraOutputs = outputs;
     saveSettings(_settings);
@@ -3907,7 +4046,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   }
   if (meth === 'POST' && p === '/api/settings') {
     const b = await parseBody(req);
-    const _settingsKeys = ['autoGap','stillSlots','maxClients','grafikLatencyMs','videoDelayMs','audioDelayMs','liveCueMode','liveCueLeadSec','mxlDomain'];
+    const _settingsKeys = ['autoGap','stillSlots','maxClients','grafikLatencyMs','videoDelayMs','audioDelayMs','liveCueMode','liveCueLeadSec','mxlDomain','st2110'];
     const _before = {}; for (const k of _settingsKeys) _before[k] = _settings[k];
     if (b.autoGap !== undefined) {
       playlist.opts.autoGap = !!b.autoGap;
@@ -3939,6 +4078,11 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
       playlist.opts.liveCueLeadSec = _settings.liveCueLeadSec;
     }
     if (b.mxlDomain !== undefined) _settings.mxlDomain = String(b.mxlDomain).trim() || '/dev/shm/mxl';
+    // ST2110 (Intel MTL/E810): geteilte NIC-Bindung — EIN MTL-Kontext pro Prozess
+    // (siehe scripts/install-mtl.sh), daher hier statt pro Quelle/Ausgang.
+    if (b.st2110 !== undefined && typeof b.st2110 === 'object') {
+      _settings.st2110 = { devIface: String(b.st2110.devIface || 'auto').trim(), devIp: String(b.st2110.devIp || '').trim() };
+    }
     saveSettings(_settings);
     _logConfigDiff(req, 'settings', _before, _settings, _settingsKeys);
     broadcast('state', getState());
@@ -3984,6 +4128,16 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     for (const ls of b.liveSources) {
       if (!ls.id) return json(res, { error: 'Jede Quelle braucht eine id' }, 400);
       if (!/^[a-zA-Z0-9_-]+$/.test(ls.id)) return json(res, { error: `Ungültige id: "${ls.id}" (nur a-z, 0-9, _, -)` }, 400);
+      // ST2110 (Intel MTL/E810): strukturierte Felder statt URI-Shorthand (zu viele
+      // Parameter für eine URI — siehe _buildSt2110VideoSrc/_buildSt2110AudioSrc).
+      // keepAlive HART auf false — niemals embedden, siehe Kommentar dort.
+      if (ls.type === 'st2110') {
+        ls.gstSrc = _buildSt2110VideoSrc(ls);
+        if (!ls.gstSrc) return json(res, { error: `Quelle "${ls.id}": ST2110 Video-IP/Port erforderlich` }, 400);
+        const aSrc = _buildSt2110AudioSrc(ls);
+        if (aSrc) { ls.gstAudioSrc = aSrc; ls.hasAudio = true; }
+        ls.keepAlive = false;
+      }
       // uri-Shorthand: RTSP / HLS / UDP / HTTP → automatisch gstSrc generieren
       if (ls.uri && !ls.gstSrc) {
         ls.gstSrc = _buildUriLiveSrc(ls.uri, ls.uriLatencyMs ?? 200);
@@ -4006,6 +4160,35 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     // erneut auf, das jetzt _liveSources frisch aus masterOpts liest (siehe
     // MasterPipeline.build()) — neue Pads entstehen ohne Prozess-Neustart.
     await master.stop(); masterStarted = false;
+    // Kurze Settle-Zeit bevor neu gestartet wird: bei DeckLink-Video-Sink reißt der
+    // Rebuild ALLE Karten-Kanäle auf einmal ab (Ausgang + jede eingebettete Live-
+    // Quelle als eigener Kanal) — ohne diese Pause verliert schon der erste
+    // Start-Versuch das Rennen gegen die Treiber-Freigabe (siehe ensureMaster()-
+    // Retry-Kommentar) und man landet unnötig im Retry-Pfad.
+    if (/decklinkvideosink/.test(masterOpts.videoSink || '')) await new Promise(r => setTimeout(r, 800));
+    const ok = await ensureMaster();
+    broadcast('state', getState());
+    return json(res, ok
+      ? { ok: true, note: 'Pipeline neu aufgebaut' }
+      : { ok: false, error: 'Pipeline-Rebuild fehlgeschlagen — siehe Server-Log' });
+  }
+
+  // ── Live-Quelle als defekt markiert (siehe MasterPipeline.markLiveSourceBroken) manuell
+  // zurücksetzen: der Kanal wird beim nächsten Rebuild wieder mit der echten Hardware-Quelle
+  // statt dem Platzhalter versucht. Absichtlich NICHT automatisch — ein wiederholter
+  // Auto-Retry auf ungeprüfter Hardware/Konfiguration war genau die Ursache, die die
+  // Pipeline im Fehlerfall mit sich reißen konnte.
+  if (meth === 'POST' && p.startsWith('/api/live-sources/') && p.endsWith('/retry')) {
+    const sess = _requireAuth(req, res, ['admin']); if (sess === false) return;
+    const id = decodeURIComponent(p.slice('/api/live-sources/'.length, -'/retry'.length));
+    if (!master.isLiveSourceBroken(id)) return json(res, { ok: false, error: `Live-Quelle "${id}" ist nicht als defekt markiert` }, 404);
+    master.clearLiveSourceBroken(id);
+    delete _dlSignalStatus[id];
+    broadcast('decklink-signal', _dlSignalStatus);
+    _userLog(sess, 'live-source.retry', id);
+    log(`Live-Quelle "${id}": Retry angefordert — Pipeline wird neu aufgebaut`, 'info', 'system');
+    await master.stop(); masterStarted = false;
+    if (/decklinkvideosink/.test(masterOpts.videoSink || '')) await new Promise(r => setTimeout(r, 800));
     const ok = await ensureMaster();
     broadcast('state', getState());
     return json(res, ok
@@ -4280,7 +4463,7 @@ function getState() {
     slots:    { onAir: playlist._onAirSlot, idle: playlist._idleSlot },
     playlist: { running: playlist._running, paused: playlist._paused, currentIndex: playlist.currentIndex, length: playlist.playlist.length },
     playing:  _currentPlaying ? { ..._currentPlaying, elapsedMs: Date.now() - _currentPlaying.startMs } : null,
-    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, mxlDomain: _settings.mxlDomain||'/dev/shm/mxl', extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'], decklinkOutputInterlaced: !!_settings.decklinkOutputInterlaced },
+    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, mxlDomain: _settings.mxlDomain||'/dev/shm/mxl', st2110: _settings.st2110||{devIface:'auto',devIp:''}, extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'], decklinkOutputInterlaced: !!_settings.decklinkOutputInterlaced },
     avSync:   master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs??0, audioMs: _settings.audioDelayMs||{} },
     grafik:   { active: activeGrafiks },
     audioTrackFallbackActive: Array.from(_activeTrackFallbacks.values()),

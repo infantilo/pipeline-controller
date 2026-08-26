@@ -1348,6 +1348,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
           <option value="audiotestsrc" data-i18n="cfg.audio.clock.pulse">audiotestsrc — pulsesink Clock (Standard, stabil)</option>
           <option value="system" data-i18n="cfg.audio.clock.system">system — GstSystemClock (Monotone Systemzeit)</option>
           <option value="ptp-decklink">ptp-decklink — DeckLink PTP Hardware-Clock</option>
+          <option value="ptp-mtl">ptp-mtl — Intel E810/MTL PTP Hardware-Clock</option>
           <option value="ptp-generic">ptp-generic — Linux PTP via NIC (phc2sys)</option>
         </select>
       </div>
@@ -1364,6 +1365,25 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div id="cfg-clock-decklink-row" style="display:none" class="fld">
         <label>DeckLink Device Nr.</label>
         <input type="number" id="cfg-clock-decklink-dev" value="0" min="0" max="7" style="font-family:var(--mono);width:80px">
+      </div>
+      <div id="cfg-clock-mtl-row" style="display:none">
+        <div style="font-size:8px;color:var(--dim);margin-bottom:4px">ST2110-30-Ziel für das Audio der primären Gruppe (agrp_pgm_stereo) — NIC-Bindung siehe Server-Tab → ST2110.</div>
+        <div class="two-col">
+          <div class="fld"><label>Ziel-IP</label>
+            <input type="text" id="cfg-clock-mtl-ip" style="font-family:var(--mono)">
+          </div>
+          <div class="fld"><label>Port</label>
+            <input type="number" id="cfg-clock-mtl-port" value="20001" min="1" max="65535" style="font-family:var(--mono)">
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="fld"><label>Payload-Type</label>
+            <input type="number" id="cfg-clock-mtl-pt" value="111" min="0" max="127" style="font-family:var(--mono)">
+          </div>
+          <div class="fld"><label>Sampling</label>
+            <input type="text" id="cfg-clock-mtl-sampling" value="48kHz" style="font-family:var(--mono)">
+          </div>
+        </div>
       </div>
       <button class="btn btn-p" style="font-size:10px;margin-top:4px" onclick="cfgSaveClock()" data-i18n="cfg.audio.saveClock">💾 Clock speichern</button>
     </div>
@@ -1951,11 +1971,16 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <!-- Type picker -->
       <div style="margin-bottom:6px">
         <div style="font-size:9px;color:var(--dim);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Quelle hinzufügen:</div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px">
           <button class="btn" onclick="liveAddType('decklink')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
             <span style="font-size:16px">🎥</span>
             <span style="font-size:9px;font-weight:700">DeckLink</span>
             <span style="font-size:8px;color:var(--dim)">SDI / HDMI</span>
+          </button>
+          <button class="btn" onclick="liveAddType('st2110')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:16px">🌐</span>
+            <span style="font-size:9px;font-weight:700">ST2110</span>
+            <span style="font-size:8px;color:var(--dim)">Intel E810</span>
           </button>
           <button class="btn" onclick="liveAddType('network')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
             <span style="font-size:16px">📡</span>
@@ -2022,6 +2047,35 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         <span id="cfg-mxl-status" style="font-size:9px;color:var(--dim)"></span>
       </div>
       <div id="cfg-mxl-flows" style="display:none;font-size:9px;font-family:var(--mono);background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:6px;max-height:120px;overflow-y:auto;white-space:pre;line-height:1.6"></div>
+
+      <div class="sep"></div>
+      <!-- ── ST2110 / Intel MTL ── -->
+      <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">🌐 ST2110 (Intel E810 / MTL)</div>
+      <div style="font-size:9px;color:var(--dim);margin-bottom:8px;line-height:1.5">
+        Intel Media Transport Library — SMPTE ST2110 über E810-NIC. Setup: <code style="font-family:var(--mono)">scripts/install-mtl.sh</code>.
+        EIN MTL-Kontext pro Prozess — die NIC-Bindung hier gilt für alle ST2110-Live-Quellen/Zusatz-Ausgänge/den PGM-Sink gemeinsam.
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-bottom:8px;font-size:11px">
+        <label>Interface / PCI-ID</label>
+        <input type="text" id="cfg-st2110-iface" placeholder="auto (z.B. ens785f0 oder 0000:af:00.0)"
+               style="font-size:11px;padding:2px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:3px;font-family:var(--mono)">
+        <label>Lokale IP (dev-ip)</label>
+        <input type="text" id="cfg-st2110-devip" placeholder="192.168.96.2"
+               style="font-size:11px;padding:2px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:3px;font-family:var(--mono)">
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-p" style="font-size:10px" onclick="st2110Save()">💾 Speichern</button>
+        <span id="cfg-st2110-status" style="font-size:9px;color:var(--dim)"></span>
+      </div>
+      <div style="font-size:9px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">PGM-Video-Sink (Programm-Ausgang) auf ST2110 setzen</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px 6px;margin-bottom:6px;font-size:10px">
+        <label style="color:var(--dim)">Ziel-IP<input type="text" id="cfg-st2110-pgm-ip" style="width:100%;font-family:var(--mono);font-size:10px"></label>
+        <label style="color:var(--dim)">Port<input type="number" id="cfg-st2110-pgm-port" value="20000" min="1" max="65535" style="width:100%;font-family:var(--mono);font-size:10px"></label>
+        <label style="color:var(--dim)">Payload-Type<input type="number" id="cfg-st2110-pgm-pt" value="112" min="0" max="127" style="width:100%;font-family:var(--mono);font-size:10px"></label>
+        <label style="color:var(--dim)">Format<input type="text" id="cfg-st2110-pgm-fmt" value="YUV422PLANAR10LE" style="width:100%;font-family:var(--mono);font-size:10px"></label>
+      </div>
+      <button class="btn btn-p" style="font-size:10px" onclick="st2110SetAsPgmSink()">📤 Als PGM-Video-Sink aktivieren &amp; Neustart</button>
+      <div style="font-size:8px;color:var(--dim);margin-top:6px">Audio der primären Gruppe (ST2110-30) wird über die Clock-Quelle "ptp-mtl" im Tab Audio → Clock-Quelle konfiguriert.</div>
     </div>
 
     <!-- ── TAB: SHORTCUTS ─────────────────────────────────────────── -->
@@ -5189,7 +5243,9 @@ function renderPl(){
     // DeckLink signal badge — only for live sources whose gstSrc contains decklink
     const _dlSrc=_lsConf&&/decklink/i.test(_lsConf.gstSrc||'')?_lsConf:null;
     const _dlStatus=_dlSrc?(S._dlSignal||{})[_dlSrc.id]:null;
-    const _dlBadge=_dlSrc?(_dlStatus?.ok===false
+    const _dlBadge=_dlSrc?(_dlStatus?.error
+      ?`<span style="font-size:8px;color:var(--red);font-weight:700;margin-left:3px" title="DeckLink: Defekt — Platzhalter aktiv (${_esc(_dlStatus.error)})">📡⛔</span>`
+      :_dlStatus?.ok===false
       ?`<span style="font-size:8px;color:var(--red);font-weight:700;margin-left:3px" title="DeckLink: Kein Signal">📡✗</span>`
       :_dlStatus?.ok===true
         ?`<span style="font-size:8px;color:var(--green);margin-left:3px" title="DeckLink: Signal OK">📡✓</span>`
@@ -6113,6 +6169,7 @@ async function _loadLiveTab(){
 
 // ── Detects source type from its data ────────────────────────────────────────
 function _liveRowType(ls){
+  if(ls.type==='st2110') return 'st2110';
   if(/decklink/i.test(ls.gstSrc||'')) return 'decklink';
   if(/^mxl:\/\//i.test(ls.uri||'')) return 'mxl';
   if(ls.uri) return 'network';
@@ -6121,6 +6178,7 @@ function _liveRowType(ls){
 
 const _LIVE_TYPE_DEF={
   decklink:{icon:'🎥',label:'DeckLink / SDI',color:'#5a8fd0'},
+  st2110:  {icon:'🌐',label:'ST2110 / E810',  color:'#e08a3c'},
   network: {icon:'📡',label:'Netzwerk / IP', color:'#4caf84'},
   mxl:     {icon:'🔗',label:'DMF / MXL',     color:'#b07cd4'},
   manual:  {icon:'🔧',label:'Manuell',        color:'#888'},
@@ -6165,7 +6223,15 @@ function _renderLiveList(){
       const detFmt=S._dlSignal?.[ls.id]?.format||null;
       const curFmtStr=`${S.config?.width||1920}x${S.config?.height||1080}@${S.config?.fps||25}`;
       const fmtMatch=detFmt&&`${detFmt.width}x${detFmt.height}@${detFmt.fps}`===curFmtStr;
+      const dlError=S._dlSignal?.[ls.id]?.error||null;
       typeBody=`
+      ${dlError?`
+      <div style="display:flex;gap:6px;align-items:flex-start;font-size:9px;background:rgba(220,50,50,0.12);border:1px solid rgba(220,50,50,0.4);border-radius:3px;padding:4px 6px"
+        title="Kanal wurde deaktiviert und läuft als Platzhalter (Schwarzbild/Stille), damit die Pipeline stabil bleibt. Ursache in Blackmagic Desktop Video / IP Video Configuration prüfen, dann erneut versuchen.">
+        <span style="color:var(--red,#e74c3c)">⛔ Defekt — Platzhalter aktiv:</span>
+        <span style="color:var(--red,#e74c3c);font-family:var(--mono);flex:1">${_esc(dlError)}</span>
+        <button class="btn" style="font-size:9px;padding:1px 6px;flex-shrink:0" onclick="_retryLiveSource('${_esc(ls.id)}')">🔄 Erneut versuchen</button>
+      </div>`:''}
       <div style="display:grid;grid-template-columns:auto 80px auto 1fr;gap:4px 8px;align-items:center;font-size:10px">
         <span style="color:var(--dim)">Gerät #</span>
         <input id="dl-dev-${i}" type="number" min="0" max="7" value="${_esc(devNum)}"
@@ -6191,6 +6257,44 @@ function _renderLiveList(){
         <span style="color:var(--yellow)">⚠ Gerät #${_esc(devNum)} belegt als:</span>
         <span style="color:var(--yellow)">${ls.deviceConflicts.map(c=>_esc(c.label)).join(', ')}</span>
       </div>`:''}`;
+
+    }else if(type==='st2110'){
+      const st2110=ls.st2110||(ls.st2110={video:{},audio:{}});
+      const v=st2110.video||(st2110.video={});
+      const a=st2110.audio||(st2110.audio={});
+      const stFld=(label,val,onInput,opts)=>`
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <span style="font-size:8px;color:var(--dim)">${label}</span>
+          <input ${opts||'type="text"'} value="${_esc(String(val??''))}"
+            style="font-size:10px;padding:2px 4px;background:var(--bg4);border:1px solid var(--border);color:var(--fg);border-radius:3px;font-family:var(--mono)"
+            oninput="${onInput}">
+        </div>`;
+      typeBody=`
+      <div style="font-size:9px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Video (ST2110-20)</div>
+      <div style="display:grid;grid-template-columns:1.4fr 0.7fr 0.6fr;gap:4px 6px">
+        ${stFld('Ziel-IP (Multicast/Unicast)',v.ip,`_liveRows[${i}].st2110.video.ip=this.value`)}
+        ${stFld('Port',v.port,`_liveRows[${i}].st2110.video.port=+this.value`,'type="number" min="1" max="65535"')}
+        ${stFld('Payload-Type',v.payloadType,`_liveRows[${i}].st2110.video.payloadType=+this.value`,'type="number" min="0" max="127"')}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 0.6fr 0.6fr 0.6fr;gap:4px 6px">
+        ${stFld('Format',v.format||'YUV422PLANAR10LE',`_liveRows[${i}].st2110.video.format=this.value`)}
+        ${stFld('Breite',v.width,`_liveRows[${i}].st2110.video.width=+this.value`,'type="number" min="1"')}
+        ${stFld('Höhe',v.height,`_liveRows[${i}].st2110.video.height=+this.value`,'type="number" min="1"')}
+        ${stFld('FPS',v.fps,`_liveRows[${i}].st2110.video.fps=+this.value`,'type="number" min="1"')}
+      </div>
+      <div style="font-size:9px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Audio (ST2110-30, optional)</div>
+      <div style="display:grid;grid-template-columns:1.4fr 0.7fr 0.6fr;gap:4px 6px">
+        ${stFld('Ziel-IP',a.ip,`_liveRows[${i}].st2110.audio.ip=this.value`)}
+        ${stFld('Port',a.port,`_liveRows[${i}].st2110.audio.port=+this.value`,'type="number" min="1" max="65535"')}
+        ${stFld('Payload-Type',a.payloadType,`_liveRows[${i}].st2110.audio.payloadType=+this.value`,'type="number" min="0" max="127"')}
+      </div>
+      <div style="display:grid;grid-template-columns:0.6fr 0.7fr 0.6fr 0.7fr;gap:4px 6px">
+        ${stFld('Kanäle',a.channels,`_liveRows[${i}].st2110.audio.channels=+this.value`,'type="number" min="1" max="16"')}
+        ${stFld('Sampling',a.sampling||'48kHz',`_liveRows[${i}].st2110.audio.sampling=this.value`)}
+        ${stFld('Ptime',a.ptime||'1ms',`_liveRows[${i}].st2110.audio.ptime=this.value`)}
+        ${stFld('Format',a.format||'pcm24',`_liveRows[${i}].st2110.audio.format=this.value`)}
+      </div>
+      <div style="font-size:8px;color:var(--dim)">NIC-Bindung (Interface/PCI-ID, lokale IP) gilt geräteweit — siehe Server-Tab → ST2110.</div>`;
 
     }else if(type==='network'){
       typeBody=`
@@ -6431,6 +6535,14 @@ async function liveAddType(type){
     _liveRows.push({id:'',_autoId:'',label:'',uri:'',gstSrc:'',inputId:'',keepAlive:false,audioSources:[]});
   }else if(type==='mxl'){
     _liveRows.push({id:'',_autoId:'',label:'',uri:'',gstSrc:'',mxlDomain:S.config?.mxlDomain||'/dev/shm/mxl',inputId:'',keepAlive:false,audioSources:[]});
+  }else if(type==='st2110'){
+    // keepAlive IMMER false — ST2110-Quellen werden nie embedded (siehe server.js
+    // Kommentar bei _buildSt2110VideoSrc). type:'st2110' steuert das strukturierte
+    // Panel (siehe _renderLiveList) statt der freien gstSrc-Eingabe.
+    _liveRows.push({id:'',_autoId:'',label:'',type:'st2110',uri:'',gstSrc:'',inputId:'',keepAlive:false,
+      st2110:{video:{ip:'',port:20000,payloadType:112,format:'YUV422PLANAR10LE',width:S.config?.width||1920,height:S.config?.height||1080,fps:S.config?.fps||25},
+              audio:{ip:'',port:20001,payloadType:111,channels:2,sampling:'48kHz',ptime:'1ms',format:'pcm24'}},
+      audioSources:[]});
   }else{
     _liveRows.push({id:'',_autoId:'',label:'',uri:'',gstSrc:'',inputId:'',keepAlive:true,audioSources:[]});
   }
@@ -6474,9 +6586,24 @@ function mxlSelectFlow(i,gi){
   _renderLiveList();
 }
 
+async function _retryLiveSource(id){
+  if(!await _confirmRestart(`Live-Quelle "${id}" erneut versuchen — Pipeline-Neustart erforderlich`)) return;
+  showToast('⏳ Erneuter Versuch — Pipeline wird neu aufgebaut…');
+  try {
+    const r=await fetch(`/api/live-sources/${encodeURIComponent(id)}/retry`,{method:'POST'}).then(r=>r.json());
+    showToast(r.ok ? '✅ Pipeline neu aufgebaut' : '⚠ '+(r.error||'Fehler'));
+  } catch(e){ showToast('⚠ Fehler: '+e.message); }
+}
+
+function _liveRowHasSource(ls){
+  // ST2110: gstSrc wird server-seitig aus st2110.video/audio gebaut (siehe
+  // _buildSt2110VideoSrc in server.js) — clientseitig reicht die Video-Ziel-IP.
+  if(ls.type==='st2110') return !!ls.st2110?.video?.ip;
+  return !!(ls.gstSrc||ls.uri);
+}
 async function liveSave(){
-  const valid=_liveRows.filter(ls=>ls.id&&(ls.gstSrc||ls.uri));
-  const invalid=_liveRows.filter(ls=>!ls.id||(!ls.gstSrc&&!ls.uri));
+  const valid=_liveRows.filter(ls=>ls.id&&_liveRowHasSource(ls));
+  const invalid=_liveRows.filter(ls=>!ls.id||!_liveRowHasSource(ls));
   if(invalid.length){showToast(`⚠ ${invalid.length} Einträge ohne id, gstSrc oder URI werden ignoriert`);await new Promise(r=>setTimeout(r,1200));}
   if(!await _confirmRestart('Live-Quellen geändert — Pipeline-Neustart zur Aktivierung erforderlich')) return;
   showToast('⏳ Live-Quellen werden gespeichert — Pipeline wird neu aufgebaut…');
@@ -6542,6 +6669,12 @@ async function _loadRtspTestStatus() {
   // MXL-Domain-Feld mit gespeichertem Wert befüllen
   const mxlIn = document.getElementById('cfg-mxl-domain');
   if (mxlIn) mxlIn.value = S.config?.mxlDomain || '/dev/shm/mxl';
+  // ST2110-Felder mit gespeicherten Werten befüllen
+  const st2110 = S.config?.st2110 || {};
+  const ifaceIn = document.getElementById('cfg-st2110-iface');
+  if (ifaceIn) ifaceIn.value = st2110.devIface || '';
+  const devIpIn = document.getElementById('cfg-st2110-devip');
+  if (devIpIn) devIpIn.value = st2110.devIp || '';
 }
 
 async function mxlDomainSave() {
@@ -6553,6 +6686,42 @@ async function mxlDomainSave() {
   } catch(e) {
     if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; }
   }
+}
+
+async function st2110Save() {
+  const devIface = document.getElementById('cfg-st2110-iface')?.value?.trim() || 'auto';
+  const devIp    = document.getElementById('cfg-st2110-devip')?.value?.trim() || '';
+  const st = document.getElementById('cfg-st2110-status');
+  try {
+    await api('POST', '/api/settings', { st2110: { devIface, devIp } });
+    if (S.config) S.config.st2110 = { devIface, devIp };
+    if (st) { st.textContent = '✓ gespeichert'; st.style.color = 'var(--green)'; }
+  } catch(e) {
+    if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; }
+  }
+}
+
+// Baut den mtl_st20p_tx-Sink-String aus den Feldern und aktiviert ihn als PGM-
+// Video-Sink über denselben generischen Mechanismus, den DeckLink bereits nutzt
+// (/api/config/sink — siehe server.js). Element-/Property-Namen: siehe Kommentar
+// bei _buildSt2110VideoSrc in server.js — nach scripts/install-mtl.sh gegen
+// `gst-inspect-1.0 mtl_st20p_tx` verifizieren.
+async function st2110SetAsPgmSink() {
+  const ip  = document.getElementById('cfg-st2110-pgm-ip')?.value?.trim();
+  const port = document.getElementById('cfg-st2110-pgm-port')?.value || 20000;
+  const pt   = document.getElementById('cfg-st2110-pgm-pt')?.value || 112;
+  const fmt  = document.getElementById('cfg-st2110-pgm-fmt')?.value?.trim() || 'YUV422PLANAR10LE';
+  if (!ip) { showToast('⚠ Ziel-IP erforderlich'); return; }
+  const devIface = document.getElementById('cfg-st2110-iface')?.value?.trim() || 'auto';
+  const devIp    = document.getElementById('cfg-st2110-devip')?.value?.trim() || '';
+  const devProps = `dev-port=${devIface}${devIp ? ` dev-ip=${devIp}` : ''}`;
+  const sink = `mtl_st20p_tx ${devProps} ip=${ip} udp-port=${port} payload-type=${pt} fmt=${fmt} fps=${S.config?.fps||25}`;
+  if (!await _confirmRestart(`PGM-Video-Sink → ST2110:\n${sink}`)) return;
+  showToast('⏳ PGM-Video-Sink wird gesetzt — Pipeline wird neu aufgebaut…');
+  try {
+    const r = await api('POST', '/api/config/sink', { sink });
+    showToast(r.ok ? '✅ PGM-Video-Sink aktiviert' : '⚠ ' + (r.error || 'Fehler'));
+  } catch(e) { showToast('⚠ Fehler: ' + e.message); }
 }
 
 async function mxlDomainProbe() {
@@ -6833,6 +7002,7 @@ function _cfgClockProviderChange() {
   const p = document.getElementById('cfg-clock-provider')?.value || 'audiotestsrc';
   document.getElementById('cfg-clock-ptp-row').style.display     = p.startsWith('ptp') ? '' : 'none';
   document.getElementById('cfg-clock-decklink-row').style.display = p === 'ptp-decklink' ? '' : 'none';
+  document.getElementById('cfg-clock-mtl-row').style.display      = p === 'ptp-mtl' ? '' : 'none';
 }
 
 function _loadClockConfig(cfg) {
@@ -6848,6 +7018,15 @@ function _loadClockConfig(cfg) {
   if (ifEl) ifEl.value = clock.ptpInterface || 'eth0';
   const dlEl = document.getElementById('cfg-clock-decklink-dev');
   if (dlEl) dlEl.value = clock.decklinkDevice ?? 0;
+  const mtl = clock.st2110Audio || {};
+  const mtlIpEl = document.getElementById('cfg-clock-mtl-ip');
+  if (mtlIpEl) mtlIpEl.value = mtl.ip || '';
+  const mtlPortEl = document.getElementById('cfg-clock-mtl-port');
+  if (mtlPortEl) mtlPortEl.value = mtl.port ?? 20001;
+  const mtlPtEl = document.getElementById('cfg-clock-mtl-pt');
+  if (mtlPtEl) mtlPtEl.value = mtl.payloadType ?? 111;
+  const mtlSamplingEl = document.getElementById('cfg-clock-mtl-sampling');
+  if (mtlSamplingEl) mtlSamplingEl.value = mtl.sampling || '48kHz';
   _cfgClockProviderChange();
 }
 
@@ -6858,6 +7037,12 @@ async function cfgSaveClock() {
     ptpDomain:    parseInt(document.getElementById('cfg-clock-ptp-domain')?.value  || '127'),
     ptpInterface: document.getElementById('cfg-clock-ptp-iface')?.value  || 'eth0',
     decklinkDevice: parseInt(document.getElementById('cfg-clock-decklink-dev')?.value || '0'),
+    st2110Audio: {
+      ip:          document.getElementById('cfg-clock-mtl-ip')?.value?.trim() || '',
+      port:        parseInt(document.getElementById('cfg-clock-mtl-port')?.value || '20001'),
+      payloadType: parseInt(document.getElementById('cfg-clock-mtl-pt')?.value || '111'),
+      sampling:    document.getElementById('cfg-clock-mtl-sampling')?.value || '48kHz',
+    },
     fallbackToSystem: true,
   };
   const r = await apiFetch('/api/audio/clock', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -8212,7 +8397,11 @@ function cfgAddOutput(){
   _outputRows.push({ id: `out${Date.now()}_${n}`, label: `Ausgang ${n}`, enabled: false,
     source: 'pgm', audioGroup: (S.config?.audioGroupIds||['pgm-stereo'])[0],
     width: 0, height: 0, bitrate: 4000, speedPreset: 'veryfast', sink: 'udp', uri: '',
-    deviceNumber: null, decklinkMode: '1080p25', decklinkAudio: true });
+    deviceNumber: null, decklinkMode: '1080p25', decklinkAudio: true,
+    st2110VideoIp: '', st2110VideoPort: 20000, st2110VideoPayloadType: 112,
+    st2110VideoFormat: 'YUV422PLANAR10LE', st2110VideoWidth: 0, st2110VideoHeight: 0, st2110VideoFps: 0,
+    st2110AudioIp: '', st2110AudioPort: 20001, st2110AudioPayloadType: 111,
+    st2110AudioChannels: 2, st2110AudioSampling: '48kHz', st2110AudioPtime: '1ms', st2110AudioFormat: 'pcm24' });
   _renderOutputsList();
 }
 
@@ -8235,6 +8424,20 @@ function _outputsFromRows(){
       deviceNumber: f('deviceNumber')?.value !== '' && f('deviceNumber')?.value != null ? parseInt(f('deviceNumber').value) : null,
       decklinkMode: f('decklinkMode')?.value || '1080p25',
       decklinkAudio: f('decklinkAudio') ? f('decklinkAudio').checked : true,
+      st2110VideoIp:          f('st2110VideoIp')?.value.trim() || '',
+      st2110VideoPort:        f('st2110VideoPort')?.value || 20000,
+      st2110VideoPayloadType: f('st2110VideoPayloadType')?.value || 112,
+      st2110VideoFormat:      f('st2110VideoFormat')?.value || 'YUV422PLANAR10LE',
+      st2110VideoWidth:       f('st2110VideoWidth')?.value || 0,
+      st2110VideoHeight:      f('st2110VideoHeight')?.value || 0,
+      st2110VideoFps:         f('st2110VideoFps')?.value || 0,
+      st2110AudioIp:          f('st2110AudioIp')?.value.trim() || '',
+      st2110AudioPort:        f('st2110AudioPort')?.value || 20001,
+      st2110AudioPayloadType: f('st2110AudioPayloadType')?.value || 111,
+      st2110AudioChannels:    f('st2110AudioChannels')?.value || 2,
+      st2110AudioSampling:    f('st2110AudioSampling')?.value || '48kHz',
+      st2110AudioPtime:       f('st2110AudioPtime')?.value || '1ms',
+      st2110AudioFormat:      f('st2110AudioFormat')?.value || 'pcm24',
     };
   });
 }
@@ -8269,6 +8472,7 @@ function _renderOutputsList(){
   if (!_outputRows.length) { el.innerHTML = '<div style="font-size:10px;color:var(--dim);padding:6px 0">Keine Zusatz-Ausgänge konfiguriert.</div>'; return; }
   el.innerHTML = _outputRows.map(o => {
     const isDecklink = o.sink === 'decklink';
+    const isSt2110   = o.sink === 'st2110';
     const decklinkFields = `
         <label style="font-size:9px;color:var(--dim)">DeckLink-Gerät
           <select data-f="deviceNumber" style="font-size:10px">
@@ -8290,6 +8494,22 @@ function _renderOutputsList(){
         <label style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:3px;white-space:nowrap;margin-top:12px">
           <input type="checkbox" data-f="decklinkAudio" ${o.decklinkAudio!==false?'checked':''} style="accent-color:var(--green)"> Audio mitsenden
         </label>`;
+    const st2110Field=(label,f_,val,opts)=>`
+        <label style="font-size:9px;color:var(--dim)">${label}
+          <input ${opts||'type="text"'} data-f="${f_}" value="${(val??'').toString().replace(/"/g,'&quot;')}" style="width:110px;font-family:var(--mono);font-size:10px">
+        </label>`;
+    const st2110Fields = `
+        <div style="flex-basis:100%;font-size:8px;color:var(--dim);font-weight:600;text-transform:uppercase">Video (ST2110-20)</div>
+        ${st2110Field('Ziel-IP','st2110VideoIp',o.st2110VideoIp)}
+        ${st2110Field('Port','st2110VideoPort',o.st2110VideoPort,'type="number" min="1" max="65535"')}
+        ${st2110Field('Payload-Type','st2110VideoPayloadType',o.st2110VideoPayloadType,'type="number" min="0" max="127"')}
+        ${st2110Field('Format','st2110VideoFormat',o.st2110VideoFormat||'YUV422PLANAR10LE')}
+        <div style="flex-basis:100%;font-size:8px;color:var(--dim);font-weight:600;text-transform:uppercase">Audio (ST2110-30, optional)</div>
+        ${st2110Field('Ziel-IP','st2110AudioIp',o.st2110AudioIp)}
+        ${st2110Field('Port','st2110AudioPort',o.st2110AudioPort,'type="number" min="1" max="65535"')}
+        ${st2110Field('Payload-Type','st2110AudioPayloadType',o.st2110AudioPayloadType,'type="number" min="0" max="127"')}
+        ${st2110Field('Sampling','st2110AudioSampling',o.st2110AudioSampling||'48kHz')}
+        <div style="flex-basis:100%;font-size:8px;color:var(--dim)">NIC-Bindung (Interface/PCI-ID, lokale IP) gilt geräteweit — siehe Server-Tab → ST2110.</div>`;
     const networkFields = `
         <label style="font-size:9px;color:var(--dim)">Breite (0=Original)
           <input type="number" data-f="width" value="${o.width||0}" min="0" max="3840" step="2" style="width:70px;font-family:var(--mono);font-size:10px">
@@ -8336,10 +8556,10 @@ function _renderOutputsList(){
         </label>
         <label style="font-size:9px;color:var(--dim)">Sink
           <select data-f="sink" onchange="_outputSinkChange(this,this.value)" style="font-size:10px">
-            ${['udp','srt','rtmp','file','decklink'].map(s=>`<option value="${s}"${o.sink===s?' selected':''}>${s==='decklink'?'DeckLink (SDI/HDMI-Hardware)':s.toUpperCase()}</option>`).join('')}
+            ${['udp','srt','rtmp','file','decklink','st2110'].map(s=>`<option value="${s}"${o.sink===s?' selected':''}>${s==='decklink'?'DeckLink (SDI/HDMI-Hardware)':s==='st2110'?'ST2110 (Intel E810)':s.toUpperCase()}</option>`).join('')}
           </select>
         </label>
-        ${isDecklink ? decklinkFields : networkFields}
+        ${isDecklink ? decklinkFields : isSt2110 ? st2110Fields : networkFields}
       </div>
     </div>`;
   }).join('');
