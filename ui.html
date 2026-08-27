@@ -134,6 +134,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 .sw-btn:hover{border-color:#444;}
 .sw-btn.active{border-color:var(--accent);}
 .sw-btn.onair{border-color:var(--red);background:rgba(240,80,80,.07);}
+.sw-btn.dl-blocked{opacity:.45;cursor:not-allowed;border-color:var(--red);}
 .sw-icon{font-size:13px;display:block;margin-bottom:1px;}
 .sw-label{font-size:9px;font-weight:700;display:block;}
 .sw-sub{font-size:8px;color:var(--dim);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -1975,7 +1976,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
           <button class="btn" onclick="liveAddType('decklink')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
             <span style="font-size:16px">🎥</span>
             <span style="font-size:9px;font-weight:700">DeckLink</span>
-            <span style="font-size:8px;color:var(--dim)">SDI / HDMI</span>
+            <span style="font-size:8px;color:var(--dim)">SDI / HDMI / IP (2110)</span>
           </button>
           <button class="btn" onclick="liveAddType('st2110')" style="padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px">
             <span style="font-size:16px">🌐</span>
@@ -2055,6 +2056,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         Intel Media Transport Library — SMPTE ST2110 über E810-NIC. Setup: <code style="font-family:var(--mono)">scripts/install-mtl.sh</code>.
         EIN MTL-Kontext pro Prozess — die NIC-Bindung hier gilt für alle ST2110-Live-Quellen/Zusatz-Ausgänge/den PGM-Sink gemeinsam.
       </div>
+      <div id="cfg-st2110-hw-status" style="display:none;font-size:9px;padding:5px 7px;border-radius:3px;margin-bottom:8px"></div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-bottom:8px;font-size:11px">
         <label>Interface / PCI-ID</label>
         <input type="text" id="cfg-st2110-iface" placeholder="auto (z.B. ens785f0 oder 0000:af:00.0)"
@@ -2762,8 +2764,16 @@ sse.addEventListener('grafik',e=>{
   });
   sse.addEventListener('decklink-signal',e=>{
     S._dlSignal=JSON.parse(e.data);
-    // Re-render playlist so signal badges update
-    if(S.plData?.length) renderPl();
+    // Switcher-Buttons sperren/entsperren, sobald sich Signal-/Defekt-Status ändert
+    updateSw();
+    // Re-validate playlist so a DeckLink outage/recovery flips affected live
+    // events into/out of the "Missing" status pill, same as a missing file
+    if(S.plData.length){
+      api('POST','/api/playlist/validate').then(r=>{
+        if(Array.isArray(r)){S.plValid={};r.forEach(v=>S.plValid[v.id]=v);}
+        renderPl();
+      }).catch(()=>renderPl());
+    }
     // Re-render Live-Sources-Editor so the detected-format readout updates
     if(document.getElementById('cfg-panel-live')?.style.display!=='none' && _liveRows?.length) _renderLiveList();
   });
@@ -3465,13 +3475,15 @@ function _renderSwitcherGrid(){
     `<div class="sw-btn" id="sw-${N}"   data-slot="playerSmpte" onclick="switchTo(${N})">  <span class="sw-icon">📺</span><span class="sw-label">SMPTE</span><span class="sw-sub">Testbild</span></div>`,
     `<div class="sw-btn" id="sw-${N+1}" data-slot="playerBlack" onclick="switchTo(${N+1})"><span class="sw-icon">⬛</span><span class="sw-label">BLACK</span><span class="sw-sub">Schwarz</span></div>`,
     `<div class="sw-btn" id="sw-${N+2}" data-slot="playerImage" onclick="switchTo(${N+2})"><span class="sw-icon">🖼</span><span class="sw-label">IMAGE</span><span class="sw-sub" id="sw${N+2}-sub">Standbild</span></div>`,
-    ...liveSrcs.map(l=>
-      `<div class="sw-btn" id="sw-live-${l.id}" data-live="${l.id}" onclick="switchLive('${l.id}')">
+    ...liveSrcs.map(l=>{
+      const dlSt=_dlLiveStatus(l.id);
+      const title=dlSt.level!=='na'?` title="DeckLink: ${_esc(dlSt.label)}"`:'';
+      return `<div class="sw-btn${dlSt.blocked?' dl-blocked':''}" id="sw-live-${l.id}" data-live="${l.id}" onclick="switchLive('${l.id}')"${title}>
         <span class="sw-icon">${l.icon||'📡'}</span>
         <span class="sw-label">${(l.label||l.id).toUpperCase()}</span>
-        <span class="sw-sub">LIVE</span>
-      </div>`
-    ),
+        <span class="sw-sub" id="sw-live-${l.id}-sub">${dlSt.level!=='na'?dlSt.icon:'LIVE'}</span>
+      </div>`;
+    }),
   ];
   grid.innerHTML=btns.join('');
   updateSw();
@@ -3617,6 +3629,8 @@ function _renderPlayerCards(){
 }
 
 async function switchLive(id){
+  const dlSt=_dlLiveStatus(id);
+  if(dlSt.blocked){ showToast('⛔ DeckLink: '+dlSt.label+' — Cut blockiert'); return; }
   const r=await apiFetch('/api/switch/live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   const d=await r?.json();
   if(!d?.ok) showToast('❌ '+(d?.error||'Fehler'));
@@ -3638,6 +3652,11 @@ function updateSw(){
     const padIdx=N+5+i;
     el.classList.toggle('active',padIdx===p);
     el.classList.toggle('onair',padIdx===p&&S.master.running);
+    const dlSt=_dlLiveStatus(l.id);
+    el.classList.toggle('dl-blocked',dlSt.blocked);
+    if(dlSt.level!=='na') el.title=`DeckLink: ${dlSt.label}`;
+    const subEl=document.getElementById(`sw-live-${l.id}-sub`);
+    if(subEl) subEl.textContent=dlSt.level!=='na'?dlSt.icon:'LIVE';
   });
   document.getElementById('onair-txt').textContent=S.master.running?`ON AIR: ${_swPadLabel(p)}`:'—';
 }
@@ -5241,21 +5260,16 @@ function renderPl(){
     const _lsLabel=_lsConf?.label||null;
     const _liveLabel=e.source==='live'?(e.liveSourceLabel||e.liveSource||null):null;
     // DeckLink signal badge — only for live sources whose gstSrc contains decklink
-    const _dlSrc=_lsConf&&/decklink/i.test(_lsConf.gstSrc||'')?_lsConf:null;
-    const _dlStatus=_dlSrc?(S._dlSignal||{})[_dlSrc.id]:null;
-    const _dlBadge=_dlSrc?(_dlStatus?.error
-      ?`<span style="font-size:8px;color:var(--red);font-weight:700;margin-left:3px" title="DeckLink: Defekt — Platzhalter aktiv (${_esc(_dlStatus.error)})">📡⛔</span>`
-      :_dlStatus?.ok===false
-      ?`<span style="font-size:8px;color:var(--red);font-weight:700;margin-left:3px" title="DeckLink: Kein Signal">📡✗</span>`
-      :_dlStatus?.ok===true
-        ?`<span style="font-size:8px;color:var(--green);margin-left:3px" title="DeckLink: Signal OK">📡✓</span>`
-        :`<span style="font-size:8px;color:var(--dim);margin-left:3px" title="DeckLink: Status unbekannt">📡?</span>`)
-    :'';
+    const _dlSt=_lsConf?_dlLiveStatus(_lsConf.id):{level:'na',blocked:false};
+    const _dlBadge=_dlSt.level!=='na'
+      ?`<span style="font-size:8px;color:${_dlSt.blocked?'var(--red)':_dlSt.level==='ok'?'var(--green)':'var(--dim)'};font-weight:${_dlSt.blocked?700:400};margin-left:3px" title="DeckLink: ${_esc(_dlSt.label)}">${_dlSt.icon}</span>`
+      :'';
+    const _liveMissing=(v&&!v.ok)&&_dlSt.level!=='na';
     const mainLabel=noFile
       ?`<span style="color:var(--red);font-style:italic">(kein File)</span>`
+      :_liveLabel?`<span style="color:${_liveMissing?'var(--red)':'var(--yellow)'}">📡 ${_liveLabel}</span><span style="font-size:8px;color:var(--dim);margin-left:4px">(auto-slot)</span>${_dlBadge}`
+      :_lsLabel?`<span style="color:${_liveMissing?'var(--red)':'var(--yellow)'}">📡 ${_lsLabel}</span>${_dlBadge}`
       :(v&&!v.ok)?`<span style="color:var(--red)">${e.file}</span>`
-      :_liveLabel?`<span style="color:var(--yellow)">📡 ${_liveLabel}</span><span style="font-size:8px;color:var(--dim);margin-left:4px">(auto-slot)</span>${_dlBadge}`
-      :_lsLabel?`<span style="color:var(--yellow)">📡 ${_lsLabel}</span>${_dlBadge}`
       :`${e.file||e.source||'—'}${_ftmBadgeHtml(e.file)}`;
     const durWarnBadge = e._durationWarning ? `<span style="font-size:8px;color:var(--yellow);margin-left:4px" title="${e._durationWarning}">⏱</span>` : '';
     const trWarnBadge  = e._transitionWarning ? `<span style="font-size:8px;color:var(--yellow);margin-left:4px" title="${e._transitionWarning.replace(/"/g,'&quot;')}">🔀⚠</span>` : '';
@@ -5717,6 +5731,19 @@ async function startPlaylist(){
   await api('POST','/api/playlist/start',{from});
   if(from>0) showToast(`▶ Start ab Event ${from+1}`);
 }
+// Einheitlicher DeckLink-Verfügbarkeitsstatus einer Live-Quelle — gemeinsame Quelle
+// für Playlist-Badge, Switcher-Button-Sperre und switchLive()-Guard. `blocked:true`
+// bedeutet: Cut auf diese Quelle ist nicht erlaubt (Defekt ODER kein Signal — beide
+// Fälle werden gleich hart behandelt).
+function _dlLiveStatus(lsId){
+  const lsConf=(S.config?.liveSources||[]).find(ls=>ls.id===lsId);
+  if(!lsConf||!/decklink/i.test(lsConf.gstSrc||'')) return {level:'na',blocked:false,icon:'',label:''};
+  const st=(S._dlSignal||{})[lsId];
+  if(st?.error)      return {level:'broken',   blocked:true,  icon:'📡⛔', label:`Defekt — Platzhalter aktiv (${st.error})`};
+  if(st?.ok===false) return {level:'no-signal',blocked:true,  icon:'📡✗', label:'Kein Signal'};
+  if(st?.ok===true)  return {level:'ok',       blocked:false, icon:'📡✓', label:'Signal OK'};
+  return                    {level:'unknown',  blocked:false, icon:'📡?', label:'Status unbekannt'};
+}
 function _dlSignalOkForEvent(ev) {
   if (!ev) return true;
   const lsConf = (S.config?.liveSources||[]).find(ls=>ls.id===ev.source);
@@ -6177,7 +6204,7 @@ function _liveRowType(ls){
 }
 
 const _LIVE_TYPE_DEF={
-  decklink:{icon:'🎥',label:'DeckLink / SDI',color:'#5a8fd0'},
+  decklink:{icon:'🎥',label:'DeckLink / SDI, HDMI, IP',color:'#5a8fd0'},
   st2110:  {icon:'🌐',label:'ST2110 / E810',  color:'#e08a3c'},
   network: {icon:'📡',label:'Netzwerk / IP', color:'#4caf84'},
   mxl:     {icon:'🔗',label:'DMF / MXL',     color:'#b07cd4'},
@@ -6675,6 +6702,31 @@ async function _loadRtspTestStatus() {
   if (ifaceIn) ifaceIn.value = st2110.devIface || '';
   const devIpIn = document.getElementById('cfg-st2110-devip');
   if (devIpIn) devIpIn.value = st2110.devIp || '';
+  // E810-Hardware-Status (nur informativ — Konfiguration bleibt auch ohne erkannte
+  // Karte möglich, z.B. um sie remote vorzubereiten, bevor die Karte eingebaut ist).
+  const hwEl = document.getElementById('cfg-st2110-hw-status');
+  if (hwEl) {
+    const hw = S.config?.hw || {};
+    if (!hw.e810Present) {
+      hwEl.style.display = 'block';
+      hwEl.style.background = 'rgba(240,80,80,.1)';
+      hwEl.style.border = '1px solid rgba(240,80,80,.3)';
+      hwEl.style.color = 'var(--red)';
+      hwEl.textContent = '⚠ Keine Intel E810 erkannt — ST2110 wird auf dieser Maschine nicht funktionieren.';
+    } else if (!hw.e810Bound) {
+      hwEl.style.display = 'block';
+      hwEl.style.background = 'rgba(240,180,60,.1)';
+      hwEl.style.border = '1px solid rgba(240,180,60,.3)';
+      hwEl.style.color = 'var(--yellow)';
+      hwEl.textContent = '⚠ E810 erkannt, aber AF_XDP-Bind fehlgeschlagen — siehe Server-Log. ST2110 bleibt inaktiv.';
+    } else {
+      hwEl.style.display = 'block';
+      hwEl.style.background = 'rgba(80,200,120,.1)';
+      hwEl.style.border = '1px solid rgba(80,200,120,.3)';
+      hwEl.style.color = 'var(--green)';
+      hwEl.textContent = '✓ E810 erkannt und AF_XDP-gebunden.';
+    }
+  }
 }
 
 async function mxlDomainSave() {

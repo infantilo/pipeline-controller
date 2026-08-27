@@ -305,6 +305,33 @@ else
     warn "GStreamer-Plugin-Verzeichnis nicht gefunden: ${GST_PLUGIN_SRC}"
 fi
 
+# ── 4b. MTL (Intel Media Transport Library / ST2110 auf E810, optional) ──────
+# Setzt voraus, dass scripts/install-mtl.sh vorher EINMALIG auf der Build-
+# Maschine gelaufen ist (baut third_party/mtl/build + .../gst-install). Fehlt
+# das Verzeichnis, wird MTL einfach übersprungen — das AppImage bleibt ohne
+# ST2110-Unterstützung lauffähig (kein Hard-Fail, analog zum fehlenden
+# GST_PLUGIN_SRC-Fall oben).
+MTL_SRC_DIR="${MTL_SRC_DIR:-${SCRIPT_DIR}/third_party/mtl}"
+if [[ -d "${MTL_SRC_DIR}/build/lib" && -d "${MTL_SRC_DIR}/gst-install" ]]; then
+    log "MTL (Intel E810/ST2110): ${MTL_SRC_DIR}"
+    mapfile -t MTL_LIBS < <(find "${MTL_SRC_DIR}/build/lib" -name '*.so*' 2>/dev/null || true)
+    [[ ${#MTL_LIBS[@]} -gt 0 ]] && copy_libs "$APP_LIB" "${MTL_LIBS[@]}"
+    mapfile -t MTL_PLUGINS < <(find "${MTL_SRC_DIR}/gst-install" -name '*.so' 2>/dev/null || true)
+    if [[ ${#MTL_PLUGINS[@]} -gt 0 ]]; then
+        # Direkt in APP_GST (wie die übrigen GStreamer-Plugins) — greift automatisch
+        # über den bestehenden GST_PLUGIN_PATH-Export in AppRun, keine eigene env-Datei nötig.
+        cp -a "${MTL_PLUGINS[@]}" "${APP_GST}/"
+        copy_libs "$APP_LIB" "${MTL_PLUGINS[@]}"
+    fi
+    # nicctl.sh (+ Begleit-Skripte) für den AF_XDP-Auto-Bind in AppRun mitliefern
+    if [[ -d "${MTL_SRC_DIR}/script" ]]; then
+        mkdir -p "${APP_USR}/lib/mtl-script"
+        cp -a "${MTL_SRC_DIR}/script/." "${APP_USR}/lib/mtl-script/"
+    fi
+else
+    warn "MTL nicht gefunden (${MTL_SRC_DIR}) — AppImage wird ohne ST2110/E810-Unterstützung gebaut (scripts/install-mtl.sh vorher laufen lassen, falls gewünscht)."
+fi
+
 # ── 5. GStreamer-Kernbibliotheken ─────────────────────────────────────────────
 log "GStreamer-Kernbibliotheken..."
 GST_CORE_PATTERNS=(
@@ -592,12 +619,64 @@ elif command -v lspci &>/dev/null && lspci 2>/dev/null | grep -qi nvidia; then
 fi
 export HW_NVIDIA_PRESENT
 
+# E810-Erkennung + AF_XDP-Auto-Bind (Intel MTL/ST2110): läuft bei JEDEM Start,
+# idempotent (nicctl.sh af_xdp ist ein Bind-Aufruf, kein Toggle) und best-effort —
+# ein Fehler hier (fehlende Berechtigung, kein Treffer, nicctl.sh nicht gebündelt)
+# darf den restlichen Programmstart nie blockieren, exakt wie oben bei DeckLink/
+# NVIDIA. Voraussetzung für den Bind-Schritt: passwortloses sudo für nicctl.sh auf
+# der Zielmaschine (einmaliger Ops-Setup-Schritt, sonst bleibt ST2110 inaktiv und
+# die App läuft normal ohne E810-Unterstützung weiter).
+HW_E810_PRESENT=0
+_E810_PCI_ADDRS=()
+if command -v lspci &>/dev/null; then
+    while IFS= read -r _addr; do
+        [[ -n "$_addr" ]] && _E810_PCI_ADDRS+=("$_addr")
+    done < <(lspci -D 2>/dev/null | grep -i "E810" | awk '{print $1}')
+fi
+[[ ${#_E810_PCI_ADDRS[@]} -gt 0 ]] && HW_E810_PRESENT=1
+export HW_E810_PRESENT
+
+HW_E810_BOUND=0
+_MTL_NICCTL="${APPDIR}/usr/lib/mtl-script/nicctl.sh"
+if [[ $HW_E810_PRESENT -eq 1 && -x "$_MTL_NICCTL" ]]; then
+    for _addr in "${_E810_PCI_ADDRS[@]}"; do
+        _iface=""
+        for _netdir in /sys/bus/pci/devices/"${_addr}"/net/*; do
+            [[ -d "$_netdir" ]] && _iface="$(basename "$_netdir")"
+        done
+        if [[ -n "$_iface" ]]; then
+            if sudo -n "$_MTL_NICCTL" af_xdp "$_iface" >>"$LOG_FILE" 2>&1; then
+                HW_E810_BOUND=1
+                echo "[AppRun] E810 AF_XDP gebunden: ${_iface} (${_addr})" >> "$LOG_FILE"
+            else
+                echo "[AppRun] E810 AF_XDP-Bind fehlgeschlagen für ${_iface} (${_addr}) — ST2110 bleibt inaktiv" >> "$LOG_FILE"
+            fi
+        fi
+    done
+elif [[ $HW_E810_PRESENT -eq 1 ]]; then
+    echo "[AppRun] E810 erkannt, aber nicctl.sh nicht gebündelt (MTL nicht im Build enthalten)" >> "$LOG_FILE"
+fi
+export HW_E810_BOUND
+
+_E810_LOG_STATUS="nicht gefunden"
+_E810_SHORT_STATUS="✗ nicht gefunden"
+if [[ $HW_E810_PRESENT -eq 1 ]]; then
+    if [[ $HW_E810_BOUND -eq 1 ]]; then
+        _E810_LOG_STATUS="gefunden (AF_XDP gebunden)"
+        _E810_SHORT_STATUS="✓ gefunden (AF_XDP ✓)"
+    else
+        _E810_LOG_STATUS="gefunden (AF_XDP nicht gebunden)"
+        _E810_SHORT_STATUS="✓ gefunden (AF_XDP ✗)"
+    fi
+fi
+
 {
     echo "=== AppRun: Hardware-Erkennung $(date -Is) ==="
     echo "  DeckLink: $([[ $HW_DECKLINK_PRESENT -eq 1 ]] && echo "gefunden" || echo "nicht gefunden")"
     echo "  NVIDIA:   $([[ $HW_NVIDIA_PRESENT -eq 1 ]] && echo "gefunden" || echo "nicht gefunden")"
+    echo "  E810:     ${_E810_LOG_STATUS}"
 } >> "$LOG_FILE"
-echo "[AppRun] DeckLink: $([[ $HW_DECKLINK_PRESENT -eq 1 ]] && echo "✓ gefunden" || echo "✗ nicht gefunden") | NVIDIA: $([[ $HW_NVIDIA_PRESENT -eq 1 ]] && echo "✓ gefunden" || echo "✗ nicht gefunden")"
+echo "[AppRun] DeckLink: $([[ $HW_DECKLINK_PRESENT -eq 1 ]] && echo "✓ gefunden" || echo "✗ nicht gefunden") | NVIDIA: $([[ $HW_NVIDIA_PRESENT -eq 1 ]] && echo "✓ gefunden" || echo "✗ nicht gefunden") | E810: ${_E810_SHORT_STATUS}"
 
 # ── Port aus settings.json lesen (Fallback: 3000) ────────────────────────────
 _PORT="${PORT:-3000}"
