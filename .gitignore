@@ -105,3 +105,6 @@ key.pem
 channels/
 channels.json
 .supervisor-state.json
+
+# Downloaded build caches (avvideofilter release, MTL)
+third_party/

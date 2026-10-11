@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "start:debug": "node server.js --debug",
-    "probe": "node probe.js"
+    "probe": "node probe.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18.0.0"

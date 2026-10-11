@@ -188,7 +188,12 @@ if [[ -z "${CLEAN_BUILD:-}" ]]; then
     echo "│              02700111 + dve-lower-third                  │"
     echo "│  [n] VOLL   — alles einschließen                         │"
     echo "└─────────────────────────────────────────────────────────┘"
-    read -r -p "  Auswahl [J/n]: " _BUILD_ANS
+    _BUILD_ANS=""
+    if [[ -t 0 ]]; then
+        read -r -p "  Auswahl [J/n]: " _BUILD_ANS
+    else
+        echo "  Nicht-interaktiv (kein TTY) — Standard CLEAN wird verwendet (CLEAN_BUILD=0 zum Ändern)"
+    fi
     if [[ "${_BUILD_ANS,,}" == "n" ]]; then
         CLEAN_BUILD=0
     else
@@ -330,6 +335,42 @@ if [[ -d "${MTL_SRC_DIR}/build/lib" && -d "${MTL_SRC_DIR}/gst-install" ]]; then
     fi
 else
     warn "MTL nicht gefunden (${MTL_SRC_DIR}) — AppImage wird ohne ST2110/E810-Unterstützung gebaut (scripts/install-mtl.sh vorher laufen lassen, falls gewünscht)."
+fi
+
+# ── 4c. avvideofilter (libavfilter-Element, Framerate-Konvertierung "blend") ──
+# Optionales Plugin von https://github.com/emcodem/avvideofilter (LGPL-2.1+,
+# self-contained mit eigenem FFmpeg, Namen *_avvf → keine Kollision mit gst-libav).
+# Release wird per sha256 geprüft und unter third_party/avvideofilter gecacht.
+# Fehlt es (offline etc.), wird ohne gebaut — frameRateConversion=blend fällt
+# dann zur Laufzeit auf videorate zurück.
+AVVF_VERSION="${AVVF_VERSION:-0.1.2}"
+AVVF_SHA256="${AVVF_SHA256:-5a0a128d1033d9e8f76756c1840a7be08e1da94db04b14230bfcd9fed6d2d5ea}"
+AVVF_TGZ_NAME="avvideofilter-linux-amd64-glibc2.35-gst1.20.tar.gz"
+AVVF_DIR="${SCRIPT_DIR}/third_party/avvideofilter/${AVVF_VERSION}"
+AVVF_TGZ="${AVVF_DIR}/${AVVF_TGZ_NAME}"
+if [[ ! -f "$AVVF_TGZ" ]]; then
+    mkdir -p "$AVVF_DIR"
+    curl -fsSL -o "$AVVF_TGZ" \
+        "https://github.com/emcodem/avvideofilter/releases/download/v${AVVF_VERSION}/${AVVF_TGZ_NAME}" 2>/dev/null \
+        || { rm -f "$AVVF_TGZ"; warn "avvideofilter-Download fehlgeschlagen — AppImage ohne blend-Framerate-Konvertierung."; }
+fi
+if [[ -f "$AVVF_TGZ" ]]; then
+    if [[ "$(sha256sum "$AVVF_TGZ" | cut -d' ' -f1)" != "$AVVF_SHA256" ]]; then
+        warn "avvideofilter: sha256 stimmt nicht — übersprungen (Datei gelöscht)."
+        rm -f "$AVVF_TGZ"
+    else
+        log "avvideofilter ${AVVF_VERSION}"
+        AVVF_TMP="$(mktemp -d)"
+        tar -xzf "$AVVF_TGZ" -C "$AVVF_TMP" --strip-components=1
+        cp -a "${AVVF_TMP}/libgstavvideofilter.so" "${APP_GST}/"
+        # FFmpeg-Libs nach APP_LIB (LD_LIBRARY_PATH + RPATH $ORIGIN/../lib), nicht in
+        # APP_GST: der Plugin-Scanner würde sie sonst als (ungültige) Plugins probieren.
+        cp -a "${AVVF_TMP}/avvideofilter-ffmpeg/"*_avvf.so* "${APP_LIB}/"
+        mkdir -p "${APP_USR}/share/licenses/avvideofilter"
+        cp -a "${AVVF_TMP}/COPYING" "${AVVF_TMP}/avvideofilter-ffmpeg/"{LICENSE.md,COPYING.LGPLv2.1,BUILDINFO.txt} \
+            "${APP_USR}/share/licenses/avvideofilter/" 2>/dev/null || true
+        rm -rf "$AVVF_TMP"
+    fi
 fi
 
 # ── 5. GStreamer-Kernbibliotheken ─────────────────────────────────────────────
@@ -770,7 +811,15 @@ echo "├───────────────────────�
 printf "│  Git-Tag %-51s │\n" "${_TAG} erstellen + package.json committen?"
 echo "│  (Nur sinnvoll wenn kein weiteres Build-Artefakt folgt)     │"
 echo "└─────────────────────────────────────────────────────────────┘"
-read -r -p "  Git-Tag + Commit erstellen? [J/n]: " _TAG_ANS
+# Env-Var überschreibt die Abfrage: TAG_RELEASE=1 (ja) / TAG_RELEASE=0 (nein)
+if [[ -n "${TAG_RELEASE:-}" ]]; then
+    [[ "${TAG_RELEASE}" == "1" ]] && _TAG_ANS="j" || _TAG_ANS="n"
+elif [[ -t 0 ]]; then
+    read -r -p "  Git-Tag + Commit erstellen? [J/n]: " _TAG_ANS
+else
+    _TAG_ANS="n"
+    echo "  Nicht-interaktiv (kein TTY) — Tag/Commit wird übersprungen (TAG_RELEASE=1 zum Erzwingen)"
+fi
 if [[ "${_TAG_ANS,,}" != "n" ]]; then
     # Commit package.json version bump (staged only if modified)
     if git -C "${_GIT_DIR}" diff --quiet HEAD -- package.json 2>/dev/null; then
@@ -787,7 +836,15 @@ if [[ "${_TAG_ANS,,}" != "n" ]]; then
         git -C "${_GIT_DIR}" tag -a "${_TAG}" -m "Release ${_TAG}"
         log "Tag ${_TAG} erstellt"
     fi
-    read -r -p "  Tag + Commit pushen? [J/n]: " _PUSH_ANS
+    # Env-Var überschreibt die Abfrage: PUSH_RELEASE=1 (ja) / PUSH_RELEASE=0 (nein)
+    if [[ -n "${PUSH_RELEASE:-}" ]]; then
+        [[ "${PUSH_RELEASE}" == "1" ]] && _PUSH_ANS="j" || _PUSH_ANS="n"
+    elif [[ -t 0 ]]; then
+        read -r -p "  Tag + Commit pushen? [J/n]: " _PUSH_ANS
+    else
+        _PUSH_ANS="n"
+        echo "  Nicht-interaktiv (kein TTY) — Push wird übersprungen (PUSH_RELEASE=1 zum Erzwingen)"
+    fi
     if [[ "${_PUSH_ANS,,}" != "n" ]]; then
         git -C "${_GIT_DIR}" push
         git -C "${_GIT_DIR}" push origin "${_TAG}"

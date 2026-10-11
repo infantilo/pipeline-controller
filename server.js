@@ -51,6 +51,11 @@ function _applyExternalEnvEarly(envFileName, extraKeys) {
 }
 _applyExternalEnvEarly('mxl.env', ['MXL_DOMAIN', 'MXL_INFO_BIN']);
 _applyExternalEnvEarly('mtl.env', ['MTL_BACKEND']);
+// avvideofilter (libavfilter graph element, e.g. blended frame-rate conversion):
+// env/avvideofilter.env sets GST_PLUGIN_PATH to the plugin's build/install dir.
+// Only needed when the plugin is not in a directory GStreamer scans anyway
+// (e.g. ~/.local/share/gstreamer-1.0/plugins, where the releases install it).
+_applyExternalEnvEarly('avvideofilter.env', []);
 
 // Robust gegen versehentlich mitgetipptes "GST_DEBUG=" (naheliegend, da Doku/
 // Log-Hinweise den Filter oft in Shell-Form GST_DEBUG="foo:5" zeigen) und
@@ -119,6 +124,7 @@ function _writablePath(relPath) {
 
 const PORT           = parseInt(process.env.PORT       || '3000');
 const IMAGES_DIR     = _writablePath('images');
+const CHANNELBRANDING_DIR = _writablePath('channelbranding');
 const VIDEO_SINK     = process.env.VIDEO_SINK || null;
 const DB_PATH        = _writablePath('library.json');
 const SETTINGS_PATH  = _writablePath('settings.json');
@@ -300,8 +306,8 @@ function resolveIdleImage(nameOrPath) {
   if (!nameOrPath) return null;
   if (path.isAbsolute(nameOrPath) && fs.existsSync(nameOrPath)) return nameOrPath;
   const candidates = [
-    path.join(__dirname, 'images', nameOrPath),
-    path.join(__dirname, 'channelbranding', nameOrPath),
+    path.join(IMAGES_DIR, nameOrPath),
+    path.join(CHANNELBRANDING_DIR, nameOrPath),
     path.join(__dirname, nameOrPath),
   ];
   return candidates.find(p => fs.existsSync(p)) || null;
@@ -326,6 +332,21 @@ function resolveIdleImage(nameOrPath) {
     PlayerPipeline._nvdecAvailable = true;
     console.log('[server] NVDEC Hardware-Decode aktiviert (GST_PLUGIN_FEATURE_RANK gesetzt)');
   } catch { /* nvdec nicht verfügbar — Software-Decode bleibt aktiv */ }
+})();
+
+// ── avvideofilter availability (frameRateConversion: 'blend') ─────────────────
+// Probed once at startup; without the plugin, players fall back to videorate.
+const { setAvVideoFilterAvailable, isAvVideoFilterAvailable } = require('./lib/FrameRateChain');
+(function detectAvVideoFilter() {
+  const { execFileSync } = require('child_process');
+  try {
+    execFileSync('gst-inspect-1.0', ['avvideofilter'], { stdio: 'ignore', timeout: 3000 });
+    setAvVideoFilterAvailable(true);
+    console.log('[server] avvideofilter available (frameRateConversion: blend possible)');
+  } catch {
+    if (_settings.frameRateConversion === 'blend')
+      console.warn('[server] frameRateConversion=blend, but avvideofilter not found — using videorate');
+  }
 })();
 
 // ── AudioGroupConfig ───────────────────────────────────────────────────────────
@@ -1334,9 +1355,12 @@ const masterOpts = {
   audioSink:        _settings.audioSink  || process.env.AUDIO_SINK || 'pulsesink',
   idleSource:       _settings.idleSource    || 'smpte',
   idleImagePath:    resolveIdleImage(_settings.idleImagePath) || null,
+  brandingDir:      CHANNELBRANDING_DIR,
   scaleMode:        _settings.scaleMode        || 'fit',
   scaleMethod:      _settings.scaleMethod      ?? 1,
   deinterlaceMode:  _settings.deinterlaceMode  || 'auto',
+  // 'videorate' (drop/duplicate) or 'blend' (avvideofilter framerate=fps=N)
+  frameRateConversion: _settings.frameRateConversion || 'videorate',
   debugger:         debugger_,
   audioGroupConfig: audioGroupConfig.groups.length ? audioGroupConfig : null,
   liveSources:      _settings.liveSources || [],
@@ -1496,8 +1520,10 @@ setInterval(() => {
 }, 500);
 master.on('switched', d => {
   broadcast('switched', d);
-  // Stop feeder when switching AWAY from a live pad (no-op for embedded sources)
-  if (d.prevPad != null && d.prevPad >= master.padLiveBase) {
+  // Stop feeder when switching AWAY from a live pad (no-op for embedded sources).
+  // prevPad === pad: the live source on air was cut again, so nothing is
+  // switched away from and its feeder must keep running.
+  if (d.prevPad != null && d.prevPad !== d.pad && d.prevPad >= master.padLiveBase) {
     const liveIdx = d.prevPad - master.padLiveBase;
     const ls = (_settings.liveSources || [])[liveIdx];
     if (ls?.id) master.stopLiveFeeder(ls.id).catch(() => {});
@@ -1712,6 +1738,7 @@ const recordEngine = new RecordEngine({
   recordDir:   _settings.recordDir   || _writablePath('recordings'),
   audioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']),
   slots:       _settings.recordSlots || ['rec1', 'rec2', 'rec3'],
+  getFps:      () => masterOpts.fps,
   log:         (msg, lvl) => log(msg, lvl, 'record'),
 });
 
@@ -3166,8 +3193,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
 
   // Branding
   if (meth === 'GET' && p === '/api/branding') {
-    const dir = path.join(__dirname, 'channelbranding');
-    try { fs.mkdirSync(dir,{recursive:true}); return json(res, fs.readdirSync(dir).filter(f => /\.(png|jpg|svg)$/i.test(f))); }
+    try { fs.mkdirSync(CHANNELBRANDING_DIR,{recursive:true}); return json(res, fs.readdirSync(CHANNELBRANDING_DIR).filter(f => /\.(png|jpg|svg)$/i.test(f))); }
     catch { return json(res, []); }
   }
   if (meth === 'POST' && p === '/api/branding/set') {
@@ -3312,17 +3338,21 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   }
   if (meth === 'POST' && p === '/api/config/conversion') {
     const b = await parseBody(req);
-    const _before = { scaleMode: _settings.scaleMode, scaleMethod: _settings.scaleMethod, deinterlaceMode: _settings.deinterlaceMode };
+    const _before = { scaleMode: _settings.scaleMode, scaleMethod: _settings.scaleMethod, deinterlaceMode: _settings.deinterlaceMode, frameRateConversion: _settings.frameRateConversion };
     const SCALE_MODES   = ['fit','crop','stretch'];
     const DEINT_MODES   = ['auto','always','never'];
+    const FRC_MODES     = ['videorate','blend'];
     const SCALE_METHODS = [0,1,2,3,4,5];
     if (b.scaleMode       !== undefined && SCALE_MODES.includes(b.scaleMode))   { masterOpts.scaleMode      = b.scaleMode;      _settings.scaleMode      = b.scaleMode; }
     if (b.scaleMethod     !== undefined && SCALE_METHODS.includes(+b.scaleMethod)) { masterOpts.scaleMethod  = +b.scaleMethod;   _settings.scaleMethod    = +b.scaleMethod; }
     if (b.deinterlaceMode !== undefined && DEINT_MODES.includes(b.deinterlaceMode)) { masterOpts.deinterlaceMode = b.deinterlaceMode; _settings.deinterlaceMode = b.deinterlaceMode; }
+    // Players apply it from the next cue (they read opts at load); embedded live
+    // sources with the master restart below, live feeders at their next start.
+    if (b.frameRateConversion !== undefined && FRC_MODES.includes(b.frameRateConversion)) { masterOpts.frameRateConversion = b.frameRateConversion; _settings.frameRateConversion = b.frameRateConversion; }
     saveSettings(_settings);
-    _logConfigDiff(req, 'conversion', _before, _settings, ['scaleMode','scaleMethod','deinterlaceMode']);
+    _logConfigDiff(req, 'conversion', _before, _settings, ['scaleMode','scaleMethod','deinterlaceMode','frameRateConversion']);
     await master.stop(); masterStarted = false;
-    return json(res, { ok: await ensureMaster(), config: { scaleMode: masterOpts.scaleMode, scaleMethod: masterOpts.scaleMethod, deinterlaceMode: masterOpts.deinterlaceMode } });
+    return json(res, { ok: await ensureMaster(), config: { scaleMode: masterOpts.scaleMode, scaleMethod: masterOpts.scaleMethod, deinterlaceMode: masterOpts.deinterlaceMode, frameRateConversion: masterOpts.frameRateConversion, avvideofilterAvailable: isAvVideoFilterAvailable() } });
   }
   if (meth === 'POST' && p === '/api/config/numplayers') {
     const b = await parseBody(req);
@@ -4475,7 +4505,7 @@ function getState() {
     slots:    { onAir: playlist._onAirSlot, idle: playlist._idleSlot },
     playlist: { running: playlist._running, paused: playlist._paused, currentIndex: playlist.currentIndex, length: playlist.playlist.length },
     playing:  _currentPlaying ? { ..._currentPlaying, elapsedMs: Date.now() - _currentPlaying.startMs } : null,
-    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, mxlDomain: _settings.mxlDomain||'/dev/shm/mxl', st2110: _settings.st2110||{devIface:'auto',devIp:''}, extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'], decklinkOutputInterlaced: !!_settings.decklinkOutputInterlaced, hw: { decklinkPresent: process.env.HW_DECKLINK_PRESENT !== '0', nvidiaPresent: process.env.HW_NVIDIA_PRESENT === '1', e810Present: process.env.HW_E810_PRESENT === '1', e810Bound: process.env.HW_E810_BOUND === '1' } },
+    config:   { mediaDir: MEDIA_DIR, width: masterOpts.width||W, height: masterOpts.height||H, fps: masterOpts.fps||FPS, videoSink: masterOpts.videoSink||'autovideosink', audioSink: masterOpts.audioSink||'pulsesink', idleSource: masterOpts.idleSource||'smpte', idleImagePath: masterOpts.idleImagePath||null, gapSource: playlist.opts.gapSource||'black', gapFile: playlist.opts.gapFile||null, autoGap: playlist.opts.autoGap||false, clockProvider: audioGroupConfig?.clock?.provider || 'audiotestsrc', liveSources: _settings.liveSources||[], liveCueMode: _settings.liveCueMode||'timed', liveCueLeadSec: _settings.liveCueLeadSec??5, grafikLatencyMs: _settings.grafikLatencyMs??0, slotIds: _slotIds, numPlayers: _numPlayers, voSlotIds: _voSlotIds, numVoSlots: _numVoSlots, backupSlot: _settings.backupSlot||null, backupMediaDirs: _settings.backupMediaDirs||[], scaleMode: masterOpts.scaleMode||'fit', scaleMethod: masterOpts.scaleMethod??1, deinterlaceMode: masterOpts.deinterlaceMode||'auto', frameRateConversion: masterOpts.frameRateConversion||'videorate', avvideofilterAvailable: isAvVideoFilterAvailable(), transitionSpeeds: _settings.transitionSpeeds || { fast: 500, medium: 1000, slow: 2000 }, classifications: _getClassifications(), recordDir: _settings.recordDir || null, recordAudioGroup: (_settings.recordAudioGroups || [_settings.recordAudioGroup || 'pgm-stereo'])[0], recordAudioGroups: _settings.recordAudioGroups || (_settings.recordAudioGroup ? [_settings.recordAudioGroup] : ['pgm-stereo']), recordIncludeInLibrary: RECORD_IN_LIBRARY, recordSlots: _settings.recordSlots || ['rec1', 'rec2', 'rec3'], missingBehavior: _settings.missingBehavior || 'skip', defaultEvent: _settings.defaultEvent || null, stillSlots: Math.max(0, Math.min(9, parseInt(_settings.stillSlots ?? 2))), maxClients: parseInt(_settings.maxClients || '0') || 0, videoDelayMs: _settings.videoDelayMs??0, audioDelayMs: _settings.audioDelayMs||{}, testRtsp: _settings.testRtsp||null, mxlDomain: _settings.mxlDomain||'/dev/shm/mxl', st2110: _settings.st2110||{devIface:'auto',devIp:''}, extraOutputs: outputEngine.getConfig(), audioGroupIds: audioGroupConfig.groups.length ? audioGroupConfig.groups.map(g => g.id) : ['pgm-stereo'], decklinkOutputInterlaced: !!_settings.decklinkOutputInterlaced, hw: { decklinkPresent: process.env.HW_DECKLINK_PRESENT !== '0', nvidiaPresent: process.env.HW_NVIDIA_PRESENT === '1', e810Present: process.env.HW_E810_PRESENT === '1', e810Bound: process.env.HW_E810_BOUND === '1' } },
     avSync:   master?.running ? master.getDelays() : { videoMs: _settings.videoDelayMs??0, audioMs: _settings.audioDelayMs||{} },
     grafik:   { active: activeGrafiks },
     audioTrackFallbackActive: Array.from(_activeTrackFallbacks.values()),

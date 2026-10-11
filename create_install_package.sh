@@ -22,6 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(dirname "${SCRIPT_DIR}")"
 
 log() { echo "[pkg] $*"; }
+warn() { echo "[WARN] $*" >&2; }
 err() { echo "[ERR] $*" >&2; exit 1; }
 
 # ── Versionierung ─────────────────────────────────────────────────────────────
@@ -73,7 +74,12 @@ if [[ -z "${CLEAN_BUILD:-}" ]]; then
     echo "│              02700111 + dve-lower-third                  │"
     echo "│  [n] VOLL   — alles einschließen                         │"
     echo "└─────────────────────────────────────────────────────────┘"
-    read -r -p "  Auswahl [J/n]: " _BUILD_ANS
+    _BUILD_ANS=""
+    if [[ -t 0 ]]; then
+        read -r -p "  Auswahl [J/n]: " _BUILD_ANS
+    else
+        echo "  Nicht-interaktiv (kein TTY) — Standard CLEAN wird verwendet (CLEAN_BUILD=0 zum Ändern)"
+    fi
     if [[ "${_BUILD_ANS,,}" == "n" ]]; then
         CLEAN_BUILD=0
     else
@@ -176,6 +182,27 @@ fi
 for deb in "${SCRIPT_DIR}"/gstreamer1.0-plugins-bad_*.deb; do
   [[ -f "$deb" ]] && cp "$deb" "${STAGING_DIR}/" && log "GStreamer-Paket mitgepackt: $(basename "$deb")"
 done
+
+# ── avvideofilter-Plugin (optional, Framerate-Konvertierung "blend") ──────────
+# Release von https://github.com/emcodem/avvideofilter (sha256-geprüft, in
+# third_party/avvideofilter gecacht). Offline/Fehler → Paket ohne Plugin.
+AVVF_VERSION="${AVVF_VERSION:-0.1.2}"
+AVVF_SHA256="${AVVF_SHA256:-5a0a128d1033d9e8f76756c1840a7be08e1da94db04b14230bfcd9fed6d2d5ea}"
+AVVF_TGZ_NAME="avvideofilter-linux-amd64-glibc2.35-gst1.20.tar.gz"
+AVVF_TGZ="${SCRIPT_DIR}/third_party/avvideofilter/${AVVF_VERSION}/${AVVF_TGZ_NAME}"
+if [[ ! -f "$AVVF_TGZ" ]]; then
+  mkdir -p "$(dirname "$AVVF_TGZ")"
+  curl -fsSL -o "$AVVF_TGZ" \
+    "https://github.com/emcodem/avvideofilter/releases/download/v${AVVF_VERSION}/${AVVF_TGZ_NAME}" 2>/dev/null \
+    || { rm -f "$AVVF_TGZ"; warn "avvideofilter-Download fehlgeschlagen — Paket ohne blend-Plugin."; }
+fi
+if [[ -f "$AVVF_TGZ" ]]; then
+  if [[ "$(sha256sum "$AVVF_TGZ" | cut -d' ' -f1)" == "$AVVF_SHA256" ]]; then
+    cp "$AVVF_TGZ" "${STAGING_DIR}/${AVVF_TGZ_NAME}" && log "avvideofilter ${AVVF_VERSION} mitgepackt"
+  else
+    warn "avvideofilter: sha256 stimmt nicht — nicht mitgepackt."; rm -f "$AVVF_TGZ"
+  fi
+fi
 
 # Docs in Paket-Root
 [[ -f "${SCRIPT_DIR}/INSTALL.md" ]] && cp "${SCRIPT_DIR}/INSTALL.md" "${STAGING_DIR}/"
@@ -286,6 +313,24 @@ if [[ "${#MISSING_PLUGINS[@]}" -gt 0 ]]; then
 else
   ok "Alle GStreamer-Plugins vorhanden."
 fi
+
+# avvideofilter (optional): blended Framerate-Konvertierung. Benötigt glibc >= 2.35,
+# GStreamer >= 1.20. Installation nach ~/.local/share/gstreamer-1.0/plugins
+# (wird von GStreamer automatisch gescannt).
+for _avvf in "${SCRIPT_DIR}"/avvideofilter-*.tar.gz; do
+  [[ -f "$_avvf" ]] || continue
+  if gst-inspect-1.0 avvideofilter &>/dev/null; then
+    ok "avvideofilter: bereits vorhanden"
+  else
+    _AVVF_DST="${HOME}/.local/share/gstreamer-1.0/plugins"
+    mkdir -p "${_AVVF_DST}" && tar -xzf "$_avvf" -C "${_AVVF_DST}" --strip-components=1 \
+      && { gst-inspect-1.0 avvideofilter &>/dev/null \
+           && ok "avvideofilter installiert (${_AVVF_DST})" \
+           || warn "avvideofilter entpackt, aber nicht ladbar (glibc/GStreamer zu alt?) — blend fällt auf videorate zurück."; } \
+      || warn "avvideofilter konnte nicht installiert werden."
+  fi
+  break
+done
 
 if command -v ffprobe &>/dev/null; then
   ok "ffprobe: OK"
@@ -556,7 +601,15 @@ echo "├───────────────────────�
 printf "│  Git-Tag %-51s │\n" "${_TAG} erstellen + package.json committen?"
 echo "│  (Nur sinnvoll wenn kein weiteres Build-Artefakt folgt)     │"
 echo "└─────────────────────────────────────────────────────────────┘"
-read -r -p "  Git-Tag + Commit erstellen? [J/n]: " _TAG_ANS
+# Env-Var überschreibt die Abfrage: TAG_RELEASE=1 (ja) / TAG_RELEASE=0 (nein)
+if [[ -n "${TAG_RELEASE:-}" ]]; then
+    [[ "${TAG_RELEASE}" == "1" ]] && _TAG_ANS="j" || _TAG_ANS="n"
+elif [[ -t 0 ]]; then
+    read -r -p "  Git-Tag + Commit erstellen? [J/n]: " _TAG_ANS
+else
+    _TAG_ANS="n"
+    echo "  Nicht-interaktiv (kein TTY) — Tag/Commit wird übersprungen (TAG_RELEASE=1 zum Erzwingen)"
+fi
 if [[ "${_TAG_ANS,,}" != "n" ]]; then
     if git -C "${SCRIPT_DIR}" diff --quiet HEAD -- package.json 2>/dev/null; then
         log "package.json bereits committed — kein Commit nötig"
@@ -571,7 +624,15 @@ if [[ "${_TAG_ANS,,}" != "n" ]]; then
         git -C "${SCRIPT_DIR}" tag -a "${_TAG}" -m "Release ${_TAG}"
         log "Tag ${_TAG} erstellt"
     fi
-    read -r -p "  Tag + Commit pushen? [J/n]: " _PUSH_ANS
+    # Env-Var überschreibt die Abfrage: PUSH_RELEASE=1 (ja) / PUSH_RELEASE=0 (nein)
+    if [[ -n "${PUSH_RELEASE:-}" ]]; then
+        [[ "${PUSH_RELEASE}" == "1" ]] && _PUSH_ANS="j" || _PUSH_ANS="n"
+    elif [[ -t 0 ]]; then
+        read -r -p "  Tag + Commit pushen? [J/n]: " _PUSH_ANS
+    else
+        _PUSH_ANS="n"
+        echo "  Nicht-interaktiv (kein TTY) — Push wird übersprungen (PUSH_RELEASE=1 zum Erzwingen)"
+    fi
     if [[ "${_PUSH_ANS,,}" != "n" ]]; then
         git -C "${SCRIPT_DIR}" push
         git -C "${SCRIPT_DIR}" push origin "${_TAG}"
