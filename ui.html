@@ -1460,6 +1460,14 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         </select>
       </div>
 
+      <div class="fld"><label data-i18n="cfg.video.frc.label">Framerate-Konvertierung</label>
+        <select id="cfg-frc-mode">
+          <option value="videorate" data-i18n="cfg.video.frc.videorate">videorate (Frames verwerfen/duplizieren)</option>
+          <option value="blend" data-i18n="cfg.video.frc.blend">Blend (Frames überblenden, avvideofilter)</option>
+        </select>
+        <div id="cfg-frc-hint" style="display:none;font-size:11px;color:var(--yellow,#e0b040);margin-top:4px" data-i18n="cfg.video.frc.missing">avvideofilter-Plugin nicht gefunden — Blend fällt auf videorate zurück.</div>
+      </div>
+
       <button class="btn btn-p" style="margin-top:12px" onclick="saveVideoSettings()" data-i18n="cfg.video.save">💾 Video speichern &amp; Neustart</button>
     </div>
 
@@ -8164,6 +8172,10 @@ function openSettings(){
     if (sqSel) sqSel.value = String(cfg.scaleMethod ?? 1);
     const diSel = document.getElementById('cfg-deinterlace-mode');
     if (diSel) diSel.value = cfg.deinterlaceMode || 'auto';
+    const frcSel = document.getElementById('cfg-frc-mode');
+    if (frcSel) frcSel.value = cfg.frameRateConversion || 'videorate';
+    const frcHint = document.getElementById('cfg-frc-hint');
+    if (frcHint) frcHint.style.display = cfg.avvideofilterAvailable ? 'none' : '';
     // DeckLink interlaced Output
     const dliChk = document.getElementById('cfg-dl-interlaced');
     if (dliChk) dliChk.checked = !!cfg.decklinkOutputInterlaced;
@@ -8225,6 +8237,7 @@ async function saveSettings(){
   const scaleMode     = document.getElementById('cfg-scale-mode')?.value || null;
   const scaleMethod   = document.getElementById('cfg-scale-method')?.value ?? null;
   const deinterlace   = document.getElementById('cfg-deinterlace-mode')?.value || null;
+  const frcMode       = document.getElementById('cfg-frc-mode')?.value || null;
 
   // Detect all changes before any API call
   const curSink       = S.config?.videoSink     || 'autovideosink';
@@ -8234,12 +8247,13 @@ async function saveSettings(){
   const curScaleMode  = S.config?.scaleMode     || 'fit';
   const curScaleMeth  = String(S.config?.scaleMethod ?? 1);
   const curDeint      = S.config?.deinterlaceMode || 'auto';
+  const curFrc        = S.config?.frameRateConversion || 'videorate';
 
   const sinkChanged   = sink    !== curSink;
   const fmtChanged    = !!(fmtVal && fmtVal !== curFmt);
   const audioChanged  = !!(audioSink && audioSink !== (S.config?.audioSink || 'pulsesink'));
   const idleChanged   = source !== curSource || (imagePath || '') !== curImage;
-  const convChanged   = scaleMode !== curScaleMode || String(scaleMethod) !== curScaleMeth || deinterlace !== curDeint;
+  const convChanged   = scaleMode !== curScaleMode || String(scaleMethod) !== curScaleMeth || deinterlace !== curDeint || (frcMode && frcMode !== curFrc);
   // Idle restarts only when playlist is not running
   const idleRestarts  = idleChanged && !S.playlist?.running;
   const needsRestart  = sinkChanged || fmtChanged || audioChanged || idleRestarts || convChanged;
@@ -8250,7 +8264,7 @@ async function saveSettings(){
       sinkChanged  ? `Video-Sink: ${curSink} → ${sink}` : null,
       fmtChanged   ? `Auflösung/Framerate: ${curFmt} → ${fmtVal}` : null,
       audioChanged ? `Audio-Sink: ${S.config?.audioSink||'pulsesink'} → ${audioSink}` : null,
-      convChanged  ? `Format-Konvertierung: Scale=${scaleMode}, Methode=${scaleMethod}, Deinterlace=${deinterlace}` : null,
+      convChanged  ? `Format-Konvertierung: Scale=${scaleMode}, Methode=${scaleMethod}, Deinterlace=${deinterlace}, Framerate=${frcMode}` : null,
     ].filter(Boolean).join('\n');
     if (!await _confirmRestart(details)) return;
   }
@@ -8267,7 +8281,7 @@ async function saveSettings(){
       body:JSON.stringify({ width: parseInt(w), height: parseInt(h), fps: parseInt(fps) }) });
   }
   if (audioChanged) await apiFetch('/api/config/audiosink', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ sink: audioSink }) });
-  if (convChanged)  await apiFetch('/api/config/conversion', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ scaleMode, scaleMethod: parseInt(scaleMethod), deinterlaceMode: deinterlace }) });
+  if (convChanged)  await apiFetch('/api/config/conversion', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ scaleMode, scaleMethod: parseInt(scaleMethod), deinterlaceMode: deinterlace, frameRateConversion: frcMode }) });
 
   if (needsRestart) showToast('Einstellungen gespeichert — Master wird neu gestartet…');
   else showToast('Einstellungen gespeichert ✓');
@@ -8362,19 +8376,21 @@ async function saveVideoSettings(){
   const scaleMode   = document.getElementById('cfg-scale-mode')?.value || null;
   const scaleMethod = document.getElementById('cfg-scale-method')?.value ?? null;
   const deinterlace = document.getElementById('cfg-deinterlace-mode')?.value || null;
+  const frcMode     = document.getElementById('cfg-frc-mode')?.value || null;
 
   const sinkChanged = sink !== (S.config?.videoSink||'autovideosink');
   const curFmt = `${S.config?.width||1920}x${S.config?.height||1080}@${S.config?.fps||25}`;
   const fmtChanged  = !!(fmtVal && fmtVal !== curFmt);
   const convChanged = scaleMode !== (S.config?.scaleMode||'fit') ||
                       String(scaleMethod) !== String(S.config?.scaleMethod??1) ||
-                      deinterlace !== (S.config?.deinterlaceMode||'auto');
+                      deinterlace !== (S.config?.deinterlaceMode||'auto') ||
+                      (frcMode && frcMode !== (S.config?.frameRateConversion||'videorate'));
 
   if (sinkChanged || fmtChanged || convChanged) {
     const details = [
       sinkChanged  ? `Video-Sink: ${S.config?.videoSink||'autovideosink'} → ${sink}` : null,
       fmtChanged   ? `Auflösung/Framerate: ${curFmt} → ${fmtVal}` : null,
-      convChanged  ? `Konvertierung: Scale=${scaleMode}, Methode=${scaleMethod}, Deinterlace=${deinterlace}` : null,
+      convChanged  ? `Konvertierung: Scale=${scaleMode}, Methode=${scaleMethod}, Deinterlace=${deinterlace}, Framerate=${frcMode}` : null,
     ].filter(Boolean).join('\n');
     if (!await _confirmRestart(details)) return;
   }
@@ -8384,7 +8400,7 @@ async function saveVideoSettings(){
     const [wh,fps]=fmtVal.split('@'); const [w,h]=wh.split('x');
     await apiFetch('/api/config/format',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({width:parseInt(w),height:parseInt(h),fps:parseInt(fps)})});
   }
-  if (convChanged) await apiFetch('/api/config/conversion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scaleMode,scaleMethod:parseInt(scaleMethod),deinterlaceMode:deinterlace})});
+  if (convChanged) await apiFetch('/api/config/conversion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scaleMode,scaleMethod:parseInt(scaleMethod),deinterlaceMode:deinterlace,frameRateConversion:frcMode})});
   const needsRestart = sinkChanged || fmtChanged || convChanged;
   showToast(needsRestart ? 'Video-Einstellungen gespeichert — Neustart läuft…' : 'Video-Einstellungen gespeichert ✓');
   if(needsRestart) closeModal('settings-modal');
@@ -10779,6 +10795,10 @@ const I18N = {
     'cfg.video.deint.auto':'Auto (erkennt interlaced automatisch)',
     'cfg.video.deint.always':'Immer (force-deinterlace)',
     'cfg.video.deint.never':'Nie (kein Deinterlacing)',
+    'cfg.video.frc.label':'Framerate-Konvertierung',
+    'cfg.video.frc.videorate':'videorate (Frames verwerfen/duplizieren)',
+    'cfg.video.frc.blend':'Blend (Frames überblenden, avvideofilter)',
+    'cfg.video.frc.missing':'avvideofilter-Plugin nicht gefunden — Blend fällt auf videorate zurück.',
     'cfg.video.save':'💾 Video speichern & Neustart',
     // Player panel
     'cfg.player.mixer':'Video Mixer','cfg.player.freezeSlots':'Freeze/Still Slots (0–9)',
@@ -11026,6 +11046,10 @@ const I18N = {
     'cfg.video.deint.auto':'Auto (detects interlaced automatically)',
     'cfg.video.deint.always':'Always (force-deinterlace)',
     'cfg.video.deint.never':'Never (no deinterlacing)',
+    'cfg.video.frc.label':'Frame rate conversion',
+    'cfg.video.frc.videorate':'videorate (drop/duplicate frames)',
+    'cfg.video.frc.blend':'Blend (blend frames, avvideofilter)',
+    'cfg.video.frc.missing':'avvideofilter plugin not found — Blend falls back to videorate.',
     'cfg.video.save':'💾 Save Video & Restart',
     // Player panel
     'cfg.player.mixer':'Video Mixer','cfg.player.freezeSlots':'Freeze/Still Slots (0–9)',
