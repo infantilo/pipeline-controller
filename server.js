@@ -1379,6 +1379,7 @@ const masterOpts = {
   videoDelayMs:     _settings.videoDelayMs  ?? 0,
   audioDelayMs:     _settings.audioDelayMs  || {},
   // GPU-Compositor: true=force glvideomixer, false=force software, unset=auto-detect
+  safeMode:         SAFE_MODE,
   gpuCompositor:    SAFE_MODE >= 1 ? false : (_settings.gpuCompositor ?? undefined),
   // GPU-Decode: false=force software; true/unset=auto (NVDEC wenn verfügbar)
   gpuDecode:        SAFE_MODE >= 1 ? false : (_settings.gpuDecode ?? undefined),
