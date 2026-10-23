@@ -52,7 +52,18 @@ fi
 
     echo "━━━ gdb-Backtrace (Neustart unter gdb) ━━━"
     if [[ -n "${GDB_BACKTRACE_FILE:-}" && -s "${GDB_BACKTRACE_FILE}" ]]; then
-        grep -vE '^\[New Thread|^\[Thread .* exited|^\[Detaching' "$GDB_BACKTRACE_FILE" | tail -n 250
+        # Reihenfolge der gdb-Ausgabe: CRASH-THREAD, ALLE THREADS, REGISTER, BIBLIOTHEKEN.
+        # NICHT per tail kürzen (das schnitt früher den Crash-Thread ab): stattdessen
+        # Leerlauf-Threads (uv-worker/V8-Worker/Inspector) herausfiltern, Libs auf
+        # gst/decklink/nvidia/gl reduzieren.
+        grep -vE '^\[New Thread|^\[Thread .* exited|^\[Detaching' "$GDB_BACKTRACE_FILE" | awk '
+            /^===== GELADENE BIBLIOTHEKEN/ { inlib=1; print; next }
+            /^=====/                      { inlib=0 }
+            inlib { if ($0 ~ /gst|decklink|DeckLink|nvidia|nvcuvid|libGL|libEGL|gst_kit|^\[Inferior/) print; next }
+            /^Thread [0-9]+ /             { blk=$0; skip=0; next_is_block=1 }
+            { print }' | awk -v RS='' -v ORS='\n\n' '
+            /PlatformWorkerThread|SignalInspector|DelayedTaskSche|uv_cond_wait.*\n.*worker \(arg/ && !/CRASH|SIG/ { next }
+            { print }' | head -n 400
     else
         echo "(kein gdb-Backtrace: gdb nicht installiert oder PC_GDB=0 gesetzt)"
     fi
