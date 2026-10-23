@@ -1,5 +1,5 @@
 #!/bin/bash
-cd "/home/infantilo/PIPELINE CONTROLLER"
+cd "/home/infantilo/PIPELINE_CONTROLLER"
 node -e "
 const m = require('gst-kit');
 console.log('Exports:', Object.keys(m));

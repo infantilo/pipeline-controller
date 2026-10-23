@@ -7,7 +7,7 @@
       "username": "",
       "password": "",
       "remotePath": "/",
-      "sourcePaths": "/home/infantilo/PIPELINE CONTROLLER/recordings",
+      "sourcePaths": "/home/infantilo/PIPELINE_CONTROLLER/recordings",
       "destDir": "",
       "preFetchMinutes": 60,
       "deleteAfterMinutes": 120,

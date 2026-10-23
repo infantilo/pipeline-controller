@@ -69,7 +69,7 @@ INSTALL_DIR="$HOME/pipeline-controller"
 mkdir -p "$INSTALL_DIR"
 
 # Quelldateien kopieren (von dieser Maschine oder Quellpfad anpassen)
-cp -r "/home/infantilo/PIPELINE CONTROLLER/"* "$INSTALL_DIR/"
+cp -r "/home/infantilo/PIPELINE_CONTROLLER/"* "$INSTALL_DIR/"
 
 # In Projektverzeichnis wechseln
 cd "$INSTALL_DIR"
