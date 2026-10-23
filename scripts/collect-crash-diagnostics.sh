@@ -45,6 +45,23 @@ fi
     dmesg 2>/dev/null | tail -n 500 | grep -iE 'blackmagic|decklink|segfault|node\[' | tail -n 60 || echo "(dmesg nicht lesbar — evtl. fehlende Rechte; siehe 'journalctl -k' als Alternative)"
     echo
 
+    echo "━━━ Resilienz-Status ━━━"
+    echo "Crash-Zähler: ${PC_CRASH_COUNT_NEXT:-?}  → nächster Start im Safe-Mode ${PC_SAFE_MODE_NEXT:-0}  (0=normal, 1=Software-Decode/Compositor, 2=Pipeline-Autostart aus)"
+    echo "ulimit -c: $(ulimit -c)   core_pattern: $(cat /proc/sys/kernel/core_pattern 2>/dev/null)   gdb: $(command -v gdb || echo 'NICHT installiert (sudo apt install gdb)')"
+    echo
+
+    echo "━━━ gdb-Backtrace (Neustart unter gdb) ━━━"
+    if [[ -n "${GDB_BACKTRACE_FILE:-}" && -s "${GDB_BACKTRACE_FILE}" ]]; then
+        grep -vE '^\[New Thread|^\[Thread .* exited|^\[Detaching' "$GDB_BACKTRACE_FILE" | tail -n 250
+    else
+        echo "(kein gdb-Backtrace: gdb nicht installiert oder PC_GDB=0 gesetzt)"
+    fi
+    echo
+
+    echo "━━━ Letzte 60 Log-Zeilen UNGEFILTERT (vor dem Absturz) ━━━"
+    [[ -f "$LOG_FILE" ]] && tail -n 60 "$LOG_FILE" | cut -c1-300
+    echo
+
     echo "━━━ Coredump + Backtrace ━━━"
     CORE=""
     # 1) klassisches core/core.<pid> im aktuellen Arbeitsverzeichnis von AppRun
@@ -106,5 +123,6 @@ cp -f "$OUT" "${OUT_DIR}/latest-crash.txt" 2>/dev/null || true
 
 # Alte Reports begrenzen (letzte 20 behalten)
 ls -t "${OUT_DIR}"/crash-*.txt 2>/dev/null | tail -n +21 | xargs -r rm -f
+ls -t "${OUT_DIR}"/gdb-backtrace-*.txt 2>/dev/null | tail -n +11 | xargs -r rm -f
 
 echo "[collect-crash-diagnostics] Report geschrieben: ${OUT}"

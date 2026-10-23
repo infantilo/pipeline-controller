@@ -1917,6 +1917,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
         style="width:100%;height:220px;font-family:var(--mono);font-size:9px;color:var(--dim);background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:6px;white-space:pre;resize:vertical"></textarea>
       <div style="display:flex;gap:4px;margin-top:4px">
         <button class="btn" style="flex:1;font-size:10px" onclick="copyDiagBundle()">📋 In Zwischenablage kopieren</button>
+        <button class="btn" style="flex:1;font-size:10px" onclick="downloadDiagBundle()">💾 Als Datei herunterladen</button>
       </div>
     </div>
 
@@ -2284,6 +2285,12 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 </div>
 </div>
 
+<div id="safe-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#7a2a1a;color:#fff;padding:8px 14px;font-size:13px;align-items:center;gap:12px">
+  <span id="safe-banner-txt" style="flex:1"></span>
+  <button onclick="safeBannerReport()" style="padding:3px 10px">Crash-Report anzeigen</button>
+  <button onclick="safeBannerRestart()" style="padding:3px 10px">Neu starten (Safe-Mode verlassen)</button>
+  <button onclick="document.getElementById('safe-banner').style.display='none'" style="padding:3px 8px">✕</button>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -8727,6 +8734,26 @@ async function loadDiagBundle(){
     out.select();
   } catch(e) { out.value = '[Fehler beim Laden: ' + e.message + ']'; }
 }
+async function safeBannerReport(){
+  try { openSettings(); cfgTab('debug'); } catch {}
+  await loadLastCrash();
+  document.getElementById('diag-bundle-out')?.scrollIntoView({block:'center'});
+}
+async function safeBannerRestart(){
+  try { await fetch('/api/debug/restart',{method:'POST'}); showToast('Neustart angefordert …'); setTimeout(()=>location.reload(), 6000); } catch(e) { showToast('Fehler: '+e.message); }
+}
+(async function checkStartupState(){
+  try {
+    const st = await fetch('/api/debug/startup').then(r=>r.json());
+    if (!st.safeMode && !st.crashCount) return;
+    const b = document.getElementById('safe-banner');
+    document.getElementById('safe-banner-txt').textContent =
+      `⚠ Server nach Absturz neu gestartet (Crash #${st.crashCount})` +
+      (st.safeMode >= 2 ? ' — SAFE-MODE 2: Pipeline wurde NICHT automatisch gestartet.' :
+       st.safeMode === 1 ? ' — SAFE-MODE 1: GPU-Compositor/-Decode deaktiviert.' : '.');
+    b.style.display = 'flex';
+  } catch {}
+})();
 async function loadLastCrash(){
   const out = document.getElementById('diag-bundle-out');
   out.value = '… lade letzten Crash-Report …';
@@ -8735,6 +8762,16 @@ async function loadLastCrash(){
     out.value = text;
     out.select();
   } catch(e) { out.value = '[Fehler beim Laden: ' + e.message + ']'; }
+}
+function downloadDiagBundle(){
+  const out = document.getElementById('diag-bundle-out');
+  if (!out.value) { showToast('Erst Bundle oder Crash-Report laden'); return; }
+  const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([out.value], {type:'text/plain;charset=utf-8'}));
+  a.download = `pipeline-diagnose_${ts}.txt`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
 }
 async function copyDiagBundle(){
   const out = document.getElementById('diag-bundle-out');

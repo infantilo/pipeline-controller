@@ -145,6 +145,12 @@ function saveSettings(s) {
 }
 const _settings = loadSettings();
 
+// Crash-Resilienz (AppRun-Restart-Loop, siehe build_appimage.sh):
+//   0 = normal, 1 = Software-Decode/-Compositor, 2 = Pipeline nicht automatisch starten
+// → UI bleibt erreichbar und zeigt den Crash-Report, statt in einer Crash-Schleife zu hängen.
+const SAFE_MODE   = parseInt(process.env.PC_SAFE_MODE  || '0') || 0;
+const CRASH_COUNT = parseInt(process.env.PC_CRASH_COUNT || '0') || 0;
+
 // ── Configurable paths (persisted in settings.json, take effect after restart) ─
 // In AppImage mode: a configured path is only used if it actually exists on this machine.
 // Stale dev-machine paths in an existing settings.json are ignored and fall through to defaults.
@@ -320,6 +326,7 @@ function resolveIdleImage(nameOrPath) {
 // Kein NVDEC-Fehler bei nicht vorhandenen Elementen: execFileSync wirft, IIFE fängt.
 (function applyNvdecRankEarly() {
   if (_settings.gpuDecode === false) return;
+  if (SAFE_MODE >= 1) return;   // Safe-Mode nach Crash-Schleife: kein NVDEC
   // AppRun's Startup-Hardwarecheck hat bereits "keine NVIDIA-GPU" festgestellt —
   // den 3s-gst-inspect-Versuch (der ohnehin scheitern würde) gar nicht erst starten.
   if (process.env.HW_NVIDIA_PRESENT === '0') return;
@@ -1371,9 +1378,9 @@ const masterOpts = {
   videoDelayMs:     _settings.videoDelayMs  ?? 0,
   audioDelayMs:     _settings.audioDelayMs  || {},
   // GPU-Compositor: true=force glvideomixer, false=force software, unset=auto-detect
-  gpuCompositor:    _settings.gpuCompositor ?? undefined,
+  gpuCompositor:    SAFE_MODE >= 1 ? false : (_settings.gpuCompositor ?? undefined),
   // GPU-Decode: false=force software; true/unset=auto (NVDEC wenn verfügbar)
-  gpuDecode:        _settings.gpuDecode     ?? undefined,
+  gpuDecode:        SAFE_MODE >= 1 ? false : (_settings.gpuDecode ?? undefined),
 };
 
 // ── Pipeline-Clock-Strategie ──────────────────────────────────────────────────
@@ -4448,6 +4455,17 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end(text || '(kein Crash-Report vorhanden)');
   }
+  // Start-/Resilienz-Status für das UI-Banner (Safe-Mode, Crash-Zähler)
+  if (meth === 'GET' && p === '/api/debug/startup') {
+    return json(res, { safeMode: SAFE_MODE, crashCount: CRASH_COUNT,
+      hasCrashReport: !!DiagnosticBundle.readLastCrash(_instanceDir || _appImageWorkDir || __dirname) });
+  }
+  // AppRun startet bei Exit-Code 75 neu und setzt Crash-Zähler/Safe-Mode zurück.
+  if (meth === 'POST' && p === '/api/debug/restart') {
+    json(res, { ok: true });
+    setTimeout(() => process.exit(75), 300);
+    return;
+  }
   if (meth === 'POST' && p === '/api/debug/enable') {
     const b = await parseBody(req);
     const enable  = b.enabled !== false;
@@ -4628,6 +4646,13 @@ server.listen(PORT, () => {
     }
   }
 
+  if (SAFE_MODE >= 1) {
+    log(`⚠ SAFE-MODE ${SAFE_MODE} (Crash #${CRASH_COUNT} in Folge): ${SAFE_MODE >= 2 ? 'Pipeline-Autostart UND GPU-Pfade deaktiviert' : 'GPU-Compositor/-Decode deaktiviert (Software)'} — Details: Diagnose-Tab → "Letzter Crash"`, 'warn', 'system');
+  }
+  if (SAFE_MODE >= 2) {
+    log('Master-Pipeline/Plugins werden im Safe-Mode NICHT automatisch gestartet. Manuell starten oder "Safe-Mode verlassen" in der UI.', 'warn', 'system');
+    return;
+  }
   ensureMaster();
   _autoLoadPlaylist();
   pluginHost.loadAll().catch(e => log(`Plugin-Host Startup: ${e.message}`, 'warn', 'plugins'));

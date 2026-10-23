@@ -733,8 +733,64 @@ echo "[AppRun] Konfiguration: ${WORK_DIR}/settings.json"
 # Browser nach 3s automatisch öffnen (nur beim ersten Start, nicht nach Neustart)
 _BROWSER_OPENED=0
 
+# ── Crash-Resilienz ──────────────────────────────────────────────────────────
+# - Core-Dumps erlauben (falls die Distribution es zulässt).
+# - Node läuft (sofern gdb installiert ist) standardmäßig unter gdb (Batch-Modus), damit
+#   der native Backtrace OHNE Coredump/apport/coredumpctl im Diagnose-Report landet.
+#   PC_GDB=0 schaltet gdb ab.
+# - Crash-Schleife (Absturz < 60s nach Start): Backoff + Safe-Mode-Stufen, die der
+#   Server über PC_SAFE_MODE auswertet (1 = Software-Decode/-Compositor,
+#   2 = Pipeline nicht automatisch starten → UI bleibt erreichbar und zeigt den Report).
+# - Exit-Code 75 = vom Server gewünschter Neustart (z.B. "Safe-Mode verlassen").
+ulimit -c unlimited 2>/dev/null || true
+mkdir -p "${WORK_DIR}/diagnostics" 2>/dev/null || true
+_CRASH_COUNT=0
+_SAFE_MODE=0
+export PC_SAFE_MODE=0
+
+# Startet Node unter gdb; stdout/stderr des Servers gehen weiter ins Server-Log.
+# Gibt den ermittelten Node-Exit-Code zurück (139 bei Signal) und schreibt den
+# gdb-Backtrace nach $1.
+_run_node_gdb() {
+    local bt_file="$1"; shift
+    local cmds; cmds="$(mktemp)"
+    {
+        echo "set pagination off"
+        echo "set confirm off"
+        echo "set debuginfod enabled off"
+        echo "set startup-with-shell on"
+        for _s in SIGPIPE SIGUSR1 SIGUSR2 SIGCHLD SIGALRM SIGHUP SIGWINCH SIGURG SIGPROF; do
+            echo "handle $_s nostop noprint pass"
+        done
+        printf 'set args --require %q %q' "${APPDIR}/app/appimage_bootstrap.js" "${APPDIR}/app/server.js"
+        for _a in "$@"; do printf ' %q' "$_a"; done
+        printf ' >> %q 2>&1\n' "$LOG_FILE"
+        echo "run"
+        echo "echo \n===== CRASH-THREAD =====\n"
+        echo "bt full 40"
+        echo "echo \n===== ALLE THREADS =====\n"
+        echo "thread apply all bt 25"
+        echo "echo \n===== REGISTER =====\n"
+        echo "info registers rip rsp"
+        echo "echo \n===== GELADENE BIBLIOTHEKEN (gst/decklink/nvidia/gl) =====\n"
+        echo "info sharedlibrary"
+        echo "kill"
+        echo "quit"
+    } > "$cmds"
+    gdb -batch -x "$cmds" "${APPDIR}/usr/bin/node" > "$bt_file" 2>&1
+    rm -f "$cmds"
+    if   grep -qE 'exited normally' "$bt_file"; then return 0
+    elif grep -qE '\[Inferior 1 \(process [0-9]+\) exited with code' "$bt_file"; then
+        local c; c="$(grep -oE 'exited with code [0-9]+' "$bt_file" | tail -n1 | grep -oE '[0-9]+$')"
+        return $(( 10#${c:-1} & 255 ))
+    elif grep -qE 'SIGSEGV|SIGBUS|SIGILL|SIGFPE'  "$bt_file"; then return 139
+    elif grep -qE 'SIGABRT' "$bt_file"; then return 134
+    fi
+    return 1
+}
+
 while true; do
-    echo "=== AppRun: Start $(date -Is) ===" >> "$LOG_FILE"
+    echo "=== AppRun: Start $(date -Is) (crashes=${_CRASH_COUNT} safe-mode=${_SAFE_MODE}) ===" >> "$LOG_FILE"
     set +e
 
     if [[ "$_BROWSER_OPENED" -eq 0 ]]; then
@@ -742,25 +798,50 @@ while true; do
         ( sleep 3 && xdg-open "http://localhost:${_PORT}" ) &>/dev/null &
     fi
 
-    "${APPDIR}/usr/bin/node" \
-        --require "${APPDIR}/app/appimage_bootstrap.js" \
-        "${APPDIR}/app/server.js" \
-        "$@" >> "$LOG_FILE" 2>&1
-    NODE_EXIT=$?
+    _T_START=$SECONDS
+    export PC_SAFE_MODE="$_SAFE_MODE" PC_CRASH_COUNT="$_CRASH_COUNT"
+    _GDB_BT=""
+    if command -v gdb &>/dev/null && [[ "${PC_GDB:-1}" != "0" ]]; then
+        _GDB_BT="${WORK_DIR}/diagnostics/gdb-backtrace-$(date +%Y%m%d-%H%M%S).txt"
+        echo "[AppRun] Starte Node unter gdb (Backtrace bei Absturz → ${_GDB_BT})"
+        _run_node_gdb "$_GDB_BT" "$@"
+        NODE_EXIT=$?
+    else
+        "${APPDIR}/usr/bin/node" \
+            --require "${APPDIR}/app/appimage_bootstrap.js" \
+            "${APPDIR}/app/server.js" \
+            "$@" >> "$LOG_FILE" 2>&1
+        NODE_EXIT=$?
+    fi
+    _UPTIME=$(( SECONDS - _T_START ))
     set -e
-    echo "=== AppRun: Node beendet, Exit-Code=${NODE_EXIT} $(date -Is) ===" >> "$LOG_FILE"
+    echo "=== AppRun: Node beendet, Exit-Code=${NODE_EXIT} nach ${_UPTIME}s $(date -Is) ===" >> "$LOG_FILE"
 
     if [[ "$NODE_EXIT" -eq 0 ]]; then
         echo "[AppRun] Geordneter Shutdown — beende."
         break
     fi
 
+    if [[ "$NODE_EXIT" -eq 75 ]]; then
+        echo "[AppRun] Neustart angefordert (Exit 75) — Crash-Zähler zurückgesetzt."
+        _CRASH_COUNT=0; _SAFE_MODE=0
+        continue
+    fi
+
+    # Crash-Schleife erkennen: Läufe, die >60s stabil waren, setzen den Zähler zurück
+    if (( _UPTIME >= 60 )); then _CRASH_COUNT=1; else _CRASH_COUNT=$(( _CRASH_COUNT + 1 )); fi
+    if   (( _CRASH_COUNT >= 3 )); then _SAFE_MODE=2
+    elif (( _CRASH_COUNT >= 2 )); then _SAFE_MODE=1
+    fi
+
     echo "[AppRun] Abnormaler Exit (${NODE_EXIT}) — sammle Diagnose-Report..."
     if [[ -x "${APPDIR}/app/scripts/collect-crash-diagnostics.sh" ]]; then
-        "${APPDIR}/app/scripts/collect-crash-diagnostics.sh" "$NODE_EXIT" "$LOG_FILE" "$WORK_DIR" || true
+        GDB_BACKTRACE_FILE="$_GDB_BT" PC_SAFE_MODE_NEXT="$_SAFE_MODE" PC_CRASH_COUNT_NEXT="$_CRASH_COUNT" \
+            "${APPDIR}/app/scripts/collect-crash-diagnostics.sh" "$NODE_EXIT" "$LOG_FILE" "$WORK_DIR" || true
     fi
-    echo "[AppRun] Neustart in 3s... (Diagnose unter ${WORK_DIR}/diagnostics/latest-crash.txt)"
-    sleep 3
+    _DELAY=$(( _CRASH_COUNT <= 1 ? 3 : _CRASH_COUNT <= 3 ? 5 : 15 ))
+    echo "[AppRun] Neustart in ${_DELAY}s (Crash #${_CRASH_COUNT}, Safe-Mode ${_SAFE_MODE}) — Diagnose: ${WORK_DIR}/diagnostics/latest-crash.txt"
+    sleep "$_DELAY"
 done
 APPRUN
 chmod +x "${APPDIR}/AppRun"
