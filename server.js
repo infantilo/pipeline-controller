@@ -2486,7 +2486,7 @@ async function ensureMaster() {
       if (_needsDisplay)
         log(`  Hinweis: videoSink="${_vs}" braucht X11/Wayland — DISPLAY=${process.env.DISPLAY||'(nicht gesetzt)'}`, 'warn', 'master');
       else if (_sinkName === 'decklinkvideosink')
-        log(`  Hinweis: decklinkvideosink state-change-Fehler ohne Detail-Reason meist: (1) Karte/Kanal bereits von anderem Prozess ODER altem Handle in DIESEM Prozess belegt (HRESULT 0x80000009 = E_ACCESSDENIED, "Output device N in use already") — bei gst-plugins-bad 1.20 bleibt der Handle nach "Failed to wait for stop notification" hängen, nur kompletter Server-Neustart gibt ihn frei; (2) bei DeckLink IP 100G (8 bidirektionale Geräte, Profil 'dflt', KEIN Duplex-/Profil-Setup nötig — profile/duplex-mode NICHT setzen): ST-2110-Flows/PTP des Kanals nicht im Blackmagic Desktop Video Setup konfiguriert/aktiviert; (3) Desktop-Video-Treiber/-Helper läuft nicht. Filter "decklink:5,*:2" im Server-Tab setzen und den KOMPLETTEN SERVER-PROZESS neu starten (nicht nur Master — GST_DEBUG wird nur beim Prozessstart gelesen), um die eigentliche HRESULT/Fehlermeldung der DeckLink-API im Log zu sehen.`, 'warn', 'master');
+        log(`  Hinweis: decklinkvideosink state-change-Fehler ohne Detail-Reason meist: (1) Karte/Kanal bereits von anderem Prozess ODER altem Handle in DIESEM Prozess belegt (HRESULT 0x80000009 = E_ACCESSDENIED, "Output device N in use already") — bei gst-plugins-bad 1.20 bleibt der Handle nach "Failed to wait for stop notification" hängen, nur kompletter Server-Neustart gibt ihn frei; (1b) eine zweite/angehaltene Instanz dieses Servers (z.B. nach Ctrl+Z oder alter AppImage-Lauf) hält die Karte — "pgrep -af appimage_bootstrap" bzw. "pgrep -af server.js" prüfen und mit kill -9 beenden; (2) bei DeckLink IP 100G (8 bidirektionale Geräte, Profil 'dflt', KEIN Duplex-/Profil-Setup nötig — profile/duplex-mode NICHT setzen): ST-2110-Flows/PTP des Kanals nicht im Blackmagic Desktop Video Setup konfiguriert/aktiviert; (3) Desktop-Video-Treiber/-Helper läuft nicht. Filter "decklink:5,*:2" im Server-Tab setzen und den KOMPLETTEN SERVER-PROZESS neu starten (nicht nur Master — GST_DEBUG wird nur beim Prozessstart gelesen), um die eigentliche HRESULT/Fehlermeldung der DeckLink-API im Log zu sehen.`, 'warn', 'master');
       else
         log(`  Hinweis: videoSink="${_vs}" — GStreamer-Log für Details prüfen`, 'warn', 'master');
     }
@@ -4682,6 +4682,9 @@ server.listen(PORT, () => {
     }
   }
 
+  if (process.env.PC_OTHER_INSTANCES) {
+    log(`⚠ Weitere Pipeline-Controller-Prozesse laufen (PID ${process.env.PC_OTHER_INSTANCES.trim()}) — sie können die DeckLink-Karte belegen (Master-Start schlägt dann mit "state change failed" fehl). Mit "kill -9 <PID>" beenden.`, 'warn', 'system');
+  }
   if (SAFE_MODE >= 1) {
     log(`⚠ SAFE-MODE ${SAFE_MODE} (Crash #${CRASH_COUNT} in Folge): ${SAFE_MODE >= 2 ? 'Pipeline-Autostart UND GPU-Pfade deaktiviert' : 'GPU-Compositor/-Decode deaktiviert (Software)'} — Details: Diagnose-Tab → "Letzter Crash"`, 'warn', 'system');
   }

@@ -747,6 +747,16 @@ mkdir -p "${WORK_DIR}/diagnostics" 2>/dev/null || true
 _CRASH_COUNT=0
 _SAFE_MODE=0
 export PC_SAFE_MODE=0
+export PC_SUPERVISED=1   # AppRun startet bei Exit-Code 75 (z.B. DeckLink-Handle-Recovery) neu
+
+# Andere laufende/gestoppte Instanzen finden: eine zweite (oder per Ctrl+Z angehaltene)
+# Instanz hält die DeckLink-Karte belegt → "state change failed" beim Master-Start.
+_OTHER_PIDS="$(pgrep -f 'appimage_bootstrap\.js' 2>/dev/null | grep -vx "$$" | tr '\n' ' ' || true)"
+if [[ -n "${_OTHER_PIDS// /}" ]]; then
+    echo "[AppRun] ⚠ WARNUNG: weitere Pipeline-Controller-Prozesse laufen bereits (PID ${_OTHER_PIDS}) — sie halten evtl. die DeckLink-Karte belegt. Beenden mit: kill -9 ${_OTHER_PIDS}"
+    echo "[AppRun] ⚠ weitere Instanzen: ${_OTHER_PIDS}" >> "$LOG_FILE" 2>/dev/null || true
+    export PC_OTHER_INSTANCES="${_OTHER_PIDS}"
+fi
 
 # Startet Node unter gdb; stdout/stderr des Servers gehen weiter ins Server-Log.
 # Gibt den ermittelten Node-Exit-Code zurück (139 bei Signal) und schreibt den
