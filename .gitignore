@@ -108,3 +108,4 @@ channels.json
 
 # Downloaded build caches (avvideofilter release, MTL)
 third_party/
+.decklink-restarts.json

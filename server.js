@@ -122,6 +122,7 @@ function _writablePath(relPath) {
   return _appImageWorkDir ? path.join(_appImageWorkDir, relPath) : path.join(__dirname, relPath);
 }
 
+const DeckLinkRecovery = require('./lib/DeckLinkRecovery');
 const PORT           = parseInt(process.env.PORT       || '3000');
 const IMAGES_DIR     = _writablePath('images');
 const CHANNELBRANDING_DIR = _writablePath('channelbranding');
@@ -2442,9 +2443,24 @@ async function ensureMaster() {
       if (_needsDisplay)
         log(`  Hinweis: videoSink="${_vs}" braucht X11/Wayland — DISPLAY=${process.env.DISPLAY||'(nicht gesetzt)'}`, 'warn', 'master');
       else if (_sinkName === 'decklinkvideosink')
-        log(`  Hinweis: decklinkvideosink state-change-Fehler ohne Detail-Reason meist: (1) Karte bereits von anderem Prozess/altem Handle belegt, (2) bei DeckLink IP: Stream-Mapping/Profil nicht via Blackmagic IP Video Configuration konfiguriert, (3) desktopvideod läuft nicht. Filter "decklink:5,*:2" im Server-Tab setzen und den KOMPLETTEN SERVER-PROZESS neu starten (nicht nur Master — GST_DEBUG wird nur beim Prozessstart gelesen), um die eigentliche HRESULT/Fehlermeldung der DeckLink-API im Log zu sehen.`, 'warn', 'master');
+        log(`  Hinweis: decklinkvideosink state-change-Fehler ohne Detail-Reason meist: (1) Karte/Kanal bereits von anderem Prozess ODER altem Handle in DIESEM Prozess belegt (HRESULT 0x80000009 = E_ACCESSDENIED, "Output device N in use already") — bei gst-plugins-bad 1.20 bleibt der Handle nach "Failed to wait for stop notification" hängen, nur kompletter Server-Neustart gibt ihn frei; (2) bei DeckLink IP 100G (8 bidirektionale Geräte, Profil 'dflt', KEIN Duplex-/Profil-Setup nötig — profile/duplex-mode NICHT setzen): ST-2110-Flows/PTP des Kanals nicht im Blackmagic Desktop Video Setup konfiguriert/aktiviert; (3) Desktop-Video-Treiber/-Helper läuft nicht. Filter "decklink:5,*:2" im Server-Tab setzen und den KOMPLETTEN SERVER-PROZESS neu starten (nicht nur Master — GST_DEBUG wird nur beim Prozessstart gelesen), um die eigentliche HRESULT/Fehlermeldung der DeckLink-API im Log zu sehen.`, 'warn', 'master');
       else
         log(`  Hinweis: videoSink="${_vs}" — GStreamer-Log für Details prüfen`, 'warn', 'master');
+    }
+    // DeckLink-Handle hängt nach den Retries sehr wahrscheinlich im Prozess fest
+    // (siehe lib/DeckLinkRecovery.js) — nur ein Prozess-Neustart gibt ihn frei.
+    if (/decklinkvideosink/.test(masterOpts.videoSink || '') && _settings.decklinkAutoProcessRestart !== false) {
+      const rec = DeckLinkRecovery.allowRestart(_writablePath('.decklink-restarts.json'));
+      if (rec.ok) {
+        log('DeckLink nach allen Versuchen nicht startbar — kontrollierter Prozess-Neustart zur Freigabe der Karten-Handles (Supervisor/systemd startet neu)…', 'warn', 'master');
+        const t = setTimeout(() => process.exit(DeckLinkRecovery.EXIT_CODE), 5000); t.unref();
+        try { channelBus?.stop(); } catch {}
+        await pluginHost.destroy().catch(() => {});
+        clearTimeout(t);
+        process.exit(DeckLinkRecovery.EXIT_CODE);
+      } else {
+        log(`DeckLink-Prozess-Neustart übersprungen: ${rec.reason}`, 'warn', 'master');
+      }
     }
   }
   return ok;
@@ -2461,8 +2477,11 @@ function parseBody(req) {
 }
 
 function json(res, data, code = 200) {
+  let body;
+  try { body = JSON.stringify(data); }
+  catch (e) { log(`json(): Serialisierungsfehler — ${e.message}`, 'error', 'system'); code = 500; body = JSON.stringify({ ok: false, error: 'Serialisierungsfehler: ' + e.message }); }
   res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-  res.end(JSON.stringify(data));
+  res.end(body);
 }
 
 function serveFile(res, filePath, contentType) {
@@ -3334,7 +3353,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     // GrafixEngine auf neue Auflösung bringen bevor Master neu startet
     grafixEngine.setFormat(masterOpts.width, masterOpts.height, masterOpts.fps).catch(() => {});
     await master.stop(); masterStarted = false;
-    return json(res, { ok: await ensureMaster(), config: masterOpts });
+    return json(res, { ok: await ensureMaster(), config: (({ debugger: _dbg, ...rest }) => rest)(masterOpts) });
   }
   if (meth === 'POST' && p === '/api/config/conversion') {
     const b = await parseBody(req);
@@ -4584,7 +4603,7 @@ process.on('uncaughtException', err => {
 });
 process.on('unhandledRejection', reason => {
   const msg = reason?.message || String(reason);
-  log(`[WARN] Unhandled rejection: ${msg}`, 'warn', 'system');
+  log(`[WARN] Unhandled rejection: ${msg}${reason?.stack ? '\n' + reason.stack.split('\n').slice(1, 5).join('\n') : ''}`, 'warn', 'system');
   console.error('[WARN] Unhandled rejection:', reason);
 });
 
