@@ -1591,10 +1591,11 @@ function _rebuildMasterForLiveSources(why) {
     (async () => {
       // Niemals stop() aufrufen während ein Start-Vorgang noch läuft (masterStarted wird erst
       // am Ende von ensureMaster() gesetzt) — das könnte die MasterPipeline-Instanz korrumpieren.
-      for (let i = 0; i < 20 && !masterStarted; i++) await new Promise(r => setTimeout(r, 250));
+      for (let i = 0; i < 40 && (_ensureMasterInflight || !masterStarted); i++) await new Promise(r => setTimeout(r, 250));
+      if (_ensureMasterInflight) { try { await _ensureMasterInflight; } catch {} }
       log(`Automatischer Rebuild (${why})…`, 'info', 'master');
-      await master.stop(); masterStarted = false;
-      if (/decklinkvideosink/.test(masterOpts.videoSink || '')) await new Promise(r => setTimeout(r, 800));
+      masterStarted = false; await master.stop();
+      if (/decklinkvideosink/.test(masterOpts.videoSink || '')) await new Promise(r => setTimeout(r, 1500));
       await ensureMaster();
       broadcast('state', getState());
     })().catch(e => log(`Automatischer Rebuild (${why}) fehlgeschlagen: ${e.message}`, 'error', 'master'));
@@ -2435,7 +2436,17 @@ function _arOnGrafik(action, id, template, source) {
 
 // ── Master lifecycle ───────────────────────────────────────────────────────────
 let masterStarted = false;
-async function ensureMaster() {
+// Single-Flight: Watchdog, Live-Quellen-Rebuild und API-Aufrufe dürfen NIE gleichzeitig
+// einen Master-Start ausführen. Zwei parallele master.start() öffnen dasselbe DeckLink-Device
+// doppelt ("state change failed" an asink/vsink) und setzen master.pipeline mitten im Aufbau
+// auf null ("Cannot read properties of null (reading 'busPop')").
+let _ensureMasterInflight = null;
+function ensureMaster() {
+  if (_ensureMasterInflight) return _ensureMasterInflight;
+  _ensureMasterInflight = _ensureMasterImpl().finally(() => { _ensureMasterInflight = null; });
+  return _ensureMasterInflight;
+}
+async function _ensureMasterImpl() {
   if (masterStarted && master.running) return true;
   masterStarted = false;
 
@@ -2773,7 +2784,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
   // Master
   if (meth === 'POST' && p === '/api/master/start') return json(res, { ok: await ensureMaster(), running: master.running });
   if (meth === 'POST' && p === '/api/master/stop')  {
-    await master.stop(); masterStarted = false;
+    masterStarted = false; await master.stop();
     grafixEngine.masterPipeline = null;
     broadcast('state', getState());
     return json(res, { ok: true });
@@ -3397,7 +3408,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
         masterOpts.videoSink = masterOpts.videoSink.replace(/\bmode=[\w-]+/, `mode=${dlMode}`);
         _settings.videoSink  = masterOpts.videoSink;
         saveSettings(_settings);
-        await master.stop(); masterStarted = false; await ensureMaster();
+        masterStarted = false; await master.stop(); await ensureMaster();
       }
     }
     return json(res, { ok: true, enabled: !!_settings.decklinkOutputInterlaced, videoSink: masterOpts.videoSink || null });
@@ -3407,7 +3418,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const _before = { audioSink: _settings.audioSink };
     masterOpts.audioSink = b.sink; _settings.audioSink = b.sink; saveSettings(_settings);
     _logConfigDiff(req, 'audiosink', _before, _settings, ['audioSink']);
-    await master.stop(); masterStarted = false; await ensureMaster();
+    masterStarted = false; await master.stop(); await ensureMaster();
     return json(res, { ok: true, sink: b.sink });
   }
   if (meth === 'POST' && p === '/api/config/format') {
@@ -3420,7 +3431,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     _logConfigDiff(req, 'format', _before, _settings, ['width','height','fps']);
     // GrafixEngine auf neue Auflösung bringen bevor Master neu startet
     grafixEngine.setFormat(masterOpts.width, masterOpts.height, masterOpts.fps).catch(() => {});
-    await master.stop(); masterStarted = false;
+    masterStarted = false; await master.stop();
     return json(res, { ok: await ensureMaster(), config: (({ debugger: _dbg, ...rest }) => rest)(masterOpts) });
   }
   if (meth === 'POST' && p === '/api/config/conversion') {
@@ -3438,7 +3449,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     if (b.frameRateConversion !== undefined && FRC_MODES.includes(b.frameRateConversion)) { masterOpts.frameRateConversion = b.frameRateConversion; _settings.frameRateConversion = b.frameRateConversion; }
     saveSettings(_settings);
     _logConfigDiff(req, 'conversion', _before, _settings, ['scaleMode','scaleMethod','deinterlaceMode','frameRateConversion']);
-    await master.stop(); masterStarted = false;
+    masterStarted = false; await master.stop();
     return json(res, { ok: await ensureMaster(), config: { scaleMode: masterOpts.scaleMode, scaleMethod: masterOpts.scaleMethod, deinterlaceMode: masterOpts.deinterlaceMode, frameRateConversion: masterOpts.frameRateConversion, avvideofilterAvailable: isAvVideoFilterAvailable() } });
   }
   if (meth === 'POST' && p === '/api/config/numplayers') {
@@ -3505,7 +3516,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     _logConfigDiff(req, 'idle', _before, _settings, ['idleSource','idleImagePath']);
     // Neustart damit Idle-Bild / -Quelle sofort wirksam wird
     if (!playlist.running) {
-      await master.stop(); masterStarted = false; await ensureMaster();
+      masterStarted = false; await master.stop(); await ensureMaster();
     } else {
       // Playlist läuft: nur isel umschalten auf neuen Idle wenn gerade Idle aktiv
       const N = _slotIds.length;
@@ -4288,7 +4299,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     // Echter Rebuild: master.stop()+ensureMaster() ruft build() auf derselben Instanz
     // erneut auf, das jetzt _liveSources frisch aus masterOpts liest (siehe
     // MasterPipeline.build()) — neue Pads entstehen ohne Prozess-Neustart.
-    await master.stop(); masterStarted = false;
+    masterStarted = false; await master.stop();
     // Kurze Settle-Zeit bevor neu gestartet wird: bei DeckLink-Video-Sink reißt der
     // Rebuild ALLE Karten-Kanäle auf einmal ab (Ausgang + jede eingebettete Live-
     // Quelle als eigener Kanal) — ohne diese Pause verliert schon der erste
@@ -4316,7 +4327,7 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     broadcast('decklink-signal', _dlSignalStatus);
     _userLog(sess, 'live-source.retry', id);
     log(`Live-Quelle "${id}": Retry angefordert — Pipeline wird neu aufgebaut`, 'info', 'system');
-    await master.stop(); masterStarted = false;
+    masterStarted = false; await master.stop();
     if (/decklinkvideosink/.test(masterOpts.videoSink || '')) await new Promise(r => setTimeout(r, 800));
     const ok = await ensureMaster();
     broadcast('state', getState());
@@ -4659,7 +4670,7 @@ setInterval(()=>broadcast('perf',getPerf()),1000);
 // Master-Watchdog: alle 10s prüfen ob Pipeline noch läuft
 // Master pipeline watchdog: auto-restart if pipeline stopped unexpectedly
 setInterval(async () => {
-  if (!masterStarted) return;
+  if (!masterStarted || _ensureMasterInflight) return;
   if (master.running) return;
   log('⚠ Master-Pipeline nicht aktiv — Auto-Restart', 'warn', 'master');
   try { await ensureMaster(); }
