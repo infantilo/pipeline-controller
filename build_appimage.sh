@@ -759,7 +759,7 @@ _run_node_gdb() {
         echo "set confirm off"
         echo "set debuginfod enabled off"
         echo "set startup-with-shell on"
-        for _s in SIGPIPE SIGUSR1 SIGUSR2 SIGCHLD SIGALRM SIGHUP SIGWINCH SIGURG SIGPROF; do
+        for _s in SIGPIPE SIGUSR1 SIGUSR2 SIGCHLD SIGALRM SIGHUP SIGWINCH SIGURG SIGPROF SIGINT SIGTERM SIGTSTP SIGCONT; do
             echo "handle $_s nostop noprint pass"
         done
         printf 'set args --require %q %q' "${APPDIR}/app/appimage_bootstrap.js" "${APPDIR}/app/server.js"
@@ -783,6 +783,7 @@ _run_node_gdb() {
     elif grep -qE '\[Inferior 1 \(process [0-9]+\) exited with code' "$bt_file"; then
         local c; c="$(grep -oE 'exited with code [0-9]+' "$bt_file" | tail -n1 | grep -oE '[0-9]+$')"
         return $(( 10#${c:-1} & 255 ))
+    elif grep -qE 'terminated with signal SIG(INT|TERM|HUP)' "$bt_file"; then return 130   # vom Benutzer beendet, kein Crash
     elif grep -qE 'SIGSEGV|SIGBUS|SIGILL|SIGFPE'  "$bt_file"; then return 139
     elif grep -qE 'SIGABRT' "$bt_file"; then return 134
     fi
@@ -819,6 +820,11 @@ while true; do
 
     if [[ "$NODE_EXIT" -eq 0 ]]; then
         echo "[AppRun] Geordneter Shutdown — beende."
+        break
+    fi
+
+    if [[ "$NODE_EXIT" -eq 129 || "$NODE_EXIT" -eq 130 || "$NODE_EXIT" -eq 143 ]]; then
+        echo "[AppRun] Vom Benutzer/System beendet (Signal, Exit ${NODE_EXIT}) — kein Neustart."
         break
     fi
 
