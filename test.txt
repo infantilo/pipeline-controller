@@ -1,0 +1,750 @@
+decklink-verify — 2026-08-25T14:34:24+00:00 — Modus: default
+Host: twic9bmd2110.orfcmc.at | Report: /home/peter/.local/share/pipeline-controller/diagnostics/decklink-verify-20260825-143424.txt
+
+━━━ detect: GStreamer + DeckLink-Elemente ━━━
+gst-inspect-1.0 version 1.20.3
+GStreamer 1.20.3
+  decklinkvideosink: vorhanden
+  decklinkaudiosink: vorhanden
+  decklinkvideosrc: vorhanden
+  decklinkaudiosrc: vorhanden
+
+━━━ detect: Karten (gst-device-monitor Video/Sink + Video/Source) ━━━
+Device found:
+
+	name  : DeckLink IP 100G (1) (Video Capture)
+	class : Video/Source/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 0 (0x00000000)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(1\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkvideosrc ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (1) (Audio Capture)
+	class : Audio/Source/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 0 (0x00000000)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(1\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkaudiosrc ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (1) (Video Output)
+	class : Video/Sink/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 0 (0x00000000)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(1\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkvideosink
+
+
+Device found:
+
+	name  : DeckLink IP 100G (1) (Audio Output)
+	class : Audio/Sink/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 0 (0x00000000)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(1\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkaudiosink
+
+
+Device found:
+
+	name  : DeckLink IP 100G (2) (Video Capture)
+	class : Video/Source/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 1 (0x00000001)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(2\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkvideosrc device-number=1 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (2) (Audio Capture)
+	class : Audio/Source/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 1 (0x00000001)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(2\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkaudiosrc device-number=1 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (2) (Video Output)
+	class : Video/Sink/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 1 (0x00000001)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(2\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkvideosink device-number=1
+
+
+Device found:
+
+	name  : DeckLink IP 100G (2) (Audio Output)
+	class : Audio/Sink/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 1 (0x00000001)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(2\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkaudiosink device-number=1
+
+
+Device found:
+
+	name  : DeckLink IP 100G (3) (Video Capture)
+	class : Video/Source/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 2 (0x00000002)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(3\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkvideosrc device-number=2 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (3) (Audio Capture)
+	class : Audio/Source/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 2 (0x00000002)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(3\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkaudiosrc device-number=2 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (3) (Video Output)
+	class : Video/Sink/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 2 (0x00000002)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(3\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkvideosink device-number=2
+
+
+Device found:
+
+	name  : DeckLink IP 100G (3) (Audio Output)
+	class : Audio/Sink/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 2 (0x00000002)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(3\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkaudiosink device-number=2
+
+
+Device found:
+
+	name  : DeckLink IP 100G (4) (Video Capture)
+	class : Video/Source/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 3 (0x00000003)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(4\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkvideosrc device-number=3 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (4) (Audio Capture)
+	class : Audio/Source/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 3 (0x00000003)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(4\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkaudiosrc device-number=3 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (4) (Video Output)
+	class : Video/Sink/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 3 (0x00000003)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(4\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkvideosink device-number=3
+
+
+Device found:
+
+	name  : DeckLink IP 100G (4) (Audio Output)
+	class : Audio/Sink/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 3 (0x00000003)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(4\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkaudiosink device-number=3
+
+
+Device found:
+
+	name  : DeckLink IP 100G (5) (Video Capture)
+	class : Video/Source/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 4 (0x00000004)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(5\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkvideosrc device-number=4 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (5) (Audio Capture)
+	class : Audio/Source/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 4 (0x00000004)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(5\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkaudiosrc device-number=4 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (5) (Video Output)
+	class : Video/Sink/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 4 (0x00000004)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(5\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkvideosink device-number=4
+
+
+Device found:
+
+	name  : DeckLink IP 100G (5) (Audio Output)
+	class : Audio/Sink/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 4 (0x00000004)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(5\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkaudiosink device-number=4
+
+
+Device found:
+
+	name  : DeckLink IP 100G (6) (Video Capture)
+	class : Video/Source/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 5 (0x00000005)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(6\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkvideosrc device-number=5 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (6) (Audio Capture)
+	class : Audio/Source/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 5 (0x00000005)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(6\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkaudiosrc device-number=5 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (6) (Video Output)
+	class : Video/Sink/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 5 (0x00000005)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(6\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkvideosink device-number=5
+
+
+Device found:
+
+	name  : DeckLink IP 100G (6) (Audio Output)
+	class : Audio/Sink/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 5 (0x00000005)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(6\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkaudiosink device-number=5
+
+
+Device found:
+
+	name  : DeckLink IP 100G (7) (Video Capture)
+	class : Video/Source/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 6 (0x00000006)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(7\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkvideosrc device-number=6 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (7) (Audio Capture)
+	class : Audio/Source/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 6 (0x00000006)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(7\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkaudiosrc device-number=6 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (7) (Video Output)
+	class : Video/Sink/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 6 (0x00000006)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(7\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkvideosink device-number=6
+
+
+Device found:
+
+	name  : DeckLink IP 100G (7) (Audio Output)
+	class : Audio/Sink/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 6 (0x00000006)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(7\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkaudiosink device-number=6
+
+
+Device found:
+
+	name  : DeckLink IP 100G (8) (Video Capture)
+	class : Video/Source/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 7 (0x00000007)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(8\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkvideosrc device-number=7 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (8) (Audio Capture)
+	class : Audio/Source/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 7 (0x00000007)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(8\)"
+		max-channels = 64 (0x00000040)
+		supports-format-detection = true
+		serial-number = ""
+	gst-launch-1.0 decklinkaudiosrc device-number=7 ! ...
+
+
+Device found:
+
+	name  : DeckLink IP 100G (8) (Video Output)
+	class : Video/Sink/Hardware
+	caps  : video/x-raw, width=720, height=486, pixel-aspect-ratio=10/11, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=720, height=576, pixel-aspect-ratio=12/11, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=24/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=30/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=50/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=progressive, framerate=60/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=25/1
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30000/1001
+	        video/x-raw, width=1920, height=1080, pixel-aspect-ratio=1/1, interlace-mode=interleaved, framerate=30/1
+--
+	properties:
+		device-number = 7 (0x00000007)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(8\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkvideosink device-number=7
+
+
+Device found:
+
+	name  : DeckLink IP 100G (8) (Audio Output)
+	class : Audio/Sink/Hardware
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S32LE }, channels={ (int)2, (int)8, (int)16 }, rate=48000, layout=interleaved
+	properties:
+		device-number = 7 (0x00000007)
+		model-name = "DeckLink\ IP\ 100G"
+		display-name = "DeckLink\ IP\ 100G\ \(8\)"
+		max-channels = 64 (0x00000040)
+		serial-number = ""
+	gst-launch-1.0 ... ! decklinkaudiosink device-number=7
+
+
+Device found:
+
+	name  : Monitor of Dummy Output
+	class : Audio/Source
+	caps  : audio/x-raw, format={ (string)S16LE, (string)S16BE, (string)F32LE, (string)F32BE, (string)S32LE, (string)S32BE, (string)S24LE, (string)S24BE, (string)S24_32LE, (string)S24_32BE, (string)U8 }, layout=interleaved, rate=[ 1, 384000 ], channels=[ 1, 32 ]
+	        audio/x-alaw, rate=[ 1, 384000 ], channels=[ 1, 32 ]
+	        audio/x-mulaw, rate=[ 1, 384000 ], channels=[ 1, 32 ]
+	properties:
+		device.description = "Monitor\ of\ Dummy\ Output"
+		device.class = monitor
+		device.icon_name = audio-input-microphone
+		is-default = true
+
+━━━ detect: Treiber/Service ━━━
+blackmagic_io        2207744  40
+Unit desktopvideod.service could not be found.
+
+━━━ detect: Sink-Template-Caps (Auszug decklinkvideosink) ━━━
+  SINK template: 'sink'
+    Availability: Always
+    Capabilities:
+      video/x-raw
+                  width: 720
+                 height: 486
+        pixel-aspect-ratio: 10/11
+         interlace-mode: interleaved
+              framerate: [ 0/1, 2147483647/1 ]
+                 format: UYVY
+            colorimetry: bt601
+            chroma-site: mpeg2
+      video/x-raw
+                  width: 720
+                 height: 486
+        pixel-aspect-ratio: 10/11
+         interlace-mode: interleaved
+              framerate: [ 0/1, 2147483647/1 ]
+                 format: v210
+      video/x-raw
+                  width: 720
+                 height: 486
+        pixel-aspect-ratio: 10/11
+         interlace-mode: interleaved
+              framerate: [ 0/1, 2147483647/1 ]
+                 format: ARGB
+      video/x-raw
+                  width: 720
+                 height: 486
+        pixel-aspect-ratio: 10/11
+         interlace-mode: interleaved
+              framerate: [ 0/1, 2147483647/1 ]
+                 format: BGRA
+      video/x-raw
+                  width: 720
+                 height: 486
+        pixel-aspect-ratio: 10/11
+         interlace-mode: interleaved
+              framerate: [ 0/1, 2147483647/1 ]
+                 format: UYVY
+
+━━━ clock: Pipeline-Clock-Auswahl mit decklinkvideosink (device-number=0) ━━━
+FAIL: keine DeckLink-Karte gefunden — Clock-Test nicht möglich.
+
+━━━ modes: 5s-Realtest je Mode auf device-number=0 ━━━
+FAIL: keine DeckLink-Karte gefunden — Mode-Tests nicht möglich.
+
+Report gespeichert: /home/peter/.local/share/pipeline-controller/diagnostics/decklink-verify-20260825-143424.txt
