@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "basic-ftp": "^5.0.0",
-    "gst-kit": "^0.2.5",
+    "gst-kit": "0.2.5",
     "net-snmp": "^3.11.0",
     "puppeteer": "^24.0.0"
   },
