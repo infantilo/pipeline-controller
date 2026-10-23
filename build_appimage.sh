@@ -749,14 +749,38 @@ _SAFE_MODE=0
 export PC_SAFE_MODE=0
 export PC_SUPERVISED=1   # AppRun startet bei Exit-Code 75 (z.B. DeckLink-Handle-Recovery) neu
 
-# Andere laufende/gestoppte Instanzen finden: eine zweite (oder per Ctrl+Z angehaltene)
-# Instanz hält die DeckLink-Karte belegt → "state change failed" beim Master-Start.
-_OTHER_PIDS="$(pgrep -f 'appimage_bootstrap\.js' 2>/dev/null | grep -vx "$$" | tr '\n' ' ' || true)"
-if [[ -n "${_OTHER_PIDS// /}" ]]; then
-    echo "[AppRun] ⚠ WARNUNG: weitere Pipeline-Controller-Prozesse laufen bereits (PID ${_OTHER_PIDS}) — sie halten evtl. die DeckLink-Karte belegt. Beenden mit: kill -9 ${_OTHER_PIDS}"
-    echo "[AppRun] ⚠ weitere Instanzen: ${_OTHER_PIDS}" >> "$LOG_FILE" 2>/dev/null || true
-    export PC_OTHER_INSTANCES="${_OTHER_PIDS}"
-fi
+# Verwaiste Instanzen dieses Kanals beenden: eine zweite oder per Ctrl+Z angehaltene Instanz
+# (Status T) hält die DeckLink-Karte belegt → "state change failed" beim Master-Start.
+# Betroffen sind NUR Prozesse desselben Benutzers mit demselben Datenverzeichnis
+# (PC_DATA_DIR bzw. Standard) — andere Kanäle des Multi-Channel-Betriebs bleiben unberührt.
+# Abschalten: PC_KILL_STALE=0.
+_pc_env_of() { tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null | sed -n "s/^$2=//p" | head -n1; }
+_kill_stale_instances() {
+    local my_data="${PC_DATA_DIR:-}" pid ppid pcomm victims=() own
+    own=" $$ $BASHPID "
+    for pid in $(pgrep -u "$(id -u)" -f 'appimage_bootstrap\.js' 2>/dev/null); do
+        [[ "$own" == *" $pid "* ]] && continue
+        [[ "$(ps -o comm= -p "$pid" 2>/dev/null)" == node* ]] || continue   # nur Node-Prozesse, nie Shells/gdb
+        [[ "$(_pc_env_of "$pid" PC_DATA_DIR)" == "$my_data" ]] || continue
+        victims+=("$pid")
+    done
+    (( ${#victims[@]} )) || return 0
+    echo "[AppRun] ⚠ Beende verwaiste Instanz(en): ${victims[*]} (hielten ggf. die DeckLink-Karte belegt)"
+    echo "[AppRun] ⚠ verwaiste Instanzen beendet: ${victims[*]}" >> "$LOG_FILE" 2>/dev/null || true
+    for pid in "${victims[@]}"; do
+        ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+        pcomm="$(ps -o comm= -p "${ppid:-0}" 2>/dev/null)"
+        kill -CONT "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null
+        [[ "$pcomm" == "gdb" ]] && { kill -CONT "$ppid" 2>/dev/null; kill -TERM "$ppid" 2>/dev/null; }
+    done
+    sleep 3
+    for pid in "${victims[@]}"; do
+        kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+    done
+    sleep 1
+    export PC_KILLED_STALE="${victims[*]}"
+}
+if [[ "${PC_KILL_STALE:-1}" != "0" ]]; then _kill_stale_instances || true; fi
 
 # Startet Node unter gdb; stdout/stderr des Servers gehen weiter ins Server-Log.
 # Gibt den ermittelten Node-Exit-Code zurück (139 bei Signal) und schreibt den

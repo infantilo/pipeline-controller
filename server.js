@@ -4682,8 +4682,8 @@ server.listen(PORT, () => {
     }
   }
 
-  if (process.env.PC_OTHER_INSTANCES) {
-    log(`⚠ Weitere Pipeline-Controller-Prozesse laufen (PID ${process.env.PC_OTHER_INSTANCES.trim()}) — sie können die DeckLink-Karte belegen (Master-Start schlägt dann mit "state change failed" fehl). Mit "kill -9 <PID>" beenden.`, 'warn', 'system');
+  if (process.env.PC_KILLED_STALE) {
+    log(`⚠ Verwaiste Instanz(en) beim Start beendet (PID ${process.env.PC_KILLED_STALE.trim()}) — sie hielten ggf. die DeckLink-Karte belegt.`, 'warn', 'system');
   }
   if (SAFE_MODE >= 1) {
     log(`⚠ SAFE-MODE ${SAFE_MODE} (Crash #${CRASH_COUNT} in Folge): ${SAFE_MODE >= 2 ? 'Pipeline-Autostart UND GPU-Pfade deaktiviert' : 'GPU-Compositor/-Decode deaktiviert (Software)'} — Details: Diagnose-Tab → "Letzter Crash"`, 'warn', 'system');
