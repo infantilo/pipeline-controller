@@ -98,6 +98,7 @@ const http           = require('http');
 const fs             = require('fs');
 const path           = require('path');
 const { spawn }      = require('child_process');
+require('./lib/GstKitGuard');   // serialisiert gst-kit Zustandswechsel (Crash-Resilienz)
 const MasterPipeline = require('./lib/MasterPipeline');
 const PlayerPipeline = require('./lib/PlayerPipeline');
 const PlaylistEngine = require('./lib/PlaylistEngine');
