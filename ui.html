@@ -1912,6 +1912,8 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
       <div style="display:flex;gap:4px;margin-bottom:6px">
         <button class="btn btn-p" style="flex:1;font-size:10px" onclick="loadDiagBundle()">📦 Diagnose-Bundle erzeugen</button>
         <button class="btn" style="flex:1;font-size:10px" onclick="loadLastCrash()">⚠ Letzter Absturz</button>
+        <button class="btn" style="flex:1;font-size:10px" onclick="loadDeckLinkProbe(false)" title="Findet Prozesse, die die DeckLink-Karte belegen, und prüft den Desktop-Video-Helper">🔍 DeckLink-Preflight</button>
+        <button class="btn" style="flex:1;font-size:10px" onclick="loadDeckLinkProbe(true)" title="Zusätzlich: Device in isoliertem Subprozess öffnen und echten Fehlertext holen (nur bei gestopptem Master sinnvoll)">🔬 + Öffnungstest</button>
       </div>
       <textarea id="diag-bundle-out" readonly placeholder="— noch nicht erzeugt —"
         style="width:100%;height:220px;font-family:var(--mono);font-size:9px;color:var(--dim);background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:6px;white-space:pre;resize:vertical"></textarea>
@@ -8754,6 +8756,12 @@ async function safeBannerRestart(){
     b.style.display = 'flex';
   } catch {}
 })();
+async function loadDeckLinkProbe(active){
+  const out = document.getElementById('diag-bundle-out');
+  out.value = '… prüfe DeckLink' + (active ? ' (inkl. Öffnungstest, bis ~12 s)' : '') + ' …';
+  try { out.value = await fetch('/api/debug/decklink-probe' + (active ? '?active=1' : '')).then(r=>r.text()); out.select(); }
+  catch(e) { out.value = '[Fehler: ' + e.message + ']'; }
+}
 async function loadLastCrash(){
   const out = document.getElementById('diag-bundle-out');
   out.value = '… lade letzten Crash-Report …';

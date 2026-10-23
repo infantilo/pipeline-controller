@@ -124,6 +124,15 @@ function _writablePath(relPath) {
 }
 
 const DeckLinkRecovery = require('./lib/DeckLinkRecovery');
+const DeckLinkProbe    = require('./lib/DeckLinkProbe');
+
+/** DeckLink-Device-Nummer aus dem konfigurierten videoSink-String (Standard 0). */
+function _dlDeviceNumber() {
+  return parseInt((/device-number=(\d+)/.exec(masterOpts?.videoSink || '') || [])[1] || '0');
+}
+function _logProbe(findings, ctx) {
+  for (const f of findings) log(`  DeckLink-${ctx}: ${f.msg}`, f.level === 'error' ? 'error' : f.level === 'warn' ? 'warn' : 'info', 'master');
+}
 const PORT           = parseInt(process.env.PORT       || '3000');
 const IMAGES_DIR     = _writablePath('images');
 const CHANNELBRANDING_DIR = _writablePath('channelbranding');
@@ -2442,6 +2451,12 @@ async function ensureMaster() {
   }
 
   log(`Master starten (videoSink=${masterOpts.videoSink||'auto'}, idleSource=${masterOpts.idleSource})`, 'info', 'master');
+  // DeckLink-Preflight (nebenwirkungsfrei): andere Prozesse mit geladener DeckLink-API
+  // (auch angehaltene), fehlender Desktop-Video-Helper — vor dem Start melden statt erst
+  // nach dem undurchsichtigen "state change failed".
+  if (/decklink(video|audio)sink/.test(masterOpts.videoSink || '')) {
+    try { const pf = DeckLinkProbe.passive(); _logProbe(pf.findings.filter(f => f.level !== 'info'), 'Preflight'); } catch (e) { log(`DeckLink-Preflight Fehler: ${e.message}`, 'debug', 'master'); }
+  }
   let ok = await master.start();
 
   // DeckLink-Hardware/-Treiber gibt die Karte nach einem Stop manchmal nicht
@@ -2489,6 +2504,16 @@ async function ensureMaster() {
         log(`  Hinweis: decklinkvideosink state-change-Fehler ohne Detail-Reason meist: (1) Karte/Kanal bereits von anderem Prozess ODER altem Handle in DIESEM Prozess belegt (HRESULT 0x80000009 = E_ACCESSDENIED, "Output device N in use already") — bei gst-plugins-bad 1.20 bleibt der Handle nach "Failed to wait for stop notification" hängen, nur kompletter Server-Neustart gibt ihn frei; (1b) eine zweite/angehaltene Instanz dieses Servers (z.B. nach Ctrl+Z oder alter AppImage-Lauf) hält die Karte — "pgrep -af appimage_bootstrap" bzw. "pgrep -af server.js" prüfen und mit kill -9 beenden; (2) bei DeckLink IP 100G (8 bidirektionale Geräte, Profil 'dflt', KEIN Duplex-/Profil-Setup nötig — profile/duplex-mode NICHT setzen): ST-2110-Flows/PTP des Kanals nicht im Blackmagic Desktop Video Setup konfiguriert/aktiviert; (3) Desktop-Video-Treiber/-Helper läuft nicht. Filter "decklink:5,*:2" im Server-Tab setzen und den KOMPLETTEN SERVER-PROZESS neu starten (nicht nur Master — GST_DEBUG wird nur beim Prozessstart gelesen), um die eigentliche HRESULT/Fehlermeldung der DeckLink-API im Log zu sehen.`, 'warn', 'master');
       else
         log(`  Hinweis: videoSink="${_vs}" — GStreamer-Log für Details prüfen`, 'warn', 'master');
+    }
+    // Diagnose: echten Fehlergrund ermitteln (Holder-Prozesse + isolierter Öffnungstest)
+    if (/decklinkvideosink/.test(masterOpts.videoSink || '')) {
+      try {
+        const pf = DeckLinkProbe.passive();
+        _logProbe(pf.findings, 'Diagnose');
+        const ao = await DeckLinkProbe.activeOpen({ deviceNumber: _dlDeviceNumber() });
+        log(`  DeckLink-Diagnose: isolierter Öffnungstest (Device ${_dlDeviceNumber()}) ${ao.ok ? 'ERFOLGREICH — Karte ist frei, Problem liegt im Master-Pipeline-Aufbau/Handle dieses Prozesses' : 'FEHLGESCHLAGEN (schlägt er auch fehl, hält ggf. dieser Prozess selbst den Handle)'}`, ao.ok ? 'info' : 'warn', 'master');
+        for (const l of ao.lines) log(`    ${l}`, 'warn', 'master');
+      } catch (e) { log(`DeckLink-Diagnose Fehler: ${e.message}`, 'debug', 'master'); }
     }
     // DeckLink-Handle hängt nach den Retries sehr wahrscheinlich im Prozess fest
     // (siehe lib/DeckLinkRecovery.js) — nur ein Prozess-Neustart gibt ihn frei.
@@ -4490,6 +4515,23 @@ a{color:#5aabff;text-decoration:none}a:hover{text-decoration:underline}
     const text = DiagnosticBundle.readLastCrash(_instanceDir || _appImageWorkDir || __dirname);
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end(text || '(kein Crash-Report vorhanden)');
+  }
+  // DeckLink-Preflight/-Diagnose auf Abruf: ?active=1 macht zusätzlich den isolierten
+  // Öffnungstest (nur sinnvoll wenn der Master NICHT läuft — sonst hält er selbst das Device).
+  if (meth === 'GET' && p === '/api/debug/decklink-probe') {
+    const u = new URL(req.url, 'http://x');
+    const out = [];
+    const pf = DeckLinkProbe.passive();
+    out.push('━━━ DeckLink-Preflight ━━━');
+    for (const f of pf.findings) out.push(`[${f.level}] ${f.msg}`);
+    if (!pf.findings.length) out.push('keine Auffälligkeiten');
+    if (u.searchParams.get('active') === '1') {
+      const ao = await DeckLinkProbe.activeOpen({ deviceNumber: _dlDeviceNumber() });
+      out.push('', `━━━ Isolierter Öffnungstest (Device ${_dlDeviceNumber()}): ${ao.ok ? 'OK' : 'FEHLGESCHLAGEN'} ━━━`, ...ao.lines);
+      if (master.running) out.push('(Hinweis: Master läuft — der Test kann wegen des eigenen Handles scheitern.)');
+    }
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end(out.join('\n'));
   }
   // Start-/Resilienz-Status für das UI-Banner (Safe-Mode, Crash-Zähler)
   if (meth === 'GET' && p === '/api/debug/startup') {
