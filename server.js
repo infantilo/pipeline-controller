@@ -1575,8 +1575,7 @@ master.on('decklink-signal', d => {
 // (siehe markLiveSourceBroken()-Kommentar in MasterPipeline.js). Debounce, falls kurz hinter-
 // einander mehrere Quellen brechen — dann nur EIN Rebuild für alle zusammen.
 let _liveSourceHealTimer = null;
-master.on('live-source-broken', d => {
-  log(`⚠ Live-Quelle "${d.id}" ist defekt (${d.message}) — Kanal deaktiviert, Pipeline bleibt stabil. Hardware/Konfiguration prüfen und über die UI erneut versuchen.`, 'error', 'system');
+function _rebuildMasterForLiveSources(why) {
   clearTimeout(_liveSourceHealTimer);
   _liveSourceHealTimer = setTimeout(() => {
     _liveSourceHealTimer = null;
@@ -1584,13 +1583,48 @@ master.on('live-source-broken', d => {
       // Niemals stop() aufrufen während ein Start-Vorgang noch läuft (masterStarted wird erst
       // am Ende von ensureMaster() gesetzt) — das könnte die MasterPipeline-Instanz korrumpieren.
       for (let i = 0; i < 20 && !masterStarted; i++) await new Promise(r => setTimeout(r, 250));
-      log('Automatischer Rebuild nach defekter Live-Quelle — ersetzt sie durch Platzhalter…', 'info', 'master');
+      log(`Automatischer Rebuild (${why})…`, 'info', 'master');
       await master.stop(); masterStarted = false;
       if (/decklinkvideosink/.test(masterOpts.videoSink || '')) await new Promise(r => setTimeout(r, 800));
       await ensureMaster();
       broadcast('state', getState());
-    })().catch(e => log(`Automatischer Rebuild nach defekter Live-Quelle fehlgeschlagen: ${e.message}`, 'error', 'master'));
+    })().catch(e => log(`Automatischer Rebuild (${why}) fehlgeschlagen: ${e.message}`, 'error', 'master'));
   }, 2000);
+}
+
+// Automatischer Wiederversuch für Live-Quellen, die wegen eines TRANSIENTEN Fehlers
+// ("Internal data stream error", kein Signal) als defekt markiert wurden: nach 2 min,
+// dann nach 5 min, danach nur noch manuell. Sicherheitsnetz gegen on-air-Unterbrechung:
+// nie während eine Playlist läuft (Rebuild unterbricht PGM kurz) — dann +60 s warten.
+// Nicht-transiente Fehler (E_ACCESSDENIED/"in use") werden nie automatisch wiederholt.
+const LIVE_RETRY_DELAYS_MS = [120000, 300000];
+const LIVE_RETRY_TRANSIENT = /data stream error|no signal|kein signal|signal/i;
+const _liveRetryAttempts = {};
+function _scheduleLiveSourceRetry(id, message) {
+  if (!LIVE_RETRY_TRANSIENT.test(String(message || ''))) return;
+  const n = _liveRetryAttempts[id] || 0;
+  if (n >= LIVE_RETRY_DELAYS_MS.length) {
+    log(`Live-Quelle "${id}": ${n} automatische Wiederversuche erfolglos — nur noch manueller Retry über die UI`, 'warn', 'system');
+    return;
+  }
+  const attempt = (delay) => setTimeout(() => {
+    if (!master.isLiveSourceBroken(id)) return;                    // inzwischen manuell behoben
+    if (playlist?._running) { attempt(60000); return; }             // on-air → später
+    _liveRetryAttempts[id] = n + 1;
+    master.clearLiveSourceBroken(id);
+    log(`Live-Quelle "${id}": automatischer Wiederversuch ${n + 1}/${LIVE_RETRY_DELAYS_MS.length}`, 'info', 'system');
+    _rebuildMasterForLiveSources(`Wiederversuch Live-Quelle ${id}`);
+    // Zähler zurücksetzen, wenn die Quelle 10 min lang nicht erneut ausfällt
+    setTimeout(() => { if (!master.isLiveSourceBroken(id)) delete _liveRetryAttempts[id]; }, 600000).unref?.();
+  }, delay);
+  const t = attempt(LIVE_RETRY_DELAYS_MS[n]);
+  t?.unref?.();
+}
+
+master.on('live-source-broken', d => {
+  log(`⚠ Live-Quelle "${d.id}" ist defekt (${d.message}) — Kanal deaktiviert, Pipeline bleibt stabil. Hardware/Konfiguration prüfen und über die UI erneut versuchen.`, 'error', 'system');
+  _rebuildMasterForLiveSources('defekte Live-Quelle → Platzhalter');
+  _scheduleLiveSourceRetry(d.id, d.message);
 });
 // Tatsächlich verhandeltes Video-Format (Auflösung/FPS/Interlace) der DeckLink-
 // Source — rein informativ aus den negotiated Caps, siehe MasterPipeline._parseVideoCaps.
