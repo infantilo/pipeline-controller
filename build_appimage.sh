@@ -51,8 +51,10 @@ APPDIR="${BUILD_DIR}/AppDir"
 TOOLS_DIR="${PARENT_DIR}/.pipeline-build-tools"
 
 # Node.js
-NODE_BIN="$(command -v node 2>/dev/null || true)"
-[[ -z "$NODE_BIN" ]] && NODE_BIN="/home/infantilo/.config/nvm/versions/node/v24.22.1/bin/node"
+# Gepinnte LTS-Version (Brotli-Decoder-CVE-2026-111497; Node 25 ist EOL und bekommt keinen Fix).
+# Überschreibbar per NODE_BIN=...; kein Fallback auf das PATH-Node, das ungepatcht sein kann.
+NODE_BIN="${NODE_BIN:-/home/infantilo/.config/nvm/versions/node/v24.22.1/bin/node}"
+[[ -x "$NODE_BIN" ]] || { echo "FEHLER: Node nicht gefunden: ${NODE_BIN}" >&2; exit 1; }
 NODE_DIR="$(dirname "$NODE_BIN")"
 
 # node_modules
