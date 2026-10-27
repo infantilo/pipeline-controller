@@ -795,6 +795,8 @@ _run_node_gdb() {
         echo "set confirm off"
         echo "set debuginfod enabled off"
         echo "set startup-with-shell on"
+        # Node bekommt die AppImage-Bibliotheken, gdb selbst nicht (siehe unten)
+        [[ -n "${LD_LIBRARY_PATH:-}" ]] && echo "set environment LD_LIBRARY_PATH ${LD_LIBRARY_PATH}"
         for _s in SIGPIPE SIGUSR1 SIGUSR2 SIGCHLD SIGALRM SIGHUP SIGWINCH SIGURG SIGPROF SIGINT SIGTERM SIGTSTP SIGCONT; do
             echo "handle $_s nostop noprint pass"
         done
@@ -813,7 +815,9 @@ _run_node_gdb() {
         echo "kill"
         echo "quit"
     } > "$cmds"
-    gdb -batch -x "$cmds" "${APPDIR}/usr/bin/node" > "$bt_file" 2>&1
+    # gdb ohne AppImage-LD_LIBRARY_PATH starten: gebündelte libreadline/libstdc++ passen nicht zum
+    # System-gdb ("symbol lookup error: rl_eof_found" → Exit 1 nach 0s → Crash-Schleife).
+    env -u LD_LIBRARY_PATH gdb -batch -x "$cmds" "${APPDIR}/usr/bin/node" > "$bt_file" 2>&1
     rm -f "$cmds"
     if   grep -qE 'exited normally' "$bt_file"; then return 0
     elif grep -qE '\[Inferior 1 \(process [0-9]+\) exited with code' "$bt_file"; then
