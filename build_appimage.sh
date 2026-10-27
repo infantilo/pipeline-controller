@@ -52,7 +52,7 @@ TOOLS_DIR="${PARENT_DIR}/.pipeline-build-tools"
 
 # Node.js
 NODE_BIN="$(command -v node 2>/dev/null || true)"
-[[ -z "$NODE_BIN" ]] && NODE_BIN="/home/infantilo/.config/nvm/versions/node/v25.8.2/bin/node"
+[[ -z "$NODE_BIN" ]] && NODE_BIN="/home/infantilo/.config/nvm/versions/node/v24.22.1/bin/node"
 NODE_DIR="$(dirname "$NODE_BIN")"
 
 # node_modules
